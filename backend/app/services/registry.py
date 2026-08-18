@@ -18,8 +18,8 @@ from app.ml.ensemble import EnsembleScorer
 from app.notifications.providers import ConsoleNotificationProvider
 from app.repositories import (
     AlertRepository, AuditRepository, CaseRepository, DecisionRepository,
-    RuleRepository, TenantRepository, TransactionRepository, UserRepository,
-    WatchlistRepository,
+    InvestigatorRepository, RuleRepository, TenantRepository,
+    TransactionRepository, UserRepository, WatchlistRepository,
 )
 from app.rules.engine import RuleEngine
 from app.services.orchestrator import DecisionOrchestrator
@@ -40,6 +40,7 @@ class ServiceRegistry:
         self.rule_repo: RuleRepository | None = None
         self.watchlist_repo: WatchlistRepository | None = None
         self.user_repo: UserRepository | None = None
+        self.investigators: InvestigatorRepository | None = None
         self.rule_engine: RuleEngine | None = None
         self.ml_scorer: EnsembleScorer | None = None
         self.graph_engine: GraphEngine | None = None
@@ -66,6 +67,14 @@ class ServiceRegistry:
         self.rule_repo = RuleRepository(self.db)
         self.watchlist_repo = WatchlistRepository(self.db)
         self.user_repo = UserRepository(self.db)
+        self.investigators = InvestigatorRepository(self.db)
+
+        # Bootstrap a first investigator from env when none exists (dev convenience).
+        if self.investigators.count() == 0 and settings.INVESTIGATOR_EMAIL and settings.INVESTIGATOR_PASSWORD:
+            self.investigators.create(settings.INVESTIGATOR_EMAIL,
+                                      settings.INVESTIGATOR_NAME,
+                                      settings.INVESTIGATOR_PASSWORD)
+            logger.info("investigator.bootstrapped", email=settings.INVESTIGATOR_EMAIL)
 
         # 3. Seed default rules from YAML into DB
         rules_path = Path(__file__).parent.parent / "rules" / "default_ruleset.yaml"

@@ -17,11 +17,15 @@
 | ML | ⚠️ Fallback | GradientBoosting + IsolationForest إذا دُرّبا؛ وإلا heuristic مُعلَن |
 | Graph | ✅ حقيقي | NetworkX، اكتشاف أجهزة/IPs مشتركة، hops إلى احتيال معروف |
 | AML | ✅ تقني | Watchlists من DB (sanctions/high-risk countries)، كشف structuring |
-| Alerts | ✅ حقيقي | تنشأ تلقائيًا عند challenge/review/block، تُخزَّن في DB |
-| Cases | ✅ حقيقي | إدارة تحقيقات، ملاحظات، حالات، ربط معاملات |
+| Alerts | ✅ حقيقي | تنشأ تلقائيًا عند challenge/review/block، دورة حياة كاملة (إسناد/مراجعة/تصعيد/حل) + ملاحظات |
+| Cases | ✅ حقيقي | إدارة تحقيقات: ملاحظات، حالات، تعيين، حل موثّق، ربط معاملات وتنبيهات |
 | Audit Log | ✅ حقيقي | جدول منفصل في DB، يُسجَّل كل حدث مهم بدون أسرار |
 | Notifications | ⚠️ Adapter | Console حاليًا، Webhook provider متاح عند الإعداد |
-| Real-time | ✅ SSE | `/api/v1/admin/stream` (owner-only) |
+| Real-time | ✅ SSE | `/api/v1/admin/stream` (owner) + `/api/v1/investigator/stream` (investigator) |
+| Investigator Auth | ✅ حقيقي | حسابات محققين (JWT role=investigator) تُدار من بوابة المالك، وصول محمي كامل |
+| Investigator Workbench | ✅ حقيقي | لوحة محمية: قائمة مراجعة، تنبيهات، قضايا، قرارات حيّة، تحليل شبكة |
+| Owner System Settings | ✅ حقيقي | صفحة إعدادات تقرأ العتبات/الأوزان الفعلية من runtime عبر `/admin/settings` |
+| Rules/Models/Graph UI | ✅ حقيقي | إدارة القواعد (تفعيل/تعطيل/تفاصيل)، حالة النماذج، insights الشبكة |
 | Persistence | ✅ SQLite | كل البيانات في `/data/aegis.db` عبر Docker volume |
 | Docker | ✅ جاهز | `docker compose up --build` يكفي للتشغيل |
 
@@ -53,8 +57,9 @@ docker compose up --build
 1. المالك ينشئ مستأجرًا من `/admin/` (أو عبر API) → يحصل على `api_key` + `hmac_secret`.
 2. المحفظة/البنك ترسل معاملة إلى `POST /api/v1/wallet/webhook` مع توقيع HMAC.
 3. AEGIS يعيد `{decision, risk_score, reasoning_ar, top_reasons}` خلال أجزاء من الثانية.
-4. المؤسسة تراقب قراراتها وتنبيهاتها من `/merchant/`.
-5. المحقق/المالك يراقب كل شيء من `/admin/` أو `/investigator/`.
+4. المؤسسة تراقب قراراتها وتنبيهاتها وقضاياها من `/merchant/`.
+5. المالك يراقب كل شيء من `/admin/` ويدير العملاء والمحققين والقواعد والنماذج.
+6. المحقق يسجّل دخولًا محميًّا في `/investigator/` بحساب ينشئه المالك، ويتولى قائمة المراجعة: يسنِد التنبيه لنفسه، يراجع المعاملة والشبكة، يكتب ملاحظات، ثم يحل التنبيه (احتيال مؤكد / إنذار كاذب) أو يصعّده إلى قضية تُغلق بنتيجة موثّقة.
 
 ### مثال webhook
 

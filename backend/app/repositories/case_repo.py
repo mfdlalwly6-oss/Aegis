@@ -69,3 +69,18 @@ class CaseRepository:
             "UPDATE cases SET status=?, assignee=COALESCE(?,assignee), updated_at=? "
             "WHERE case_id=?", (status, assignee, utcnow(), case_id))
         return self.get(case_id)
+
+    def resolve(self, case_id: str, resolution: str, note: str = "",
+                author: str = "investigator") -> dict | None:
+        """Close a case with a resolution: confirmed_fraud / false_positive / inconclusive."""
+        case = self.get(case_id)
+        if not case:
+            return None
+        notes = case["notes"]
+        if note:
+            notes.append({"author": author, "text": note, "at": utcnow()})
+        self.db.execute(
+            "UPDATE cases SET status='closed', resolution=?, notes_json=?, updated_at=? "
+            "WHERE case_id=?",
+            (resolution, json.dumps(notes, ensure_ascii=False), utcnow(), case_id))
+        return self.get(case_id)

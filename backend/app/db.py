@@ -180,8 +180,25 @@ CREATE TABLE IF NOT EXISTS model_registry (
 );
 """
 
+_SCHEMA_002 = """
+CREATE TABLE IF NOT EXISTS investigators (
+    investigator_id TEXT PRIMARY KEY,
+    email          TEXT NOT NULL UNIQUE,
+    name           TEXT NOT NULL,
+    password_hash  TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'active',
+    created_at     TEXT NOT NULL,
+    last_login_at  TEXT
+);
+
+ALTER TABLE alerts ADD COLUMN notes_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE alerts ADD COLUMN resolution TEXT;
+ALTER TABLE cases  ADD COLUMN resolution TEXT;
+"""
+
 _MIGRATIONS: list[tuple[str, str]] = [
     ("001_init", _SCHEMA),
+    ("002_investigator_workflow", _SCHEMA_002),
 ]
 
 

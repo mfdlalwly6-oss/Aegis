@@ -13,6 +13,13 @@ const state = {
   selectedTenant: null,
   showAddForm: false,
   lastCreated: null,
+  settings: null,
+  investigators: [],
+  rules: [],
+  ruleDetail: null,
+  modelsStatus: null,
+  graphStats: null,
+  graphInsights: null,
 };
 
 const $ = s => document.querySelector(s);
@@ -52,9 +59,14 @@ async function api(path, opts = {}) {
   return d;
 }
 
-async function apiRoot(path) {
-  const r = await fetch(AEGIS_ROOT + path);
-  return r.json();
+async function apiRoot(path, opts = {}) {
+  const h = { "Content-Type": "application/json", "X-Owner-Token": state.token, ...(opts.headers || {}) };
+  const r = await fetch(AEGIS_ROOT + path, { ...opts, headers: h, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const txt = await r.text();
+  let d = {};
+  try { d = txt ? JSON.parse(txt) : {}; } catch { d = { raw: txt }; }
+  if (!r.ok) throw new Error(d.detail || d.message || ("خطأ " + r.status));
+  return d;
 }
 
 async function copy(txt, btn) {
@@ -117,6 +129,34 @@ async function loadTenants() {
 async function loadTenantDetail(tid) {
   state.selectedTenant = await api("/tenants/" + tid);
   state.selectedTenantId = tid;
+}
+
+async function loadSettings() {
+  state.settings = await api("/settings");
+}
+
+async function loadInvestigators() {
+  try { const r = await api("/investigators"); state.investigators = r.investigators || []; }
+  catch { state.investigators = []; }
+}
+
+async function loadRules() {
+  try { state.rules = await apiRoot("/rules/"); } catch { state.rules = []; }
+}
+
+async function loadRuleDetail(id) {
+  state.ruleDetail = await apiRoot("/rules/" + encodeURIComponent(id));
+}
+
+async function loadModels() {
+  try { state.modelsStatus = await apiRoot("/models/status"); } catch { state.modelsStatus = null; }
+}
+
+async function loadGraph() {
+  try {
+    state.graphStats = await apiRoot("/graph/stats");
+    state.graphInsights = await apiRoot("/graph/insights");
+  } catch { state.graphStats = null; state.graphInsights = null; }
 }
 
 async function loadDecisions() {
@@ -435,9 +475,9 @@ function renderDecisions() {
   (state.decisions || []).forEach(d => {
     const dec = d.decision || "?";
     rows.push(el("tr", {},
-      el("td", { style: "font-size:11px" }, dt(d.timestamp)),
+      el("td", { style: "font-size:11px" }, dt(d.ts || d.timestamp || d.created_at)),
       el("td", {}, el("code", { style: "font-size:11px" }, (d.tx_id || "").slice(0, 16))),
-      el("td", { style: "font-size:12.5px" }, d.tenant_name || "-"),
+      el("td", { style: "font-size:12.5px" }, d.tenant_name || d.tenant_id || "-"),
       el("td", {}, el("span", { class: "badge " + dec }, dec)),
       el("td", { style: "font-weight:700" }, ((d.risk_score || 0) * 100).toFixed(0) + "%"),
       el("td", { style: "font-size:12px" }, d.typology || "-"),
@@ -459,37 +499,50 @@ function renderDecisions() {
   return box;
 }
 
-/* ─────────────────────────────────────────── PAGE: SETTINGS ─── */
+/* ─────────────────────────────────────────── PAGE: SETTINGS (real runtime) ─── */
 function renderSettings() {
+  const s = state.settings;
+  if (!s) return el("div", { style: "color:var(--muted);text-align:center;padding:40px" }, "جارٍ التحميل…");
+  const th = s.thresholds || {}, w = s.weights || {};
   return el("div", {},
     el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "⚙️ إعدادات النظام"),
-    el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" }, "التحكم في عتبات القرار وسلوك الوكيل الذكي"),
+    el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" }, "القيم الفعلية من الخادم (runtime) — ليست نصوصاً ثابتة"),
     el("div", { class: "card" },
-      el("h3", { style: "margin-bottom:12px" }, "🎚️ عتبات القرار الحالية (مبنية داخل الكود)"),
+      el("h3", { style: "margin-bottom:12px" }, "🎚️ عتبات القرار الفعلية"),
       el("div", { class: "creds-box" },
-        credRow("✅ allow", "risk < 0.20 (منخفض — يُنفَّذ فوراً)"),
-        credRow("🔐 challenge", "0.20 ≤ risk < 0.40 (يطلب OTP)"),
-        credRow("⏳ review", "0.40 ≤ risk < 0.60 (مراجعة يدوية)"),
-        credRow("🛑 block", "risk ≥ 0.60 (يُرفض)"),
+        credRow("✅ allow", "risk < " + th.challenge + " (يُنفَّذ فوراً)"),
+        credRow("🔐 challenge", th.challenge + " ≤ risk < " + th.review + " (يطلب OTP)"),
+        credRow("⏳ review", th.review + " ≤ risk < " + th.block + " (مراجعة يدوية)"),
+        credRow("🛑 block", "risk ≥ " + th.block + " (يُرفض)"),
       ),
     ),
     el("div", { class: "card" },
-      el("h3", { style: "margin-bottom:12px" }, "🤖 الوكيل الذكي (OpenRouter)"),
-      el("div", { style: "font-size:13.5px;line-height:2" },
-        "• عدد المفاتيح المدمجة: ", el("strong", { style: "color:var(--success)" }, "8 مفاتيح"), el("br"),
-        "• النموذج الأساسي: ", el("code", {}, "google/gemma-2-9b-it:free"), el("br"),
-        "• النماذج الاحتياطية: llama-3.2-3b, mistral-7b, phi-3-mini", el("br"),
-        "• Round-robin تلقائي + fallback عند الفشل", el("br"),
-        "• 5 استراتيجيات لاستخراج JSON من ردود النماذج",
+      el("h3", { style: "margin-bottom:12px" }, "⚖️ أوزان دمج المخاطر (Risk Fusion)"),
+      el("div", { class: "creds-box" },
+        credRow("قواعد (Rules)", w.rules),
+        credRow("تعلّم آلي (ML)", w.ml),
+        credRow("شبكة (Graph)", w.graph),
+        credRow("امتثال (AML)", w.aml),
+        credRow("سلوك (Behavior)", w.behavior),
+      ),
+    ),
+    el("div", { class: "card" },
+      el("h3", { style: "margin-bottom:12px" }, "🤖 الوكيل الذكي (AI)"),
+      el("div", { class: "creds-box" },
+        credRow("مُفعَّل", s.ai?.enabled ? "نعم" : "لا"),
+        credRow("مفاتيح مهيأة", (s.ai?.keys_configured ?? 0) + " مفتاح"),
+        credRow("حدّ أدنى للدرجة", s.ai?.min_score),
       ),
     ),
     el("div", { class: "card" },
       el("h3", { style: "margin-bottom:12px" }, "📡 معلومات النظام"),
       el("div", { class: "creds-box" },
-        credRow("Owner Token", state.token || "غير معروف", { masked: true }),
-        credRow("Public URL", ""),
-        credRow("AEGIS API", ""),
-        credRow("Wallet API", ""),
+        credRow("الإصدار", s.version),
+        credRow("البيئة", s.env),
+        credRow("Public URL", s.public_url),
+        credRow("Webhook Endpoint", s.webhook_endpoint),
+        credRow("معدل الطلبات/دقيقة", s.rate_limit_per_min),
+        credRow("قاعدة البيانات", s.db_path),
       ),
     ),
   );
@@ -540,8 +593,8 @@ function renderDocs() {
     el("div", { class: "card" },
       el("h3", { style: "margin-bottom:12px" }, "🔗 روابط مفيدة"),
       el("div", { style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px" },
-        docLink("📘 OpenAPI Docs (Swagger)", "/aegis-api/docs"),
-        docLink("📗 ReDoc", "/aegis-api/redoc"),
+        docLink("📘 OpenAPI Docs (Swagger)", "/docs"),
+        docLink("📗 ReDoc", "/redoc"),
         docLink("✅ Health check", "/api/v1/system/version"),
         docLink("🏦 بوابة المؤسسة", "/merchant/"),
         docLink("🛡️ لوحة التحقيقات", "/investigator/"),
@@ -562,6 +615,170 @@ function docLink(label, href) {
   );
 }
 
+/* ─────────────────────────────────────────── PAGE: INVESTIGATORS ─── */
+function renderInvestigators() {
+  const em = el("input", { class: "form-control", type: "email", placeholder: "investigator@aegis.local", dir: "ltr" });
+  const nm = el("input", { class: "form-control", placeholder: "اسم المحقق" });
+  const pw = el("input", { class: "form-control", type: "password", placeholder: "كلمة مرور (8+ أحرف)" });
+  const rows = (state.investigators || []).map(v => el("tr", {},
+    el("td", { style: "font-size:12px" }, v.email),
+    el("td", { style: "font-size:12.5px;font-weight:700" }, v.name),
+    el("td", {}, el("span", { class: "badge " + (v.status === "active" ? "allow" : "block") }, v.status === "active" ? "نشط" : "موقوف")),
+    el("td", { style: "font-size:11px" }, dt(v.created_at)),
+    el("td", { style: "font-size:11px" }, v.last_login_at ? dt(v.last_login_at) : "لم يدخل"),
+    el("td", {}, v.status === "active" ? el("button", { class: "btn sm danger",
+      onclick: async () => {
+        if (!confirm("إيقاف حساب هذا المحقق؟")) return;
+        try { await api("/investigators/" + v.investigator_id, { method: "DELETE" }); toast("تم الإيقاف", "success"); await loadInvestigators(); renderPage(); }
+        catch (e) { toast(e.message, "error"); }
+      } }, "⛔ إيقاف") : null),
+  ));
+  return el("div", {},
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "🛡️ المحققون"),
+    el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" }, "حسابات محللي الاحتيال التي تدخل منصة التحقيقات"),
+    el("div", { class: "card", style: "border-color:var(--brand)" },
+      el("h3", { style: "margin-bottom:12px" }, "➕ إضافة محقق"),
+      el("div", { style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:12px" }, em, nm, pw),
+      el("button", { class: "btn primary", onclick: async () => {
+        try {
+          await api("/investigators", { method: "POST", body: { email: em.value.trim(), name: nm.value.trim(), password: pw.value } });
+          toast("تم إنشاء المحقق", "success"); em.value = ""; nm.value = ""; pw.value = "";
+          await loadInvestigators(); renderPage();
+        } catch (e) { toast(e.message, "error"); }
+      } }, "➕ إنشاء"),
+    ),
+    el("div", { class: "card" },
+      rows.length === 0 ? el("div", { style: "color:var(--muted);text-align:center;padding:30px" }, "لا يوجد محققون. أنشئ أول حساب أعلاه.") :
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "البريد"), el("th", {}, "الاسم"), el("th", {}, "الحالة"), el("th", {}, "أُنشئ"), el("th", {}, "آخر دخول"), el("th", {}, ""))),
+        el("tbody", {}, ...rows))),
+  );
+}
+
+/* ─────────────────────────────────────────── PAGE: RULES ─── */
+function renderRules() {
+  if (state.ruleDetail) return renderRuleDetail();
+  const rows = (state.rules || []).map(r => el("tr", { class: "clickable", onclick: async () => { await loadRuleDetail(r.id); renderPage(); } },
+    el("td", {}, el("code", { style: "font-size:11px" }, r.id)),
+    el("td", { style: "font-size:12.5px;font-weight:700" }, r.name),
+    el("td", {}, el("span", { class: "badge " + r.severity }, r.severity)),
+    el("td", { style: "font-weight:700" }, r.score),
+    el("td", {}, el("span", { class: "badge " + (r.enabled ? "allow" : "block") }, r.enabled ? "مفعَّلة" : "معطَّلة")),
+    el("td", { style: "font-size:11px;color:var(--muted)" }, (r.tags || []).join(", ")),
+  ));
+  return el("div", {},
+    el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:16px" },
+      el("div", {},
+        el("h1", { style: "font-size:1.7rem;font-weight:900" }, "📜 قواعد الاحتيال"),
+        el("p", { style: "color:var(--muted);font-size:13px;margin-top:4px" }, (state.rules || []).length + " قاعدة منصة نشطة — اضغط لعرض التفاصيل والتفعيل/التعطيل"),
+      ),
+      el("button", { class: "btn primary", onclick: async () => { try { await apiRoot("/rules/reload", { method: "POST" }); } catch(e){} await loadRules(); renderPage(); toast("أُعيد تحميل القواعد", "success"); } }, "🔄 إعادة تحميل"),
+    ),
+    el("div", { class: "card" },
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "المعرّف"), el("th", {}, "الاسم"), el("th", {}, "الخطورة"), el("th", {}, "النقاط"), el("th", {}, "الحالة"), el("th", {}, "الوسوم"))),
+        el("tbody", {}, ...rows))),
+  );
+}
+
+function renderRuleDetail() {
+  const r = state.ruleDetail;
+  return el("div", {},
+    el("button", { class: "btn sm", style: "margin-bottom:14px", onclick: () => { state.ruleDetail = null; renderPage(); } }, "→ رجوع"),
+    el("div", { class: "card" },
+      el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:12px" },
+        el("h3", {}, r.name), el("span", { class: "badge " + r.severity }, r.severity)),
+      el("div", { class: "creds-box" },
+        credRow("المعرّف", r.id),
+        credRow("النقاط", r.score),
+        credRow("الحالة", r.enabled ? "مفعَّلة" : "معطَّلة"),
+        credRow("الوسوم", (r.tags || []).join(", ")),
+      ),
+      el("p", { style: "color:var(--muted);font-size:13px;margin:12px 0;line-height:1.9" }, r.description || ""),
+      el("h4", { style: "color:var(--accent);margin-bottom:8px" }, "شرط التفعيل (JSONLogic):"),
+      el("pre", { class: "code-block" }, JSON.stringify(r.when, null, 2)),
+      el("div", { style: "margin-top:14px" },
+        el("button", { class: "btn " + (r.enabled ? "danger" : "success"),
+          onclick: async () => {
+            try {
+              await apiRoot("/rules/" + encodeURIComponent(r.id) + "/toggle", { method: "POST", body: { enabled: !r.enabled } });
+              toast(r.enabled ? "عُطّلت القاعدة" : "فُعّلت القاعدة", "success");
+              state.ruleDetail = null; await loadRules(); renderPage();
+            } catch (e) { toast(e.message, "error"); }
+          } }, r.enabled ? "⛔ تعطيل القاعدة" : "✅ تفعيل القاعدة")),
+    ),
+  );
+}
+
+/* ─────────────────────────────────────────── PAGE: MODELS ─── */
+function renderModels() {
+  const m = state.modelsStatus;
+  if (!m) return el("div", { style: "color:var(--muted);text-align:center;padding:40px" }, "جارٍ التحميل…");
+  const md = m.metadata || {};
+  return el("div", {},
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "🧠 نماذج التعلم الآلي"),
+    el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" }, "حالة وجاهزية نماذج كشف الاحتيال"),
+    el("div", { class: "grid" },
+      kpi("الوضع", m.mode === "trained" ? "مدرَّب" : "بديل حتمي", m.mode === "trained" ? "نماذج حقيقية محمَّلة" : "⚠️ يستخدم بديلًا", m.mode === "trained" ? "success" : "warn"),
+      kpi("الجاهزية", m.ready ? "جاهز" : "غير جاهز", "درجة ML في الدمج", m.ready ? "success" : "danger"),
+      kpi("النماذج", (m.models || []).length, "المحمَّلة في الذاكرة", "brand"),
+    ),
+    el("div", { class: "card" },
+      el("h3", { style: "margin-bottom:12px" }, "📦 النماذج المحمَّلة"),
+      (m.models || []).length === 0 ? el("div", { style: "color:var(--muted)" }, "لا نماذج مدرَّبة — يعمل البديل الحتمي.") :
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "الاسم"), el("th", {}, "الإصدار"), el("th", {}, "النوع"))),
+        el("tbody", {}, ...(m.models || []).map(x => el("tr", {},
+          el("td", { style: "font-weight:700" }, x.name),
+          el("td", {}, el("code", { style: "font-size:11px" }, x.version)),
+          el("td", {}, el("span", { class: "badge " + (x.type === "trained" ? "allow" : "review") }, x.type)),
+        ))))),
+    md && Object.keys(md).length ? el("div", { class: "card" },
+      el("h3", { style: "margin-bottom:12px" }, "ℹ️ بيانات التدريب"),
+      el("pre", { class: "code-block" }, JSON.stringify(md, null, 2)),
+    ) : null,
+    el("div", { class: "card" },
+      el("h3", { style: "margin-bottom:12px" }, "🎚️ عتبات ML الداخلية"),
+      el("div", { class: "creds-box" },
+        credRow("block", m.ml_thresholds?.block),
+        credRow("review", m.ml_thresholds?.review),
+      ),
+    ),
+  );
+}
+
+/* ─────────────────────────────────────────── PAGE: GRAPH ─── */
+function renderGraph() {
+  const gs = state.graphStats, gi = state.graphInsights;
+  return el("div", {},
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "🕸️ ذكاء الشبكة"),
+    el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" }, "علاقات الحسابات/الأجهزة/العناوين وكشف الحلقات"),
+    el("div", { class: "grid" },
+      kpi("العقد", gs ? gs.nodes : "—", "حسابات + معاملات + أجهزة + IP", "brand"),
+      kpi("الأضلاع", gs ? gs.edges : "—", "العلاقات", "info"),
+      kpi("حسابات احتيال معروفة", gs ? gs.known_fraud_accounts : "—", "من قضايا مؤكدة", "danger"),
+    ),
+    gi ? el("div", { class: "split" },
+      el("div", { class: "card" },
+        el("h3", { style: "margin-bottom:10px" }, "💻 أجهزة مشتركة"),
+        (gi.shared_devices || []).length === 0 ? el("div", { style: "color:var(--muted);font-size:13px" }, "لا أجهزة مشتركة.") :
+        el("table", {},
+          el("thead", {}, el("tr", {}, el("th", {}, "الجهاز"), el("th", {}, "#حسابات"))),
+          el("tbody", {}, ...gi.shared_devices.map(s => el("tr", {},
+            el("td", {}, el("code", { style: "font-size:11px" }, s.device_id)),
+            el("td", { style: "font-weight:700;color:var(--warn)" }, s.account_count)))))),
+      el("div", { class: "card" },
+        el("h3", { style: "margin-bottom:10px" }, "🌐 IP مشتركة"),
+        (gi.shared_ips || []).length === 0 ? el("div", { style: "color:var(--muted);font-size:13px" }, "لا IP مشتركة.") :
+        el("table", {},
+          el("thead", {}, el("tr", {}, el("th", {}, "IP"), el("th", {}, "#حسابات"))),
+          el("tbody", {}, ...gi.shared_ips.map(s => el("tr", {},
+            el("td", {}, el("code", { style: "font-size:11px" }, s.ip)),
+            el("td", { style: "font-weight:700;color:var(--warn)" }, s.account_count)))))),
+    ) : null,
+  );
+}
+
 /* ─────────────────────────────────────────── PAGE RENDERER ─── */
 async function renderPage() {
   const c = $("#content");
@@ -578,7 +795,20 @@ async function renderPage() {
       await loadDecisions();
       c.replaceChildren(renderDecisions());
     } else if (state.page === "settings") {
+      await loadSettings();
       c.replaceChildren(renderSettings());
+    } else if (state.page === "investigators") {
+      await loadInvestigators();
+      c.replaceChildren(renderInvestigators());
+    } else if (state.page === "rules") {
+      await loadRules();
+      c.replaceChildren(renderRules());
+    } else if (state.page === "models") {
+      await loadModels();
+      c.replaceChildren(renderModels());
+    } else if (state.page === "graph") {
+      await loadGraph();
+      c.replaceChildren(renderGraph());
     } else if (state.page === "docs") {
       c.replaceChildren(renderDocs());
     }
@@ -601,6 +831,10 @@ function render() {
     { id: "overview",  icon: "📊", label: "نظرة عامة" },
     { id: "tenants",   icon: "🏢", label: "العملاء (بنوك ومحافظ)" },
     { id: "decisions", icon: "⚖️", label: "قرارات الاحتيال" },
+    { id: "investigators", icon: "🛡️", label: "المحققون" },
+    { id: "rules",     icon: "📜", label: "قواعد الاحتيال" },
+    { id: "models",    icon: "🧠", label: "نماذج ML" },
+    { id: "graph",     icon: "🕸️", label: "ذكاء الشبكة" },
     { id: "settings",  icon: "⚙️", label: "إعدادات النظام" },
     { id: "docs",      icon: "📖", label: "دليل التكامل" },
   ];
@@ -622,7 +856,7 @@ function render() {
     el("aside", {},
       ...pages.map(p => el("div", {
         class: "nav" + (state.page === p.id ? " active" : ""),
-        onclick: () => { state.page = p.id; state.selectedTenant = null; state.lastCreated = null; state.showAddForm = false; render(); }
+        onclick: () => { state.page = p.id; state.selectedTenant = null; state.lastCreated = null; state.showAddForm = false; state.ruleDetail = null; render(); }
       }, el("span", {}, p.icon), el("span", {}, p.label))),
       el("div", { style: "margin-top:24px;padding:14px;background:var(--surface);border-radius:10px;font-size:11.5px" },
         el("div", { style: "color:var(--muted);margin-bottom:6px" }, "بوابات أخرى:"),

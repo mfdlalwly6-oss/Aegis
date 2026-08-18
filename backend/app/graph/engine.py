@@ -110,3 +110,67 @@ class GraphEngine:
     @property
     def node_count(self) -> int:
         return self._g.number_of_nodes()
+
+    @property
+    def edge_count(self) -> int:
+        return self._g.number_of_edges()
+
+    def insights(self, top_n: int = 10) -> dict[str, Any]:
+        """Aggregated graph intelligence for the investigator workbench."""
+        shared_devices = sorted(
+            ({"device_id": d, "accounts": sorted(accs), "account_count": len(accs)}
+             for d, accs in self._device_accounts.items() if len(accs) > 1),
+            key=lambda x: -x["account_count"])[:top_n]
+        shared_ips = sorted(
+            ({"ip": ip, "accounts": sorted(accs), "account_count": len(accs)}
+             for ip, accs in self._ip_accounts.items() if len(accs) > 1),
+            key=lambda x: -x["account_count"])[:top_n]
+        top_linked = sorted(
+            ({"account_id": a, "beneficiaries": len(b)}
+             for a, b in self._account_links.items()),
+            key=lambda x: -x["beneficiaries"])[:top_n]
+        return {
+            "nodes": self._g.number_of_nodes(),
+            "edges": self._g.number_of_edges(),
+            "known_fraud_accounts": sorted(self._known_fraud),
+            "shared_devices": shared_devices,
+            "shared_ips": shared_ips,
+            "top_linked_accounts": top_linked,
+        }
+
+    def account_context(self, account_id: str) -> dict[str, Any]:
+        """Everything the graph knows about one account (investigation pivot)."""
+        node = f"acct:{account_id}"
+        if node not in self._g:
+            return {"account_id": account_id, "in_graph": False}
+        devices = sorted({d for d, accs in self._device_accounts.items()
+                          if account_id in accs})
+        ips = sorted({ip for ip, accs in self._ip_accounts.items()
+                      if account_id in accs})
+        linked = sorted(self._account_links.get(account_id, set()))
+        shared_via_device = sorted({a for d in devices
+                                    for a in self._device_accounts.get(d, set())
+                                    if a != account_id})
+        shared_via_ip = sorted({a for ip in ips
+                                for a in self._ip_accounts.get(ip, set())
+                                if a != account_id})
+        hops = None
+        for f in self._known_fraud:
+            if f not in self._g:
+                continue
+            try:
+                p = nx.shortest_path_length(self._g.to_undirected(as_view=True), node, f)
+                hops = p if hops is None else min(hops, p)
+            except (nx.NetworkXNoPath, nx.NodeNotFound):
+                continue
+        return {
+            "account_id": account_id,
+            "in_graph": True,
+            "is_known_fraud": node in self._known_fraud,
+            "devices": devices,
+            "ips": ips,
+            "linked_beneficiaries": linked,
+            "accounts_sharing_device": shared_via_device,
+            "accounts_sharing_ip": shared_via_ip,
+            "hops_to_known_fraud": hops,
+        }

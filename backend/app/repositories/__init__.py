@@ -10,9 +10,11 @@ from .audit_repo import AuditRepository
 from .rule_repo import RuleRepository
 from .watchlist_repo import WatchlistRepository
 from .user_repo import UserRepository
+from .investigator_repo import InvestigatorRepository
 
 __all__ = [
     "TenantRepository", "TransactionRepository", "DecisionRepository",
     "AlertRepository", "CaseRepository", "AuditRepository",
     "RuleRepository", "WatchlistRepository", "UserRepository",
+    "InvestigatorRepository",
 ]

@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     AI_MIN_SCORE: float = 0.45
     OPENROUTER_TIMEOUT_SEC: float = 12.0
 
+    # Investigator bootstrap (first-run convenience — set via env in production)
+    INVESTIGATOR_EMAIL: str = ""
+    INVESTIGATOR_PASSWORD: str = ""
+    INVESTIGATOR_NAME: str = "محقق الاحتيال"
+
     @property
     def db_path(self) -> str:
         return self.DB_PATH or f"{self.DATA_DIR}/aegis.db"

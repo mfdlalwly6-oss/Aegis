@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import make_asgi_app
 
-from app.api.deps import get_registry, require_owner
+from app.api.deps import get_registry, require_investigator, require_owner
 from app.api.v1 import router as v1_router
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -116,10 +116,7 @@ async def ready(request: Request):
     return {"status": "ready" if ok else "degraded", **checks}
 
 
-@app.get("/api/v1/admin/stream")
-async def stream(request: Request, owner: str = Depends(require_owner)):
-    """SSE stream of live decisions — owner only."""
-    registry = request.app.state.registry
+def _sse_gen(request: Request, registry):
     queue = registry.events.subscribe()
 
     async def event_gen():
@@ -135,4 +132,21 @@ async def stream(request: Request, owner: str = Depends(require_owner)):
         finally:
             registry.events.unsubscribe(queue)
 
-    return StreamingResponse(event_gen(), media_type="text/event-stream")
+    return event_gen()
+
+
+@app.get("/api/v1/admin/stream")
+async def stream(request: Request, owner: str = Depends(require_owner)):
+    """SSE stream of live decisions — owner only."""
+    registry = request.app.state.registry
+    return StreamingResponse(_sse_gen(request, registry),
+                             media_type="text/event-stream")
+
+
+@app.get("/api/v1/investigator/stream")
+async def investigator_stream(request: Request,
+                              inv: dict = Depends(require_investigator)):
+    """SSE stream of live risk events — authenticated investigators only."""
+    registry = request.app.state.registry
+    return StreamingResponse(_sse_gen(request, registry),
+                             media_type="text/event-stream")

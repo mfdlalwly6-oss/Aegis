@@ -13,4 +13,12 @@ def rings(min_size: int = 5, request: Request = None,
 
 @router.get("/stats")
 def graph_stats(request: Request, owner=Depends(require_owner), registry=Depends(get_registry)):
-    return {"nodes": registry.graph_engine.node_count}
+    ge = registry.graph_engine
+    return {"nodes": ge.node_count, "edges": ge.edge_count,
+            "known_fraud_accounts": len(ge._known_fraud)}
+
+
+@router.get("/insights")
+def graph_insights(request: Request, owner=Depends(require_owner),
+                   registry=Depends(get_registry)):
+    return registry.graph_engine.insights()

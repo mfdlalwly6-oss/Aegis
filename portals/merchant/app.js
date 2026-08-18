@@ -1,6 +1,6 @@
 const API = "/api/v1/admin/merchant";
 const TK = "aegis_merchant_token";
-const state = { token: localStorage.getItem(TK), tenant: null, page: "overview", stats: null, integration: null, conn: null, decisions: [] };
+const state = { token: localStorage.getItem(TK), tenant: null, page: "overview", stats: null, integration: null, conn: null, decisions: [], alerts: [], cases: [] };
 const $ = s => document.querySelector(s);
 const el = (t, a = {}, ...kids) => {
   const n = document.createElement(t);
@@ -13,7 +13,7 @@ const el = (t, a = {}, ...kids) => {
   return n;
 };
 const num = n => Number(n || 0).toLocaleString("ar-EG");
-const dt = iso => new Date(iso).toLocaleString("ar-EG", { dateStyle: "short", timeStyle: "short" });
+const dt = iso => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "-" : d.toLocaleString("ar-EG", { dateStyle: "short", timeStyle: "short" }); };
 function toast(m, t = "info") { const d = el("div", { class: "toast " + t }, m); document.body.appendChild(d); setTimeout(() => d.remove(), 3000); }
 
 async function api(path, opts = {}) {
@@ -78,6 +78,12 @@ async function loadIntegration() {
 }
 async function loadDecisions() {
   state.decisions = await api("/decisions?limit=50");
+}
+async function loadAlerts() {
+  state.alerts = await api("/alerts");
+}
+async function loadCases() {
+  state.cases = await api("/cases");
 }
 
 function kpi(l, v, s) {
@@ -199,12 +205,66 @@ function renderDecisions() {
               el("th", {}, "المخاطر"), el("th", {}, "النمط"), el("th", {}, "التفسير"))),
             el("tbody", {}, ...state.decisions.map(d =>
               el("tr", {},
-                el("td", { style: "font-size:11px" }, dt(d.timestamp)),
+                el("td", { style: "font-size:11px" }, dt(d.ts || d.timestamp || d.created_at)),
                 el("td", {}, el("code", { style: "font-size:11px" }, (d.tx_id || "").slice(0, 12))),
                 el("td", {}, el("span", { class: "badge " + d.decision }, d.decision)),
                 el("td", {}, ((d.risk_score || 0) * 100).toFixed(0) + "%"),
                 el("td", { style: "font-size:11px" }, d.typology || "-"),
                 el("td", { style: "font-size:11px;color:var(--muted);max-width:280px" }, (d.reasoning_ar || "").slice(0, 120))
+              )))
+          )
+    )
+  );
+}
+
+function renderAlerts() {
+  const SEV = { critical: "حرجة", high: "عالية", medium: "متوسطة", low: "منخفضة" };
+  const ST = { open: "مفتوح", assigned: "مُسنَد", in_review: "قيد المراجعة", escalated: "مُصعَّد",
+    resolved_true_positive: "احتيال مؤكد", resolved_false_positive: "إنذار كاذب" };
+  return el("div", {},
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:8px" }, "🚨 تنبيهات مؤسستي"),
+    el("p", { style: "color:var(--muted);margin-bottom:16px" }, "التنبيهات التي أنشأها AEGIS على معاملاتك — تُدار من منصة المحقق"),
+    el("div", { class: "card" },
+      state.alerts.length === 0
+        ? el("div", { style: "text-align:center;color:var(--muted);padding:40px" }, "✅ لا توجد تنبيهات على معاملاتك")
+        : el("table", {},
+            el("thead", {}, el("tr", {},
+              el("th", {}, "الوقت"), el("th", {}, "المعرّف"), el("th", {}, "الخطورة"),
+              el("th", {}, "العنوان"), el("th", {}, "الحالة"))),
+            el("tbody", {}, ...state.alerts.map(a =>
+              el("tr", {},
+                el("td", { style: "font-size:11px" }, dt(a.created_at)),
+                el("td", {}, el("code", { style: "font-size:11px" }, (a.alert_id || "").slice(0, 14))),
+                el("td", {}, el("span", { class: "badge " + a.severity }, SEV[a.severity] || a.severity)),
+                el("td", { style: "font-size:12px;max-width:280px" }, a.title || "-"),
+                el("td", {}, el("span", { class: "badge " + a.status }, ST[a.status] || a.status))
+              )))
+          )
+    )
+  );
+}
+
+function renderCases() {
+  const ST = { open: "مفتوح", in_progress: "قيد المعالجة", escalated: "مُصعَّد", closed: "مغلق" };
+  const RES = { confirmed_fraud: "احتيال مؤكد", false_positive: "إنذار كاذب", inconclusive: "غير حاسم" };
+  return el("div", {},
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:8px" }, "📁 قضايا التحقيق"),
+    el("p", { style: "color:var(--muted);margin-bottom:16px" }, "القضايا المرتبطة بمؤسستك ونتائج التحقيق فيها"),
+    el("div", { class: "card" },
+      state.cases.length === 0
+        ? el("div", { style: "text-align:center;color:var(--muted);padding:40px" }, "لا توجد قضايا مرتبطة بمؤسستك")
+        : el("table", {},
+            el("thead", {}, el("tr", {},
+              el("th", {}, "الوقت"), el("th", {}, "المعرّف"), el("th", {}, "العنوان"),
+              el("th", {}, "الأولوية"), el("th", {}, "الحالة"), el("th", {}, "النتيجة"))),
+            el("tbody", {}, ...state.cases.map(c =>
+              el("tr", {},
+                el("td", { style: "font-size:11px" }, dt(c.created_at)),
+                el("td", {}, el("code", { style: "font-size:11px" }, (c.case_id || "").slice(0, 14))),
+                el("td", { style: "font-size:12px;max-width:240px" }, c.title || "-"),
+                el("td", {}, el("span", { class: "badge " + c.priority }, c.priority)),
+                el("td", {}, el("span", { class: "badge " + c.status }, ST[c.status] || c.status)),
+                el("td", { style: "font-size:12px" }, c.resolution ? (RES[c.resolution] || c.resolution) : "—")
               )))
           )
     )
@@ -218,6 +278,8 @@ async function renderPage() {
     if (state.page === "overview") { await loadOverview(); c.replaceChildren(renderOverview()); }
     else if (state.page === "integration") { await loadIntegration(); c.replaceChildren(renderIntegration()); }
     else if (state.page === "decisions") { await loadDecisions(); c.replaceChildren(renderDecisions()); }
+    else if (state.page === "alerts") { await loadAlerts(); c.replaceChildren(renderAlerts()); }
+    else if (state.page === "cases") { await loadCases(); c.replaceChildren(renderCases()); }
   } catch (e) {
     if (String(e.message).includes("401") || String(e.message).includes("merchant_auth")) {
       localStorage.removeItem(TK); state.token = null; render(); return;
@@ -232,8 +294,10 @@ function render() {
   if (!state.tenant) { try { state.tenant = JSON.parse(localStorage.getItem(TK + "_t") || "null"); } catch {} }
   const pages = [
     { id: "overview", icon: "📊", label: "نظرة عامة" },
-    { id: "integration", icon: "🔌", label: "إعدادات الربط" },
-    { id: "decisions", icon: "⚖️", label: "قرارات معاملاتي" }
+    { id: "decisions", icon: "⚖️", label: "قرارات معاملاتي" },
+    { id: "alerts", icon: "🚨", label: "التنبيهات" },
+    { id: "cases", icon: "📁", label: "القضايا" },
+    { id: "integration", icon: "🔌", label: "إعدادات الربط" }
   ];
   root.appendChild(el("div", { class: "layout" },
     el("header", { class: "top" },
