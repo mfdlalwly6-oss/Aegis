@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: aegis-platform
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /health
+    envVars:
+      - key: AEGIS_ENV
+        value: production
+      - key: AEGIS_VERSION
+        value: "2.0.0"
+      - key: PORT
+        value: "8000"
+      - key: AEGIS_PUBLIC_URL
+        sync: false
+      - key: AEGIS_SECRET_KEY
+        generateValue: true
+      - key: AEGIS_OWNER_TOKEN
+        sync: false
+      - key: AEGIS_DATA_DIR
+        value: /data
+      - key: AEGIS_DB_PATH
+        value: /data/aegis.db
+      - key: AEGIS_LEGACY_SECRET
+        generateValue: true
+      - key: OPENROUTER_KEYS
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+    disk:
+      name: aegis-data
+      mountPath: /data
+      sizeGB: 1

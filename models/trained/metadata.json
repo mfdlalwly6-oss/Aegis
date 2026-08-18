@@ -1,0 +1,33 @@
+{
+  "version": "2026.08.13",
+  "trained_at": "2026-08-13T23:43:20.098930+00:00",
+  "features": [
+    "amount",
+    "hour_sin",
+    "hour_cos",
+    "tx_per_min",
+    "amount_5m",
+    "distinct_merchants_1h",
+    "new_device",
+    "shared_device_count",
+    "shared_ip_count",
+    "impossible_travel",
+    "high_risk_country",
+    "new_beneficiary",
+    "seconds_since_password_change",
+    "previous_declines",
+    "previous_chargebacks",
+    "high_risk_merchant",
+    "off_hours",
+    "round_amount",
+    "structuring_pattern",
+    "suspicious_events_30d"
+  ],
+  "dataset": "synthetic — NOT real fraud data",
+  "metrics": {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "roc_auc": 1.0
+  }
+}

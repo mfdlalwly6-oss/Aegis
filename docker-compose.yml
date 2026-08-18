@@ -1,0 +1,32 @@
+services:
+  aegis:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: aegis-platform
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      AEGIS_DATA_DIR: /data
+      AEGIS_DB_PATH: /data/aegis.db
+      PORT: "8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - aegis-data:/data
+    networks:
+      - aegis-net
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  aegis-data:
+
+networks:
+  aegis-net:
+    driver: bridge

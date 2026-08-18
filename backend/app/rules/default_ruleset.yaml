@@ -1,0 +1,180 @@
+rules:
+  - id: R-VEL-001
+    name: High transaction velocity
+    severity: high
+    score: 0.35
+    tags: [velocity]
+    description: "عدد معاملات مرتفع خلال دقائق قليلة"
+    when: {">": [{"var": "features.velocity.tx_per_min_card"}, 6]}
+  - id: R-VEL-002
+    name: High amount in 5 minutes
+    severity: high
+    score: 0.30
+    tags: [velocity]
+    description: "إجمالي مرتفع خلال خمس دقائق"
+    when: {">": [{"var": "features.velocity.amount_5min_account"}, 5000]}
+  - id: R-VEL-003
+    name: Merchant diversity anomaly
+    severity: medium
+    score: 0.15
+    tags: [velocity]
+    description: "تنوع غير معتاد في التجار"
+    when: {">": [{"var": "features.velocity.distinct_merchants_1h"}, 8]}
+  - id: R-GEO-001
+    name: Impossible travel
+    severity: critical
+    score: 0.55
+    tags: [geo]
+    description: "انتقال جغرافي غير منطقي"
+    when: {"==": [{"var": "features.geo.impossible_travel"}, true]}
+  - id: R-GEO-002
+    name: FATF high-risk jurisdiction
+    severity: high
+    score: 0.30
+    tags: [aml, geo]
+    description: "بلد عالي المخاطر"
+    when: {"==": [{"var": "features.geo.fatf_high_risk"}, true]}
+  - id: R-DEV-001
+    name: New device with high amount
+    severity: high
+    score: 0.35
+    tags: [device]
+    description: "جهاز جديد مع مبلغ مرتفع"
+    when:
+      "and":
+        - {"==": [{"var": "features.device.first_seen_today"}, true]}
+        - {">": [{"var": "tx.amount"}, 1000]}
+  - id: R-DEV-002
+    name: Emulator or rooted device
+    severity: critical
+    score: 0.60
+    tags: [device]
+    description: "جهاز مضاهاة أو معدل"
+    when:
+      "or":
+        - {"==": [{"var": "features.device.emulator"}, true]}
+        - {"==": [{"var": "features.device.rooted"}, true]}
+  - id: R-DEV-003
+    name: TOR exit node
+    severity: high
+    score: 0.40
+    tags: [device]
+    description: "اتصال عبر TOR"
+    when: {"==": [{"var": "tx.device.tor"}, true]}
+  - id: R-DEV-004
+    name: VPN + high-value + new beneficiary
+    severity: high
+    score: 0.35
+    tags: [device]
+    description: "VPN مع مبلغ مرتفع ومستفيد جديد"
+    when:
+      "and":
+        - {"==": [{"var": "tx.device.vpn"}, true]}
+        - {">": [{"var": "tx.amount"}, 500]}
+        - {"==": [{"var": "features.beneficiary.new"}, true]}
+  - id: R-DEV-005
+    name: Shared device across accounts
+    severity: high
+    score: 0.30
+    tags: [device, graph]
+    description: "الجهاز مستخدم من عدة حسابات"
+    when: {">": [{"var": "features.device.shared_device_count"}, 1]}
+  - id: R-DEV-006
+    name: Shared IP across accounts
+    severity: medium
+    score: 0.20
+    tags: [device, graph]
+    description: "عنوان IP مشترك بين عدة حسابات"
+    when: {">": [{"var": "features.device.shared_ip_count"}, 2]}
+  - id: R-BEH-001
+    name: Behavioral biometric mismatch
+    severity: high
+    score: 0.40
+    tags: [behavior]
+    description: "عدم تطابق البصمة السلوكية"
+    when: {"<": [{"var": "tx.behavior.biometric_match_score"}, 0.4]}
+  - id: R-BEH-002
+    name: Robotic keystroke entropy
+    severity: medium
+    score: 0.25
+    tags: [behavior]
+    description: "إيقاع كتابة آلي"
+    when: {"<": [{"var": "tx.behavior.keystroke_entropy"}, 1.2]}
+  - id: R-ATO-001
+    name: Password change before transfer
+    severity: critical
+    score: 0.55
+    tags: [ato]
+    description: "تغيير كلمة المرور قبل التحويل مباشرة"
+    when:
+      "and":
+        - {"<": [{"var": "features.account.seconds_since_password_change"}, 600]}
+        - {">": [{"var": "tx.amount"}, 1000]}
+  - id: R-ATO-002
+    name: MFA disabled + new beneficiary
+    severity: critical
+    score: 0.60
+    tags: [ato]
+    description: "تعطيل المصادقة الثنائية مع مستفيد جديد"
+    when:
+      "and":
+        - {"==": [{"var": "features.account.mfa_recently_disabled"}, true]}
+        - {"==": [{"var": "features.beneficiary.new"}, true]}
+  - id: R-AML-001
+    name: Structuring below threshold
+    severity: high
+    score: 0.35
+    tags: [aml]
+    description: "نمط تجزئة مبالغ تحت العتبة"
+    when:
+      "and":
+        - {">=": [{"var": "tx.amount"}, 9000]}
+        - {"<": [{"var": "tx.amount"}, 10000]}
+        - {">": [{"var": "features.velocity.count_9k_10k_30d"}, 2]}
+  - id: R-AML-002
+    name: Rapid pass-through
+    severity: high
+    score: 0.40
+    tags: [aml]
+    description: "حركة أموال سريعة (دخول وخروج)"
+    when:
+      "and":
+        - {">=": [{"var": "features.velocity.tx_count_1h"}, 8]}
+        - {">": [{"var": "features.velocity.amount_1h"}, 20000]}
+  - id: R-AML-003
+    name: Round amount to offshore
+    severity: medium
+    score: 0.20
+    tags: [aml]
+    description: "مبلغ دائري إلى حساب خارجي"
+    when:
+      "and":
+        - {"==": [{"var": "features.amount_flags.is_round_1000"}, true]}
+        - {"==": [{"var": "features.beneficiary.offshore"}, true]}
+  - id: R-CT-001
+    name: Card testing pattern
+    severity: high
+    score: 0.35
+    tags: [card]
+    description: "اختبار بطاقات بمبالغ صغيرة مرفوضة"
+    when:
+      "and":
+        - {">": [{"var": "features.velocity.card_declines_1h"}, 5]}
+        - {"<": [{"var": "tx.amount"}, 5]}
+  - id: R-SE-001
+    name: Coached call pattern
+    severity: high
+    score: 0.35
+    tags: [social_engineering]
+    description: "بقاء طويل على شاشة التحويل (احتمال توجيه)"
+    when: {">": [{"var": "tx.behavior.session_duration_ms"}, 600000]}
+  - id: R-NEW-001
+    name: New account high-value first transaction
+    severity: high
+    score: 0.40
+    tags: [account]
+    description: "حساب جديد مع معاملة أولى كبيرة"
+    when:
+      "and":
+        - {"<": [{"var": "features.account.account_age_days"}, 7]}
+        - {">": [{"var": "tx.amount"}, 5000]}
