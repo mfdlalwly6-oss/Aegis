@@ -1,4 +1,4 @@
-"""SQLite database layer — real persistent storage with migrations.
+"""SQLite database layer — real persistent storage with forward-only migrations.
 Thread-safe via check_same_thread=False + explicit transactions.
 Swappable to PostgreSQL later: all access goes through app/repositories/.
 """
@@ -25,7 +25,10 @@ CREATE TABLE IF NOT EXISTS tenants (
     policy_json    TEXT NOT NULL DEFAULT '{}',
     created_at     TEXT NOT NULL,
     secret_rotated_at TEXT,
-    deleted_at     TEXT
+    deleted_at     TEXT,
+    investigator_limit INTEGER NOT NULL DEFAULT 5,
+    timezone       TEXT NOT NULL DEFAULT 'Asia/Aden',
+    review_message TEXT
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -106,7 +109,9 @@ CREATE TABLE IF NOT EXISTS alerts (
     status      TEXT NOT NULL DEFAULT 'open',
     assignee    TEXT,
     created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    updated_at  TEXT NOT NULL,
+    notes_json  TEXT NOT NULL DEFAULT '[]',
+    resolution  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_al_tenant ON alerts(tenant_id, status);
 
@@ -122,7 +127,8 @@ CREATE TABLE IF NOT EXISTS cases (
     notes_json      TEXT NOT NULL DEFAULT '[]',
     assignee    TEXT,
     created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    updated_at  TEXT NOT NULL,
+    resolution  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_case_tenant ON cases(tenant_id, status);
 
@@ -178,11 +184,10 @@ CREATE TABLE IF NOT EXISTS model_registry (
     is_active    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (model_name, version)
 );
-"""
 
-_SCHEMA_002 = """
 CREATE TABLE IF NOT EXISTS investigators (
     investigator_id TEXT PRIMARY KEY,
+    tenant_id      TEXT NOT NULL DEFAULT 'platform',
     email          TEXT NOT NULL UNIQUE,
     name           TEXT NOT NULL,
     password_hash  TEXT NOT NULL,
@@ -190,20 +195,51 @@ CREATE TABLE IF NOT EXISTS investigators (
     created_at     TEXT NOT NULL,
     last_login_at  TEXT
 );
-
-ALTER TABLE alerts ADD COLUMN notes_json TEXT NOT NULL DEFAULT '[]';
-ALTER TABLE alerts ADD COLUMN resolution TEXT;
-ALTER TABLE cases  ADD COLUMN resolution TEXT;
+CREATE INDEX IF NOT EXISTS idx_inv_tenant ON investigators(tenant_id, status);
 """
 
-_MIGRATIONS: list[tuple[str, str]] = [
-    ("001_init", _SCHEMA),
-    ("002_investigator_workflow", _SCHEMA_002),
+# Migration 003: tenant-scoped investigators + tenant limits + report fields.
+# Runs only once thanks to schema_migrations bookkeeping. Safe on existing DBs.
+_SCHEMA_003 = """
+ALTER TABLE investigators ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'platform';
+CREATE INDEX IF NOT EXISTS idx_inv_tenant ON investigators(tenant_id, status);
+
+ALTER TABLE tenants ADD COLUMN investigator_limit INTEGER NOT NULL DEFAULT 5;
+ALTER TABLE tenants ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Asia/Aden';
+ALTER TABLE tenants ADD COLUMN review_message TEXT;
+"""
+
+_MIGRATIONS: list[tuple[str, list[str]]] = [
+    ("001_init", [_SCHEMA]),
+    ("002_investigator_workflow", [
+        "ALTER TABLE alerts ADD COLUMN notes_json TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE alerts ADD COLUMN resolution TEXT",
+        "ALTER TABLE cases ADD COLUMN resolution TEXT",
+    ]),
+    ("003_tenant_scoped_investigators", [
+        "ALTER TABLE investigators ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'platform'",
+        "ALTER TABLE tenants ADD COLUMN investigator_limit INTEGER NOT NULL DEFAULT 5",
+        "ALTER TABLE tenants ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Asia/Aden'",
+        "ALTER TABLE tenants ADD COLUMN review_message TEXT",
+    ]),
 ]
 
 
+def _apply_statements(conn: "sqlite3.Connection", statements: list[str]) -> None:
+    """Apply DDL defensively — ALTER ADD COLUMN is skipped when the column exists,
+    so re-runs and pre-existing schemas never break (forward-only, idempotent)."""
+    for sql in statements:
+        if sql.startswith("ALTER TABLE") and "ADD COLUMN" in sql:
+            parts = sql.split()
+            table, col = parts[2], parts[4]
+            cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            if col in cols:
+                continue
+        conn.execute(sql)
+
+
 class Database:
-    """Minimal SQLite wrapper with migration runner."""
+    """Minimal SQLite wrapper with forward-only migration runner."""
 
     def __init__(self, path: str | None = None):
         self.path = path or settings.db_path
@@ -228,19 +264,31 @@ class Database:
                 "CREATE TABLE IF NOT EXISTS schema_migrations "
                 "(name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
             )
+            # Defensive indexes — safe to run on every boot.
+            for idx in (
+                "CREATE INDEX IF NOT EXISTS idx_inv_tenant ON investigators(tenant_id, status)",
+                "CREATE INDEX IF NOT EXISTS idx_al_tenant ON alerts(tenant_id, status)",
+                "CREATE INDEX IF NOT EXISTS idx_case_tenant ON cases(tenant_id, status)",
+                "CREATE INDEX IF NOT EXISTS idx_dec_tenant ON decisions(tenant_id, ts)",
+                "CREATE INDEX IF NOT EXISTS idx_tx_tenant ON transactions(tenant_id, ts)",
+                "CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log(tenant_id, ts)",
+                "CREATE INDEX IF NOT EXISTS idx_rules_tenant ON rules(tenant_id)",
+            ):
+                conn.execute(idx)
             from datetime import datetime, timezone
-            for name, sql in _MIGRATIONS:
+            for name, statements in _MIGRATIONS:
                 applied = conn.execute(
                     "SELECT 1 FROM schema_migrations WHERE name=?", (name,)
                 ).fetchone()
                 if applied:
                     continue
-                conn.executescript(sql)
+                _apply_statements(conn, statements)
                 conn.execute(
                     "INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)",
                     (name, datetime.now(timezone.utc).isoformat()),
                 )
                 conn.commit()
+                print(f"MIGRATION_APPLIED {name}")
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         with self._lock:

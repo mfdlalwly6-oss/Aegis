@@ -1,10 +1,12 @@
-"""Multi-Tenant Management API — Owner admin + Merchant self-service."""
+"""Multi-Tenant Management API — Owner admin + Institution (merchant) self-service."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from datetime import datetime, timezone
 
-from app.api.deps import get_registry, require_owner, require_merchant
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
+
+from app.api.deps import get_registry, require_merchant, require_owner
 from app.core.config import settings
 from app.security import issue_jwt
 
@@ -12,13 +14,30 @@ router = APIRouter()
 
 
 class CreateTenant(BaseModel):
-    name: str
+    name: str = Field(min_length=2, max_length=120)
     type: str = "wallet"
     country: str = "YE"
     plan: str = "sandbox"
     contact_email: str | None = None
     contact_phone: str | None = None
     policy: dict = {}
+    investigator_limit: int | None = Field(default=None, ge=0, le=500)
+    timezone: str | None = None
+    review_message: str | None = None
+    owner_email: str | None = None
+    owner_password: str | None = None
+    owner_name: str | None = None
+
+
+class UpdateTenant(BaseModel):
+    name: str | None = None
+    country: str | None = None
+    plan: str | None = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    investigator_limit: int | None = Field(default=None, ge=0, le=500)
+    timezone: str | None = None
+    review_message: str | None = None
 
 
 class UpdatePolicy(BaseModel):
@@ -33,18 +52,49 @@ class MerchantLogin(BaseModel):
     api_secret: str
 
 
+class CreateInvestigator(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    name: str = Field(min_length=1, max_length=120)
+    password: str = Field(min_length=8, max_length=200)
+
+
+class ResetPassword(BaseModel):
+    password: str = Field(min_length=8, max_length=200)
+
+
 # ═══════════════════ OWNER ENDPOINTS ═══════════════════
+
+def _ensure_owner_token_valid(token: str) -> None:
+    pass
+
 
 @router.get("/admin/tenants")
 def list_tenants(owner=Depends(require_owner), registry=Depends(get_registry)):
     tenants = registry.tenants.list()
-    return {"total": len(tenants), "tenants": tenants}
+    result = []
+    for t in tenants:
+        t["investigators_used"] = registry.investigators.count_active(t["tenant_id"])
+        t["investigator_limit"] = t.get("investigator_limit", 5)
+        result.append(t)
+    return {"total": len(result), "tenants": result}
 
 
 @router.post("/admin/tenants", status_code=201)
 def create_tenant(body: CreateTenant, request: Request,
                   owner=Depends(require_owner), registry=Depends(get_registry)):
-    tenant = registry.tenants.create(body.model_dump())
+    data = body.model_dump(exclude_none=True)
+    tenant = registry.tenants.create(data)
+    # Create institution owner account if requested
+    if body.owner_email and body.owner_password:
+        existing = registry.user_repo.get_by_email(tenant["tenant_id"], body.owner_email)
+        if not existing:
+            registry.user_repo.create(tenant["tenant_id"], body.owner_email,
+                                      body.owner_name or body.name,
+                                      role="institution_owner",
+                                      password=body.owner_password)
+            registry.audit.log(tenant["tenant_id"], "owner", "tenant.owner_created",
+                               "user", None, getattr(request.state, "request_id", None),
+                               {"email": body.owner_email})
     registry.audit.log(tenant["tenant_id"], "owner", "tenant.created",
                        "tenant", tenant["tenant_id"], getattr(request.state, "request_id", None),
                        {"name": tenant["name"], "plan": tenant["plan"]})
@@ -56,6 +106,81 @@ def get_tenant(tenant_id: str, owner=Depends(require_owner), registry=Depends(ge
     tenant = registry.tenants.get(tenant_id, reveal=True)
     if not tenant:
         raise HTTPException(404, "tenant_not_found")
+    tenant["investigators_used"] = registry.investigators.count_active(tenant_id)
+    return tenant
+
+
+@router.get("/admin/tenants/{tenant_id}/alerts")
+def owner_tenant_alerts(tenant_id: str, owner=Depends(require_owner),
+                        registry=Depends(get_registry)):
+    """AEGIS Owner support view — alerts belonging to one tenant only."""
+    if not registry.tenants.get(tenant_id):
+        raise HTTPException(404, "tenant_not_found")
+    return registry.alerts.list(tenant_id=tenant_id, limit=200)
+
+
+@router.get("/admin/tenants/{tenant_id}/cases")
+def owner_tenant_cases(tenant_id: str, owner=Depends(require_owner),
+                       registry=Depends(get_registry)):
+    if not registry.tenants.get(tenant_id):
+        raise HTTPException(404, "tenant_not_found")
+    return registry.cases.list(tenant_id=tenant_id, limit=200)
+
+
+@router.get("/admin/tenants/{tenant_id}/decisions")
+def owner_tenant_decisions(tenant_id: str, limit: int = 100,
+                           owner=Depends(require_owner),
+                           registry=Depends(get_registry)):
+    if not registry.tenants.get(tenant_id):
+        raise HTTPException(404, "tenant_not_found")
+    return registry.decisions.recent(limit=limit, tenant_id=tenant_id)
+
+
+@router.get("/admin/tenants/{tenant_id}/transactions")
+def owner_tenant_transactions(tenant_id: str, limit: int = 100,
+                              owner=Depends(require_owner),
+                              registry=Depends(get_registry)):
+    if not registry.tenants.get(tenant_id):
+        raise HTTPException(404, "tenant_not_found")
+    return registry.transactions.list_recent(tenant_id=tenant_id, limit=limit)
+
+
+@router.put("/admin/tenants/{tenant_id}")
+def update_tenant(tenant_id: str, body: UpdateTenant, request: Request,
+                  owner=Depends(require_owner), registry=Depends(get_registry)):
+    patch = {k: v for k, v in body.model_dump(exclude_none=True).items()}
+    if "investigator_limit" in patch:
+        active = registry.investigators.count_active(tenant_id)
+        if patch["investigator_limit"] < active:
+            raise HTTPException(400, f"limit_below_active_investigators:{active}")
+    tenant = registry.tenants.update(tenant_id, patch)
+    if not tenant:
+        raise HTTPException(404, "tenant_not_found")
+    registry.audit.log(tenant_id, "owner", "tenant.updated",
+                       "tenant", tenant_id, getattr(request.state, "request_id", None),
+                       patch)
+    return tenant
+
+
+@router.post("/admin/tenants/{tenant_id}/suspend")
+def suspend_tenant(tenant_id: str, request: Request,
+                   owner=Depends(require_owner), registry=Depends(get_registry)):
+    tenant = registry.tenants.set_status(tenant_id, "suspended")
+    if not tenant:
+        raise HTTPException(404, "tenant_not_found")
+    registry.audit.log(tenant_id, "owner", "tenant.suspended",
+                       "tenant", tenant_id, getattr(request.state, "request_id", None), {})
+    return tenant
+
+
+@router.post("/admin/tenants/{tenant_id}/activate")
+def activate_tenant(tenant_id: str, request: Request,
+                    owner=Depends(require_owner), registry=Depends(get_registry)):
+    tenant = registry.tenants.set_status(tenant_id, "active")
+    if not tenant:
+        raise HTTPException(404, "tenant_not_found")
+    registry.audit.log(tenant_id, "owner", "tenant.activated",
+                       "tenant", tenant_id, getattr(request.state, "request_id", None), {})
     return tenant
 
 
@@ -103,7 +228,7 @@ def overview(owner=Depends(require_owner), registry=Depends(get_registry)):
     total = len(tenants)
     active = len([t for t in tenants if t["status"] == "active"])
     return {
-        "server_time": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "server_time": datetime.now(timezone.utc).isoformat(),
         "total_tenants": total,
         "active_tenants": active,
         "tenants": {"total": total, "active": active},
@@ -160,47 +285,79 @@ def system_settings(owner=Depends(require_owner), registry=Depends(get_registry)
     }
 
 
-# ═══════════════════ INVESTIGATOR MANAGEMENT (owner only) ═══════════════════
+# ═══════════════════ OWNER: INVESTIGATOR MANAGEMENT (tenant-scoped) ═══════════════════
 
-class CreateInvestigator(BaseModel):
-    email: str
-    name: str
-    password: str
+@router.get("/admin/tenants/{tenant_id}/investigators")
+def list_tenant_investigators(tenant_id: str, owner=Depends(require_owner),
+                              registry=Depends(get_registry)):
+    if not registry.tenants.get(tenant_id):
+        raise HTTPException(404, "tenant_not_found")
+    rows = registry.investigators.list(tenant_id=tenant_id)
+    return {"total": len(rows), "investigators": rows,
+            "limit": registry.tenants.get(tenant_id)["investigator_limit"],
+            "used": registry.investigators.count_active(tenant_id)}
+
+
+@router.post("/admin/tenants/{tenant_id}/investigators", status_code=201)
+def create_tenant_investigator(tenant_id: str, body: CreateInvestigator, request: Request,
+                               owner=Depends(require_owner), registry=Depends(get_registry)):
+    tenant = registry.tenants.get(tenant_id)
+    if not tenant:
+        raise HTTPException(404, "tenant_not_found")
+    active = registry.investigators.count_active(tenant_id)
+    limit = tenant.get("investigator_limit", 5)
+    if active >= limit:
+        raise HTTPException(409, f"investigator_limit_reached:{limit}")
+    if registry.investigators.get_by_email(body.email):
+        raise HTTPException(409, "email_exists")
+    inv = registry.investigators.create(tenant_id, body.email, body.name, body.password)
+    registry.audit.log(tenant_id, "owner", "investigator.created",
+                       "investigator", inv["investigator_id"],
+                       getattr(request.state, "request_id", None),
+                       {"email": inv["email"], "role": "investigator"})
+    return inv
+
+
+@router.post("/admin/tenants/{tenant_id}/investigators/{inv_id}/suspend")
+def suspend_tenant_investigator(tenant_id: str, inv_id: str, request: Request,
+                                owner=Depends(require_owner), registry=Depends(get_registry)):
+    if not registry.investigators.set_status(tenant_id, inv_id, "inactive"):
+        raise HTTPException(404, "investigator_not_found")
+    registry.audit.log(tenant_id, "owner", "investigator.suspended",
+                       "investigator", inv_id,
+                       getattr(request.state, "request_id", None), {})
+    return {"ok": True, "investigator_id": inv_id}
+
+
+@router.post("/admin/tenants/{tenant_id}/investigators/{inv_id}/activate")
+def activate_tenant_investigator(tenant_id: str, inv_id: str, request: Request,
+                                 owner=Depends(require_owner), registry=Depends(get_registry)):
+    if not registry.investigators.set_status(tenant_id, inv_id, "active"):
+        raise HTTPException(404, "investigator_not_found")
+    registry.audit.log(tenant_id, "owner", "investigator.activated",
+                       "investigator", inv_id,
+                       getattr(request.state, "request_id", None), {})
+    return {"ok": True, "investigator_id": inv_id}
+
+
+@router.delete("/admin/tenants/{tenant_id}/investigators/{inv_id}")
+def delete_tenant_investigator(tenant_id: str, inv_id: str, request: Request,
+                               owner=Depends(require_owner), registry=Depends(get_registry)):
+    if not registry.investigators.set_status(tenant_id, inv_id, "deleted"):
+        raise HTTPException(404, "investigator_not_found")
+    registry.audit.log(tenant_id, "owner", "investigator.deleted",
+                       "investigator", inv_id,
+                       getattr(request.state, "request_id", None), {})
+    return {"ok": True, "investigator_id": inv_id}
 
 
 @router.get("/admin/investigators")
-def list_investigators(owner=Depends(require_owner), registry=Depends(get_registry)):
+def list_all_investigators(owner=Depends(require_owner), registry=Depends(get_registry)):
     return {"total": registry.investigators.count(),
             "investigators": registry.investigators.list()}
 
 
-@router.post("/admin/investigators", status_code=201)
-def create_investigator(body: CreateInvestigator, request: Request,
-                        owner=Depends(require_owner), registry=Depends(get_registry)):
-    if registry.investigators.get_by_email(body.email):
-        raise HTTPException(409, "email_exists")
-    if len(body.password) < 8:
-        raise HTTPException(400, "password_too_short_min_8")
-    inv = registry.investigators.create(body.email, body.name, body.password)
-    registry.audit.log(None, "owner", "investigator.created",
-                       "investigator", inv["investigator_id"],
-                       getattr(request.state, "request_id", None),
-                       {"email": inv["email"]})
-    return inv
-
-
-@router.delete("/admin/investigators/{investigator_id}")
-def deactivate_investigator(investigator_id: str, request: Request,
-                            owner=Depends(require_owner), registry=Depends(get_registry)):
-    if not registry.investigators.deactivate(investigator_id):
-        raise HTTPException(404, "investigator_not_found")
-    registry.audit.log(None, "owner", "investigator.deactivated",
-                       "investigator", investigator_id,
-                       getattr(request.state, "request_id", None), {})
-    return {"ok": True, "investigator_id": investigator_id}
-
-
-# ═══════════════════ MERCHANT ENDPOINTS ═══════════════════
+# ═══════════════════ MERCHANT / INSTITUTION ENDPOINTS ═══════════════════
 
 @router.post("/admin/merchant/login")
 def merchant_login(body: MerchantLogin, request: Request, registry=Depends(get_registry)):
@@ -227,6 +384,68 @@ def merchant_me(merchant=Depends(require_merchant), registry=Depends(get_registr
     if not tenant:
         raise HTTPException(404, "tenant_not_found")
     return tenant
+
+
+@router.get("/admin/merchant/dashboard")
+def merchant_dashboard(merchant=Depends(require_merchant), registry=Depends(get_registry)):
+    tid = merchant["tenant_id"]
+    dec = registry.decisions.count_by_tenant(tid)
+    recent = registry.decisions.recent(limit=10, tenant_id=tid)
+    alerts = registry.alerts.list(tenant_id=tid, limit=50)
+    cases = registry.cases.list(tenant_id=tid, limit=50)
+    open_alerts = sum(1 for a in alerts if a["status"] in
+                      ("open", "assigned", "in_review", "escalated"))
+    open_cases = sum(1 for c in cases if c["status"] != "closed")
+    manual = [a for a in alerts if a["status"] in
+              ("resolved_true_positive", "resolved_false_positive")]
+    durations, sla = [], 0
+    for a in manual:
+        try:
+            start = datetime.fromisoformat(a["created_at"])
+            end = datetime.fromisoformat(a["updated_at"])
+            minutes = (end - start).total_seconds() / 60
+            durations.append(minutes)
+            if minutes > 1440:
+                sla += 1
+        except Exception:
+            continue
+    return {
+        "tenant_id": tid,
+        "decisions": dec,
+        "recent": recent,
+        "alerts": {"total": len(alerts), "open": open_alerts,
+                   "counts": {s: sum(1 for a in alerts if a["status"] == s)
+                              for s in ("open", "assigned", "in_review",
+                                        "escalated", "resolved_true_positive",
+                                        "resolved_false_positive")}},
+        "cases": {"total": len(cases), "open": open_cases,
+                  "by_status": {s: sum(1 for c in cases if c["status"] == s)
+                                for s in ("open", "in_progress", "escalated", "closed")}},
+        "manual_reviews": {
+            "total": len(manual),
+            "avg_duration_min": round(sum(durations) / len(durations), 1) if durations else 0,
+            "sla_breach_over_24h": sla,
+        },
+        "top_risk_reasons": _top_reasons(registry, tid),
+        "connection": {"status": "connected", "aegis_core": settings.VERSION,
+                       "ml": bool(registry.ml_scorer and registry.ml_scorer.ready)},
+    }
+
+
+def _top_reasons(registry, tenant_id: str, limit: int = 8) -> list[dict]:
+    import json as _json
+    from collections import Counter
+    counts = Counter()
+    for row in registry.db.query(
+            "SELECT top_reasons_json FROM decisions WHERE tenant_id=? "
+            "ORDER BY ts DESC LIMIT 300", (tenant_id,)):
+        try:
+            for item in _json.loads(row["top_reasons_json"] or "[]"):
+                key = item if isinstance(item, str) else item.get("reason", str(item))
+                counts[key] += 1
+        except Exception:
+            continue
+    return [{"reason": k, "count": v} for k, v in counts.most_common(limit)]
 
 
 @router.get("/admin/merchant/integration")
@@ -288,11 +507,12 @@ def merchant_integration(merchant=Depends(require_merchant), registry=Depends(ge
 @router.get("/admin/merchant/connection-status")
 def merchant_connection(merchant=Depends(require_merchant), registry=Depends(get_registry)):
     ml_ready = registry.ml_scorer.ready if registry.ml_scorer else False
-    now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+    tenant = registry.tenants.get(merchant["tenant_id"])
+    now = datetime.now(timezone.utc).isoformat()
     return {"tenant_id": merchant["tenant_id"], "api": True,
             "database": True, "ml": ml_ready,
-            "graph": True, "tenant_status": "active",
-            "connected": True,
+            "graph": True, "tenant_status": tenant.get("status", "unknown") if tenant else "unknown",
+            "connected": bool(tenant and tenant.get("status") == "active"),
             "aegis_core": settings.VERSION,
             "ai_agent": "ready" if settings.openrouter_keys and settings.AI_ENABLED else "not_configured",
             "checked_at": now}
@@ -304,9 +524,20 @@ def merchant_stats(merchant=Depends(require_merchant), registry=Depends(get_regi
 
 
 @router.get("/admin/merchant/decisions")
-def merchant_decisions(limit: int = 50, merchant=Depends(require_merchant),
+def merchant_decisions(limit: int = 50, decision: str | None = None,
+                       merchant=Depends(require_merchant),
                        registry=Depends(get_registry)):
+    if decision:
+        return registry.db.query(
+            "SELECT * FROM decisions WHERE tenant_id=? AND decision=? ORDER BY ts DESC LIMIT ?",
+            (merchant["tenant_id"], decision, limit))
     return registry.decisions.recent(limit=limit, tenant_id=merchant["tenant_id"])
+
+
+@router.get("/admin/merchant/transactions")
+def merchant_transactions(limit: int = 100, merchant=Depends(require_merchant),
+                          registry=Depends(get_registry)):
+    return registry.transactions.list_recent(tenant_id=merchant["tenant_id"], limit=limit)
 
 
 @router.get("/admin/merchant/alerts")
@@ -318,3 +549,115 @@ def merchant_alerts(status: str | None = None, merchant=Depends(require_merchant
 @router.get("/admin/merchant/cases")
 def merchant_cases(merchant=Depends(require_merchant), registry=Depends(get_registry)):
     return registry.cases.list(tenant_id=merchant["tenant_id"])
+
+
+@router.get("/admin/merchant/manual-reviews")
+def merchant_manual_reviews(merchant=Depends(require_merchant),
+                            registry=Depends(get_registry)):
+    """Manually-processed transactions — reviewer identity, timings, resolution."""
+    rows = registry.db.query(
+        "SELECT a.alert_id, a.tenant_id, a.tx_id, a.severity, a.title, a.status, "
+        "a.assignee, a.created_at, a.updated_at, a.resolution, t.amount, t.currency "
+        "FROM alerts a LEFT JOIN transactions t ON t.tx_id = a.tx_id "
+        "WHERE a.tenant_id=? AND a.status LIKE 'resolved%' "
+        "ORDER BY a.updated_at DESC LIMIT 200",
+        (merchant["tenant_id"],))
+    for r in rows:
+        try:
+            dur = (datetime.fromisoformat(r["updated_at"]) -
+                   datetime.fromisoformat(r["created_at"])).total_seconds() / 60
+            r["review_duration_min"] = round(dur, 1)
+        except Exception:
+            r["review_duration_min"] = None
+        r["actor_type"] = "institution_owner" if r.get("assignee") and \
+            "@" not in (r.get("assignee") or "") else "investigator"
+        r["role"] = "investigator"
+    return rows
+
+
+@router.get("/admin/merchant/audit")
+def merchant_audit(limit: int = 200, merchant=Depends(require_merchant),
+                   registry=Depends(get_registry)):
+    return registry.audit_repo.list(tenant_id=merchant["tenant_id"], limit=limit)
+
+
+@router.get("/admin/merchant/investigators")
+def merchant_investigators(merchant=Depends(require_merchant), registry=Depends(get_registry)):
+    tid = merchant["tenant_id"]
+    rows = registry.investigators.list(tenant_id=tid)
+    tenant = registry.tenants.get(tid)
+    return {"total": len(rows), "investigators": rows,
+            "limit": tenant.get("investigator_limit", 5) if tenant else 5,
+            "used": registry.investigators.count_active(tid)}
+
+
+@router.post("/admin/merchant/investigators", status_code=201)
+def merchant_create_investigator(body: CreateInvestigator, request: Request,
+                                 merchant=Depends(require_merchant),
+                                 registry=Depends(get_registry)):
+    """Institution Owner creates an investigator for OWN institution (limit enforced)."""
+    tid = merchant["tenant_id"]
+    tenant = registry.tenants.get(tid)
+    if not tenant:
+        raise HTTPException(404, "tenant_not_found")
+    if merchant.get("role") not in ("merchant", "institution_owner", "tenant_admin"):
+        raise HTTPException(403, "insufficient_role")
+    active = registry.investigators.count_active(tid)
+    limit = tenant.get("investigator_limit", 5)
+    if active >= limit:
+        raise HTTPException(409, f"investigator_limit_reached:{limit}")
+    if registry.investigators.get_by_email(body.email):
+        raise HTTPException(409, "email_exists")
+    inv = registry.investigators.create(tid, body.email, body.name, body.password)
+    registry.audit.log(tid, merchant.get("sub", merchant.get("name", "institution_owner")),
+                       "investigator.created", "investigator", inv["investigator_id"],
+                       getattr(request.state, "request_id", None),
+                       {"email": inv["email"], "actor_type": merchant.get("role")})
+    return inv
+
+
+def _inv_action(investigator_id: str, action: str, merchant, request, registry,
+                status_value: str):
+    tid = merchant["tenant_id"]
+    if not registry.investigators.set_status(tid, investigator_id, status_value):
+        raise HTTPException(404, "investigator_not_found")
+    registry.audit.log(tid, merchant.get("sub", merchant.get("name", "institution_owner")),
+                       f"investigator.{action}", "investigator", investigator_id,
+                       getattr(request.state, "request_id", None),
+                       {"actor_type": merchant.get("role")})
+    return {"ok": True, "investigator_id": investigator_id}
+
+
+@router.post("/admin/merchant/investigators/{inv_id}/suspend")
+def merchant_suspend_investigator(inv_id: str, request: Request,
+                                  merchant=Depends(require_merchant),
+                                  registry=Depends(get_registry)):
+    return _inv_action(inv_id, "suspended", merchant, request, registry, "inactive")
+
+
+@router.post("/admin/merchant/investigators/{inv_id}/activate")
+def merchant_activate_investigator(inv_id: str, request: Request,
+                                   merchant=Depends(require_merchant),
+                                   registry=Depends(get_registry)):
+    return _inv_action(inv_id, "activated", merchant, request, registry, "active")
+
+
+@router.delete("/admin/merchant/investigators/{inv_id}")
+def merchant_delete_investigator(inv_id: str, request: Request,
+                                 merchant=Depends(require_merchant),
+                                 registry=Depends(get_registry)):
+    return _inv_action(inv_id, "deleted", merchant, request, registry, "deleted")
+
+
+@router.post("/admin/merchant/investigators/{inv_id}/reset-password")
+def merchant_reset_password(inv_id: str, body: ResetPassword, request: Request,
+                            merchant=Depends(require_merchant),
+                            registry=Depends(get_registry)):
+    tid = merchant["tenant_id"]
+    if not registry.investigators.reset_password(tid, inv_id, body.password):
+        raise HTTPException(404, "investigator_not_found")
+    registry.audit.log(tid, merchant.get("sub", merchant.get("name", "institution_owner")),
+                       "investigator.password_reset", "investigator", inv_id,
+                       getattr(request.state, "request_id", None),
+                       {"actor_type": merchant.get("role")})
+    return {"ok": True, "investigator_id": inv_id}

@@ -70,11 +70,21 @@ class ServiceRegistry:
         self.investigators = InvestigatorRepository(self.db)
 
         # Bootstrap a first investigator from env when none exists (dev convenience).
-        if self.investigators.count() == 0 and settings.INVESTIGATOR_EMAIL and settings.INVESTIGATOR_PASSWORD:
-            self.investigators.create(settings.INVESTIGATOR_EMAIL,
-                                      settings.INVESTIGATOR_NAME,
-                                      settings.INVESTIGATOR_PASSWORD)
-            logger.info("investigator.bootstrapped", email=settings.INVESTIGATOR_EMAIL)
+        # Investigators are tenant-scoped: use INVESTIGATOR_TENANT_ID, else first
+        # active tenant, else a 'platform' placeholder so the account always has a scope.
+        inv_email = getattr(settings, "INVESTIGATOR_EMAIL", "") or ""
+        inv_pass = getattr(settings, "INVESTIGATOR_PASSWORD", "") or ""
+        if self.investigators.count() == 0 and inv_email and inv_pass:
+            tenant_id = getattr(settings, "INVESTIGATOR_TENANT_ID", "") or ""
+            if not tenant_id:
+                tenants = self.tenants.list()
+                tenant_id = next((t["tenant_id"] for t in tenants if t["status"] == "active"),
+                                 "platform")
+            self.investigators.create(tenant_id, inv_email,
+                                      getattr(settings, "INVESTIGATOR_NAME", "") or "محقق الاحتيال",
+                                      inv_pass)
+            logger.info("investigator.bootstrapped", email=inv_email,
+                        tenant_id=tenant_id)
 
         # 3. Seed default rules from YAML into DB
         rules_path = Path(__file__).parent.parent / "rules" / "default_ruleset.yaml"

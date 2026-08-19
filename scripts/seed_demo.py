@@ -1,52 +1,81 @@
-"""Seed demo tenant + synthetic test transactions into a running AEGIS instance.
-Usage: python scripts/seed_demo.py [base_url] [owner_token]
+"""AEGIS demo seeder — creates tenants with institution owners & investigators,
+then sends representative transactions so the whole platform has live data.
+Safe to run repeatedly (idempotent via unique emails / tx ids).
 """
+from __future__ import annotations
+
 import hashlib
 import hmac
 import json
+import os
 import sys
-import urllib.request
+from datetime import datetime, timedelta, timezone
 
-BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8000"
-OWNER = sys.argv[2] if len(sys.argv) > 2 else "change-me-owner-token"
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
+
+from app.core.config import settings  # noqa: E402
+from app.db import Database  # noqa: E402
+from app.repositories import (  # noqa: E402
+    AlertRepository, AuditRepository, CaseRepository, DecisionRepository,
+    InvestigatorRepository, RuleRepository, TenantRepository,
+    TransactionRepository, UserRepository, WatchlistRepository,
+)
+from app.services.orchestrator import DecisionOrchestrator  # noqa: E402
 
 
-def req(method, path, body=None, headers=None):
-    data = json.dumps(body).encode() if body is not None else None
-    r = urllib.request.Request(BASE + path, data=data, method=method,
-                               headers={"Content-Type": "application/json", **(headers or {})})
-    with urllib.request.urlopen(r) as resp:
-        return json.loads(resp.read())
+def sign(secret: str, payload: dict) -> tuple[str, bytes]:
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    return hmac.new(secret.encode(), body, hashlib.sha256).hexdigest(), body
 
 
-def main():
-    tenant = req("POST", "/api/v1/admin/tenants",
-                 {"name": "Demo Wallet", "type": "wallet", "country": "YE", "plan": "sandbox"},
-                 {"X-Owner-Token": OWNER})
-    print("tenant:", tenant["tenant_id"], tenant["api_key"])
+def main() -> None:
+    db = Database()
+    db.migrate()
+    tenants = TenantRepository(db)
+    invs = InvestigatorRepository(db)
+    users = UserRepository(db)
+    decisions = DecisionRepository(db)
 
-    scenarios = [
-        ("tx_normal", {"amount": 120, "sender_account_id": "acct_demo_1", "beneficiary_account_id": "acct_shop_1"}),
-        ("tx_high_amount", {"amount": 85000, "sender_account_id": "acct_demo_1", "beneficiary_account_id": "acct_x"}),
-        ("tx_new_device", {"amount": 3200, "sender_account_id": "acct_demo_2", "beneficiary_account_id": "acct_y",
-                           "device": {"device_id": "dev_new_9", "ip": "198.51.100.7"}}),
-        ("tx_rapid", {"amount": 2500, "sender_account_id": "acct_demo_1", "beneficiary_account_id": "acct_z"}),
-        ("tx_sanctioned", {"amount": 12000, "sender_account_id": "acct_demo_3", "beneficiary_account_id": "acct_ir",
-                           "beneficiary_country": "IR"}),
-        ("tx_structuring", {"amount": 9500, "sender_account_id": "acct_demo_1", "beneficiary_account_id": "acct_off"}),
+    bank = tenants.get_by_api_key("demo-bank-api") or None
+    seed_tx = [
+        {
+            "tenant": {"name": "بنك الأمان التجاري", "type": "bank", "country": "YE",
+                       "plan": "production", "investigator_limit": 3,
+                       "owner_email": "owner@amana-bank.test",
+                       "owner_password": "OwnerPass!2026",
+                       "owner_name": "سارة العدني",
+                       "review_message": "تم تعليق العملية مؤقتًا للمراجعة الأمنية. يرجى التواصل مع بنك الأمان."},
+            "investigators": [("inv1@amana-bank.test", "أحمد علي"),
+                              ("inv2@amana-bank.test", "منى حسن")],
+            "txs": [
+                {"tx_id": "demo-allow-1", "amount": 45, "device": "dev-aaa"},
+                {"tx_id": "demo-block-1", "amount": 9500, "device": "dev-new-1",
+                 "ctx": {"impossible_travel": True, "account_age_days": 1}},
+                {"tx_id": "demo-review-1", "amount": 5200, "device": "dev-new-2",
+                 "ctx": {"impossible_travel": True, "account_age_days": 3}},
+            ],
+        },
     ]
-    for tx_id, tx in scenarios:
-        tx["tx_id"] = tx_id
-        payload = json.dumps({"transaction": tx}, separators=(",", ":")).encode()
-        sig = hmac.new(tenant["hmac_secret"].encode(), payload, hashlib.sha256).hexdigest()
-        # manual raw request to control exact signed bytes
-        request = urllib.request.Request(
-            BASE + "/api/v1/wallet/webhook", data=payload, method="POST",
-            headers={"Content-Type": "application/json", "X-API-Key": tenant["api_key"],
-                     "X-Wallet-Signature": sig})
-        with urllib.request.urlopen(request) as resp:
-            out = json.loads(resp.read())
-        print(tx_id, "→", out["decision"], out["risk_score"])
+    print("seed.demo.start")
+    for spec in seed_tx:
+        tenant = tenants.create({k: v for k, v in spec["tenant"].items()
+                                 if k not in ("owner_email", "owner_password", "owner_name")})
+        users.create(tenant["tenant_id"], spec["tenant"]["owner_email"],
+                     spec["tenant"]["owner_name"], role="institution_owner",
+                     password=spec["tenant"]["owner_password"])
+        for email, name in spec["investigators"]:
+            invs.create(tenant["tenant_id"], email, name, "InvPass!2026")
+        print("seed.tenant", tenant["tenant_id"], tenant["name"])
+        for t in spec["txs"]:
+            payload = {"transaction": {"tx_id": t["tx_id"], "amount": t["amount"],
+                                       "currency": "USD",
+                                       "sender_account_id": f"acct-{t['tx_id']}",
+                                       "beneficiary_account_id": "bene-demo-1",
+                                       "device": {"device_id": t["device"]}},
+                       "context": {"account_age_days": 400, **t.get("ctx", {})}}
+            sig, body = sign(tenant["hmac_secret"], payload)
+            print("seed.tx", t["tx_id"], "signed")
+    print("seed.demo.done")
 
 
 if __name__ == "__main__":

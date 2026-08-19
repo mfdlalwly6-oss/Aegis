@@ -29,3 +29,6 @@ joblib==1.4.2
 # Optional integrations (fail-safe if service not present)
 redis==5.1.1
 aiokafka==0.11.0
+reportlab>=4.0
+arabic-reshaper>=3.0
+python-bidi>=0.4

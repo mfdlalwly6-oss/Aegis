@@ -16,6 +16,10 @@ from app.security import verify_signature
 
 router = APIRouter()
 
+DEFAULT_REVIEW_MESSAGE = (
+    "تم تعليق العملية مؤقتًا للمراجعة الأمنية. يرجى التواصل مع البنك أو "
+    "المؤسسة المالية لإتمام المراجعة.")
+
 
 def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
     """Normalize any wallet/bank payload into the canonical Transaction schema."""
@@ -42,7 +46,6 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
         raise HTTPException(400, "amount_required")
 
     metadata = dict(src.get("metadata") or {})
-    # fold context fields into metadata so feature extractor can use them
     for k in ("velocity", "account", "beneficiary", "geo", "customer"):
         if isinstance(ctx.get(k), dict):
             metadata.setdefault(k, ctx[k])
@@ -52,7 +55,6 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
               "distinct_merchants_1h", "card_declines_1h", "billing_country"):
         if k in ctx:
             metadata.setdefault(k, ctx[k])
-    # flatten one-level nested context dicts (e.g. context.velocity.amount_5min_account)
     for section in ("velocity", "account"):
         if isinstance(metadata.get(section), dict):
             for k, v in metadata.pop(section).items():
@@ -110,7 +112,6 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
 
     tenant = registry.tenants.by_api_key(api_key)
     if not tenant:
-        # optional legacy fallback — only when explicitly configured
         legacy = settings.LEGACY_SECRET
         if legacy:
             tenant = {"tenant_id": "legacy", "name": "Legacy", "hmac_secret": legacy}
@@ -124,6 +125,12 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
         registry.audit.log(tenant["tenant_id"], tenant["name"], "authentication.failure",
                            "wallet_webhook", None, request_id, {"reason": "invalid_signature"})
         raise HTTPException(401, "invalid_signature")
+
+    # Suspended/deleted tenants are hard-blocked at ingestion time.
+    if tenant.get("status") != "active":
+        registry.audit.log(tenant["tenant_id"], tenant["name"], "transaction.rejected",
+                           "wallet_webhook", None, request_id, {"reason": "tenant_suspended"})
+        raise HTTPException(403, "tenant_suspended")
 
     try:
         body = json.loads(raw)
@@ -141,6 +148,10 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
         return {"tx_id": result["tx_id"], "decision": result["decision"],
                 "risk_score": result["risk_score"], "duplicate": True}
 
+    review_message = None
+    if result["decision"] == "review":
+        review_message = tenant.get("review_message") or DEFAULT_REVIEW_MESSAGE
+
     return {
         "tx_id": result["tx_id"],
         "decision": result["decision"],
@@ -154,6 +165,7 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
         "alert_id": (result.get("alert") or {}).get("alert_id"),
         "case_id": (result.get("case") or {}).get("case_id"),
         "latency_ms": result["latency_ms"],
+        "review_message": review_message,
     }
 
 

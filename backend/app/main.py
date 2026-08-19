@@ -63,12 +63,26 @@ app.add_middleware(
 app.include_router(v1_router, prefix="/api/v1")
 app.mount("/metrics", make_asgi_app())
 
-PORTALS_DIR = Path(__file__).resolve().parents[1] / "portals"
+def _find_portals_dir():
+    base = Path(__file__).resolve()
+    for level in (2, 1):
+        cand = base.parents[level] / "portals"
+        if cand.exists():
+            return cand
+    return None
+
+
+PORTALS_DIR = _find_portals_dir()
 if PORTALS_DIR.exists():
     for portal in ("admin", "merchant", "investigator"):
         p = PORTALS_DIR / portal
         if p.exists():
             app.mount(f"/{portal}", StaticFiles(directory=str(p), html=True), name=portal)
+
+
+_FONTS_DIR = Path(__file__).resolve().parent / "assets" / "fonts"
+if _FONTS_DIR.exists():
+    app.mount("/fonts", StaticFiles(directory=str(_FONTS_DIR)), name="fonts")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -79,10 +93,10 @@ async def home():
 <style>
 body{font-family:system-ui,sans-serif;background:#0F172A;color:#F1F5F9;min-height:100vh;
 display:flex;align-items:center;justify-content:center;margin:0}
-.hero{max-width:640px;padding:40px;text-align:center}
+.hero{max-width:680px;padding:40px;text-align:center}
 h1{font-size:2.4rem;background:linear-gradient(90deg,#3B82F6,#06B6D4);
 -webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:12px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-top:28px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:28px}
 a{background:#1E293B;border:1px solid #334155;padding:20px;border-radius:12px;
 text-decoration:none;color:#F1F5F9;display:block;transition:.15s}
 a:hover{border-color:#06B6D4;transform:translateY(-2px)}
@@ -92,11 +106,11 @@ a:hover{border-color:#06B6D4;transform:translateY(-2px)}
 </style></head><body>
 <div class="hero">
 <h1>🛡️ AEGIS Platform</h1>
-<p style="color:#94A3B8;font-size:15px">نظام كشف الاحتيال المالي متعدد المستأجرين</p>
+<p style="color:#94A3B8;font-size:15px">منصة كشف الاحتيال المالي متعددة المؤسسات</p>
 <div class="grid">
-  <a href="/admin/"><div class="icon">👑</div><div class="label">بوابة المالك</div><div class="sub">إدارة العملاء والمفاتيح</div></a>
-  <a href="/merchant/"><div class="icon">🏦</div><div class="label">بوابة المؤسسة</div><div class="sub">للبنوك/المحافظ المرتبطة</div></a>
-  <a href="/investigator/"><div class="icon">🛡️</div><div class="label">لوحة التحقيقات</div><div class="sub">مراقبة القرارات الحيّة</div></a>
+  <a href="/admin/"><div class="icon">👑</div><div class="label">بوابة مالك المنصة</div><div class="sub">إدارة المؤسسات والمفاتيح والحدود</div></a>
+  <a href="/merchant/"><div class="icon">🏦</div><div class="label">بوابة المؤسسة</div><div class="sub">للبنوك/المحافظ — لوحة، محققون، تقارير</div></a>
+  <a href="/investigator/"><div class="icon">🛡️</div><div class="label">لوحة المحقق</div><div class="sub">مراجعة التنبيهات والحالات الحيّة</div></a>
   <a href="/docs"><div class="icon">📘</div><div class="label">API Docs</div><div class="sub">Swagger UI</div></a>
 </div>
 </div>
@@ -146,7 +160,7 @@ async def stream(request: Request, owner: str = Depends(require_owner)):
 @app.get("/api/v1/investigator/stream")
 async def investigator_stream(request: Request,
                               inv: dict = Depends(require_investigator)):
-    """SSE stream of live risk events — authenticated investigators only."""
+    """SSE stream of live risk events — authenticated, tenant-scoped investigators only."""
     registry = request.app.state.registry
     return StreamingResponse(_sse_gen(request, registry),
                              media_type="text/event-stream")

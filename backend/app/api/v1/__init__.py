@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from . import (transactions, alerts, cases, rules, models, graph, health, auth,
-               tenants, webhook, investigator)
+               tenants, webhook, investigator, reports)
 
 router = APIRouter()
 router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -14,3 +14,4 @@ router.include_router(health.router, tags=["system"])
 router.include_router(tenants.router, tags=["tenants"])
 router.include_router(webhook.router, tags=["webhook"])
 router.include_router(investigator.router, prefix="/investigator", tags=["investigator"])
+router.include_router(reports.router, prefix="/reports", tags=["reports"])
