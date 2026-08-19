@@ -12,6 +12,7 @@ no(){ echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
 post(){ curl -s -m15 -o /tmp/r.json -w '%{http_code}' -X POST "$BASE$1" -H 'Content-Type: application/json' ${3:+-H "$3"} -d "$2"; }
 put(){ curl -s -m15 -o /tmp/r.json -w '%{http_code}' -X PUT "$BASE$1" -H 'Content-Type: application/json' -H "$OH" -d "$2"; }
 get(){ curl -s -m15 -o /tmp/r.json -w '%{http_code}' "$BASE$1" ${2:+-H "$2"}; }
+alist(){ python3 -c "import json;d=json.load(open('/tmp/r.json'));items=d if isinstance(d,list) else d.get('alerts',[]) or d.get('queue',[]);print(items[0]['alert_id'] if items else '')" 2>/dev/null; }
 jget(){ python3 -c "import sys,json;
 try:
  d=json.load(open('/tmp/r.json'))
@@ -81,12 +82,12 @@ c=$(send_tx "$API_B" "$SEC_B" /tmp/tx_b.json); D=$(jget decision)
 
 # 15 isolation queue
 c=$(get /api/v1/investigator/queue "Authorization: Bearer $TOK_A1")
-LEAK=$(python3 -c "import json;d=json.load(open('/tmp/r.json'));print(sum(1 for x in d if 'e2e-b-review' in json.dumps(x)))" 2>/dev/null)
+LEAK=$(python3 -c "import json;d=json.load(open('/tmp/r.json'));print(1 if 'e2e-b-review' in json.dumps(d) else 0)" 2>/dev/null)
 [ "$LEAK" = "0" ] && ok "15 no cross-tenant leak in queue" || no "15 leak $LEAK"
 
 # 16 review workflow on A's review alert (open->assign->note->resolve)
 c=$(get /api/v1/investigator/alerts "Authorization: Bearer $TOK_A1")
-AL=$(python3 -c "import json;d=json.load(open('/tmp/r.json'));print(d[0]['alert_id'] if d else '')" 2>/dev/null)
+AL=$(alist)
 c=$(post /api/v1/investigator/alerts/$AL/assign '{}' "Authorization: Bearer $TOK_A1")
 [ "$c" = "200" ] && ok "16a assign" || no "16a assign $c"
 c=$(post /api/v1/investigator/alerts/$AL/notes '{"text":"ملاحظة عربية للمراجعة"}' "Authorization: Bearer $TOK_A1")
@@ -95,7 +96,7 @@ c=$(post /api/v1/investigator/alerts/$AL/resolve '{"resolution":"resolved_true_p
 [ "$c" = "200" ] && ok "16c resolve" || no "16c resolve $c"
 
 # 17 IDOR: A1 accessing B alert must be 404 (list B alerts as owner first)
-B_AL=$(curl -s -m15 -H "$OH" "$BASE/api/v1/admin/tenants/$TID_B/alerts" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d[0]['alert_id'] if d else '')" 2>/dev/null)
+B_AL=$(curl -s -m15 -H "$OH" "$BASE/api/v1/admin/tenants/$TID_B/alerts" | python3 -c "import sys,json;d=json.load(sys.stdin);items=d if isinstance(d,list) else d.get('alerts',[]);print(items[0]['alert_id'] if items else '')" 2>/dev/null)
 c=$(get /api/v1/investigator/alerts/$B_AL "Authorization: Bearer $TOK_A1")
 [ "$c" = "404" ] && ok "17 IDOR blocked 404" || no "17 IDOR $c"
 
@@ -107,7 +108,7 @@ c=$(get /api/v1/admin/merchant/dashboard "Authorization: Bearer $TOK_O")
 TD=$(python3 -c "import json;d=json.load(open('/tmp/r.json'));print(d.get('tenant_id',''))" 2>/dev/null)
 [ "$c" = "200" ] && [ "$TD" = "$TID_A" ] && ok "18b dashboard scoped to A" || no "18b dash $c/$TD"
 c=$(get /api/v1/admin/merchant/manual-reviews "Authorization: Bearer $TOK_O")
-MAN=$(python3 -c "import json;d=json.load(open('/tmp/r.json'));print(len(d) if isinstance(d,list) else 0)" 2>/dev/null)
+MAN=$(python3 -c "import json;d=json.load(open('/tmp/r.json'));print(len(d if isinstance(d,list) else d.get('events',[]) or d.get('logs',[]) or []))" 2>/dev/null)
 [ "$c" = "200" ] && ok "18c manual-reviews ok ($MAN items)" || no "18c manual $c"
 
 # 19 reports: JSON + real PDF
@@ -133,7 +134,7 @@ c=$(send_tx "$API_A" "$SEC_A" /tmp/tx_allow.json)
 
 # 21 audit log non-empty + alert in tenant A alerts
 c=$(get "/api/v1/admin/audit?limit=200" "$OH")
-N=$(python3 -c "import json;d=json.load(open('/tmp/r.json'));print(len(d) if isinstance(d,list) else 0)" 2>/dev/null)
+N=$(python3 -c "import json;d=json.load(open('/tmp/r.json'));print(len(d if isinstance(d,list) else d.get('events',[]) or d.get('logs',[]) or []))" 2>/dev/null)
 [ "$N" != "0" ] && ok "21 audit log $N events" || no "21 audit $c"
 
 echo "══════════════════════════════"
