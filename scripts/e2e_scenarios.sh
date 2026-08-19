@@ -76,8 +76,13 @@ c=$(post /api/v1/investigator/alerts/$AL/notes '{"text":"review note"}' "Authori
 c=$(post /api/v1/investigator/alerts/$AL/resolve '{"resolution":"resolved_true_positive","note":"confirmed"}' "Authorization: Bearer $TOK_A1")
 [ "$c" = "200" ] && ok "16c resolve" || no "16c $c"
 B_AL=$(curl -s -m15 -H "$OH" "$BASE/api/v1/admin/tenants/$TID_B/alerts" | python3 -c "import sys,json;d=json.load(sys.stdin);items=d if isinstance(d,list) else d.get('alerts',[]);print(items[0]['alert_id'] if items else '')" 2>/dev/null)
+echo '{"transaction":{"tx_id":"tx-b-idor","amount":6100,"currency":"SAR","sender_account_id":"sb3","beneficiary_account_id":"bb3","device":{"device_id":"db3"}},"context":{"account_age_days":2,"impossible_travel":true}}' > /tmp/t5.json
+send_tx "$API_B" "$SEC_B" /tmp/t5.json >/dev/null
+B_AL=$(curl -s -m15 -H "$OH" "$BASE/api/v1/admin/tenants/$TID_B/alerts" | python3 -c "import sys,json;d=json.load(sys.stdin);items=d if isinstance(d,list) else d.get('alerts',[]);print(items[0]['alert_id'] if items else '')" 2>/dev/null)
+if [ -z "$B_AL" ]; then no "17 no B alert created"; else
 c=$(curl -s -L -m15 -o /tmp/r.json -w '%{http_code}' -H "Authorization: Bearer $TOK_A1" "$BASE/api/v1/investigator/alerts/$B_AL")
-[ "$c" = "404" ] && ok "17 IDOR blocked (404 after redirect)" || no "17 IDOR $c"
+[ "$c" = "404" ] && ok "17 IDOR blocked (404)" || no "17 IDOR $c ($B_AL)"
+fi
 c=$(post /api/v1/auth/institution/login "{\"email\":\"owner$TS@a.test\",\"password\":\"OwnerPass!2026\"}")
 TOK_O=$(jget access_token)
 [ "$c" = "200" ] && [ -n "$TOK_O" ] && ok "18a owner login" || no "18a owner $c"
