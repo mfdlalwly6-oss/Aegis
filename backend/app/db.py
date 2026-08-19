@@ -222,11 +222,6 @@ _MIGRATIONS: list[tuple[str, list[str]]] = [
         "ALTER TABLE tenants ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Asia/Aden'",
         "ALTER TABLE tenants ADD COLUMN review_message TEXT",
     ]),
-    ("004_legacy_column_backfill", [
-        "ALTER TABLE rules ADD COLUMN tenant_id TEXT",
-        "ALTER TABLE webhooks_seen ADD COLUMN tenant_id TEXT",
-        "ALTER TABLE webhooks_seen ADD COLUMN tx_id TEXT",
-    ]),
 ]
 
 
