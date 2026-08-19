@@ -234,13 +234,23 @@ def _apply_statements(conn: "sqlite3.Connection", statements: list[str]) -> None
     """Apply DDL defensively — ALTER ADD COLUMN is skipped when the column exists,
     so re-runs and pre-existing schemas never break (forward-only, idempotent)."""
     for sql in statements:
-        if sql.startswith("ALTER TABLE") and "ADD COLUMN" in sql:
-            parts = sql.split()
-            table, col = parts[2], parts[4]
-            cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+        stmt = sql.strip()
+        if stmt.upper().startswith("ALTER TABLE") and "ADD COLUMN" in stmt.upper():
+            tokens = stmt.split()
+            try:
+                table, col = tokens[2], tokens[5]
+            except IndexError:
+                conn.execute(sql)
+                continue
+            cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
             if col in cols:
                 continue
-        conn.execute(sql)
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" in str(exc):
+                continue  # legacy DB that already carries the column — safe skip
+            raise
 
 
 class Database:
