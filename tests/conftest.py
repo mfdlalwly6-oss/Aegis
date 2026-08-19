@@ -1,55 +1,50 @@
-"""Shared test fixtures — isolated SQLite per test, real FastAPI TestClient.
-Clears app.* modules between tests so each test gets fresh settings from env.
-"""
-from __future__ import annotations
-
+"""Shared pytest fixtures — fresh ephemeral DB per session, owner token preset."""
+import os
 import sys
-from pathlib import Path
+import tempfile
+
+_DATA = tempfile.mkdtemp(prefix="aegis-test-")
+os.environ["AEGIS_ENV"] = "test"
+os.environ["AEGIS_DATA_DIR"] = _DATA
+os.environ["AEGIS_DB_PATH"] = os.path.join(_DATA, "aegis.db")
+os.environ["AEGIS_SECRET_KEY"] = "test-secret-key-0123456789abcdef"
+os.environ["AEGIS_OWNER_TOKEN"] = "test-owner-token"
+os.environ["AEGIS_PUBLIC_URL"] = "http://localhost:8000"
+os.environ["AEGIS_INVESTIGATOR_EMAIL"] = ""
+os.environ["AEGIS_INVESTIGATOR_PASSWORD"] = ""
+os.environ["AEGIS_INVESTIGATOR_NAME"] = ""
+
+for m in list(sys.modules):
+    if m.startswith("app"):
+        del sys.modules[m]
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import pytest
 from fastapi.testclient import TestClient
 
-ROOT = Path(__file__).resolve().parents[1]
+OWNER_HEADERS = {"X-Owner-Token": "test-owner-token"}
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("AEGIS_ENV", "development")
-    monkeypatch.setenv("AEGIS_OWNER_TOKEN", "test-owner-token-2026")
-    monkeypatch.setenv("AEGIS_SECRET_KEY", "test-secret-key-that-is-long-enough-for-hs256")
-    monkeypatch.setenv("AEGIS_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("AEGIS_DB_PATH", str(tmp_path / "aegis-test.db"))
-    monkeypatch.setenv("AEGIS_PUBLIC_URL", "http://testserver")
-    monkeypatch.setenv("AEGIS_LEGACY_SECRET", "")
-    monkeypatch.setenv("OPENROUTER_KEYS", "")
-    monkeypatch.setenv("AI_ENABLED", "false")
-
-    # Remove cached app modules so settings reload from the new env vars
-    for name in [k for k in sys.modules if k.startswith("app.") or k == "app"]:
-        del sys.modules[name]
-
+def client():
     from app.main import app
-
     with TestClient(app) as c:
-        c.owner_headers = {"X-Owner-Token": "test-owner-token-2026"}
         yield c
 
 
-def create_tenant(client, name="Test Wallet"):
-    r = client.post("/api/v1/admin/tenants", headers=client.owner_headers,
-                    json={"name": name, "type": "wallet", "country": "YE"})
+def create_tenant(client, **kw):
+    body = {
+        "name": kw.get("name", "Test Tenant"),
+        "type": kw.get("type", "wallet"),
+        "country": kw.get("country", "YE"),
+        "plan": kw.get("plan", "sandbox"),
+        "investigator_limit": kw.get("investigator_limit", 5),
+        "timezone": kw.get("timezone", "Asia/Aden"),
+        "owner_email": kw.get("owner_email"),
+        "owner_password": kw.get("owner_password"),
+        "owner_name": kw.get("owner_name"),
+    }
+    body = {k: v for k, v in body.items() if v is not None}
+    r = client.post("/api/v1/admin/tenants", json=body, headers=OWNER_HEADERS)
     assert r.status_code == 201, r.text
     return r.json()
-
-
-def sign(secret: str, payload: dict) -> tuple[str, bytes]:
-    import hashlib, hmac, json
-    body = json.dumps(payload, separators=(",", ":")).encode()
-    return hmac.new(secret.encode(), body, hashlib.sha256).hexdigest(), body
-
-
-def merchant_token(client, tenant):
-    r = client.post("/api/v1/admin/merchant/login",
-                    json={"api_key": tenant["api_key"], "api_secret": tenant["hmac_secret"]})
-    assert r.status_code == 200, r.text
-    return r.json()["merchant_token"]
