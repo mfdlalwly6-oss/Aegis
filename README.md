@@ -125,7 +125,7 @@ PYTHONPATH=backend python -m pytest tests -q
 ## 14) النسخ الاحتياطي والاستعادة
 
 - قاعدة SQLite: `sqlite3 /data/aegis.db ".backup '/data/aegis-$(date +%F).db'"`.
-- النسخ الكامل: `tar --exclude='.env' --exclude='.git' -czf aegis-backup.tgz -C /home/zr0/Aegis .`
+- النسخ الكامل: `tar --exclude='.env' --exclude='.git' -czf aegis-backup.tgz -C "$(pwd)" .`
 - الاستعادة: فك الضغط في مكان المشروع ثم `docker compose up -d` (الهجرات تُطبق تلقائيًا للأمام).
 
 ## 15) بنية المستودع
