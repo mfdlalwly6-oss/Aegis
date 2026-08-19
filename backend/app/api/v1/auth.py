@@ -3,7 +3,7 @@ import hashlib
 import hmac
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from jose import jwt
 from pydantic import BaseModel, Field
 
