@@ -2,7 +2,7 @@
 # AEGIS E2E v3 — aligned to the LIVE deployed routes and decision bands
 # (decisions: allow | challenge | review | block | error)
 set +e
-cd /home/zr0/Aegis
+cd "$(dirname "$0")/.."
 BASE=http://localhost:8000
 TS=$(date +%s)
 OWNER=$(grep -E '^AEGIS_OWNER_TOKEN=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"' | tr -d ' ')

@@ -109,7 +109,7 @@ set +e
 echo "== E2E CLEANUP =="
 python3 - <<'PY'
 import json,re,urllib.request
-src=open('/home/zr0/Aegis/.env').read()
+src=open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env')).read()
 m=re.search(r'AEGIS_OWNER_TOKEN\s*=\s*["\']?([^\s"\']+)',src)
 tok=m.group(1); base='http://localhost:8000/api/v1/admin/tenants'
 def call(path,method='GET'):

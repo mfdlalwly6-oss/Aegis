@@ -146,3 +146,15 @@ tests/          # pytest suite
 ---
 
 **ملاحظة أمنية**: لا ترفع `.env` أو الأسرار إلى Git/ZIP أبدًا. استخدم `.env.example` فقط، وبدّل `AEGIS_SECRET_KEY` و`AEGIS_OWNER_TOKEN` بقيم عشوائية في الإنتاج.
+
+## Dev & testing (portable)
+
+```bash
+cp .env.example .env          # then edit secrets (SECRET_KEY, OWNER_TOKEN)
+docker compose build          # requires Docker + Docker Hub access
+docker compose up -d          # http://localhost:8000
+# Tests: install dev deps where you run pytest
+pip install -r backend/requirements-dev.txt
+pytest                          # from repo root (pythonpath=backend)
+bash scripts/e2e_local.sh       # full E2E (self-cleaning)
+```

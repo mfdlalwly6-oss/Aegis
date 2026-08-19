@@ -3,6 +3,7 @@ Arabic text is reshaped (arabic_reshaper + python-bidi) and rendered with
 Amiri font (bundled) with DejaVuSans fallback for Latin.
 """
 from __future__ import annotations
+from pathlib import Path
 
 import io
 from datetime import datetime, timezone
@@ -23,16 +24,16 @@ _FONT_CANDIDATES = [
         "/app/backend/app/assets/fonts/Amiri-Regular.ttf",
         "backend/app/assets/fonts/Amiri-Regular.ttf",
         "app/assets/fonts/Amiri-Regular.ttf",
-        "/home/user/aegis-work/remote/backend/app/assets/fonts/Amiri-Regular.ttf",
-        "/home/zr0/Aegis/backend/app/assets/fonts/Amiri-Regular.ttf",
+        str(Path(__file__).resolve().parents[2] / "backend" / "app" / "assets" / "fonts" / "Amiri-Regular.ttf"),
+        str(Path(__file__).resolve().parents[2] / "backend" / "app" / "assets" / "fonts" / "Amiri-Regular.ttf"),
     ],
     "Amiri-Bold", [
         "/app/app/assets/fonts/Amiri-Bold.ttf",
         "/app/backend/app/assets/fonts/Amiri-Bold.ttf",
         "backend/app/assets/fonts/Amiri-Bold.ttf",
         "app/assets/fonts/Amiri-Bold.ttf",
-        "/home/user/aegis-work/remote/backend/app/assets/fonts/Amiri-Bold.ttf",
-        "/home/zr0/Aegis/backend/app/assets/fonts/Amiri-Bold.ttf",
+        str(Path(__file__).resolve().parents[2] / "backend" / "app" / "assets" / "fonts" / "Amiri-Bold.ttf"),
+        str(Path(__file__).resolve().parents[2] / "backend" / "app" / "assets" / "fonts" / "Amiri-Bold.ttf"),
     ],
     "DejaVuSans", [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
