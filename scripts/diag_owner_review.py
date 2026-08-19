@@ -2,8 +2,8 @@
 import hashlib, hmac, json, time
 import httpx
 
-BASE = "http://127.0.0.1:8000"
-OWNER = "dev-owner-token-2026"
+BASE = "http://localhost:8000"
+OWNER = "flLPeQtZ68SfzY3ofo_3PLoZpa0-iKn0kmCc4f4ceUz6E61KAxwD5C7m0gcor68N"
 OH = {"X-Owner-Token": OWNER}
 c = httpx.Client(base_url=BASE, timeout=30)
 ts = int(time.time())

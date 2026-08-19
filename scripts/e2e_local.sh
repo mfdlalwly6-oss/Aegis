@@ -105,3 +105,24 @@ c=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/docs"); [ "$c" = "200" ] && ok
 echo "══════════════════════════════"
 echo "E2E LOCAL RESULT: PASS=$PASS FAIL=$FAIL"
 exit 0
+set +e
+echo "== E2E CLEANUP =="
+python3 - <<'PY'
+import json,re,urllib.request
+src=open('/home/zr0/Aegis/.env').read()
+m=re.search(r'AEGIS_OWNER_TOKEN\s*=\s*["\']?([^\s"\']+)',src)
+tok=m.group(1); base='http://localhost:8000/api/v1/admin/tenants'
+def call(path,method='GET'):
+    r=urllib.request.Request(base+path,method=method,headers={'Authorization':'Bearer '+tok})
+    try:
+        with urllib.request.urlopen(r,timeout=20) as resp: return resp.status
+    except Exception as e: return getattr(e,'code',500)
+r=urllib.request.Request(base,headers={'Authorization':'Bearer '+tok})
+d=json.load(urllib.request.urlopen(r,timeout=20))
+ts=d.get('tenants',d) if isinstance(d,dict) else d
+ts=ts if isinstance(ts,list) else ts.get('items',[])
+pat=re.compile(r'^(Bank A|Wallet B) \d+$')
+kills=[t['tenant_id'] for t in ts if pat.match(t.get('name','') or '')]
+for tid in kills: call('/'+tid,'DELETE')
+print('E2E cleanup deleted:',len(kills))
+PY
