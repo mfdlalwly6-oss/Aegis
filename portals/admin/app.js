@@ -20,6 +20,8 @@ const state = {
   modelsStatus: null,
   graphStats: null,
   graphInsights: null,
+  tenantInvs: null,
+  tenantInvsFor: null,
 };
 
 const $ = s => document.querySelector(s);
@@ -138,6 +140,12 @@ async function loadSettings() {
 async function loadInvestigators() {
   try { const r = await api("/investigators"); state.investigators = r.investigators || []; }
   catch { state.investigators = []; }
+}
+
+async function loadTenantInvestigators(tid) {
+  const r = await api("/tenants/" + tid + "/investigators");
+  state.tenantInvs = r;
+  state.tenantInvsFor = tid;
 }
 
 async function loadRules() {
@@ -274,14 +282,26 @@ function renderTenants() {
       el("td", {}, t.type === "wallet" ? "💳 محفظة" : t.type === "bank" ? "🏦 بنك" : t.type === "payment" ? "💰 دفع" : t.type),
       el("td", {}, t.country || "-"),
       el("td", {}, t.plan === "production" ? "🚀 Production" : "🧪 Sandbox"),
-      el("td", {}, el("span", { class: "badge allow" }, t.status || "active")),
+      el("td", {}, el("span", { class: "badge " + (t.status === "active" ? "allow" : "block") }, t.status || "active"),
+        el("div", { style: "font-size:10.5px;color:var(--muted);margin-top:2px" }, "محققون: " + (t.investigators_used ?? 0) + "/" + (t.investigator_limit ?? 5))),
       el("td", {},
-        el("button", { class: "btn", style: "padding:5px 10px;font-size:11px;margin-left:4px",
-          onclick: async () => { try { await loadTenantDetail(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } }
-        }, "🔌 عرض المفاتيح"),
-        el("button", { class: "btn danger", style: "padding:5px 10px;font-size:11px",
-          onclick: () => deleteTenant(t.tenant_id)
-        }, "🗑️")),
+        el("div", { style: "display:flex;gap:4px;flex-wrap:wrap" },
+          el("button", { class: "btn", style: "padding:5px 8px;font-size:11px",
+            onclick: async () => { try { await loadTenantDetail(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } }
+          }, "🔌 مفاتيح"),
+          t.status === "active"
+            ? el("button", { class: "btn sm danger", style: "padding:5px 8px;font-size:11px",
+                onclick: async () => { try { await api("/tenants/" + t.tenant_id + "/suspend", { method: "POST", body: {} }); toast("أُوقفت المؤسسة", "success"); await loadTenants(); render(); } catch (e) { toast(e.message, "error"); } }
+              }, "⏸ إيقاف")
+            : el("button", { class: "btn sm success", style: "padding:5px 8px;font-size:11px",
+                onclick: async () => { try { await api("/tenants/" + t.tenant_id + "/activate", { method: "POST", body: {} }); toast("نُشطت المؤسسة", "success"); await loadTenants(); render(); } catch (e) { toast(e.message, "error"); } }
+              }, "▶ تنشيط"),
+          el("button", { class: "btn", style: "padding:5px 8px;font-size:11px",
+            onclick: async () => { try { await loadTenantInvestigators(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } }
+          }, "👥 محققون"),
+          el("button", { class: "btn danger", style: "padding:5px 8px;font-size:11px",
+            onclick: () => deleteTenant(t.tenant_id)
+          }, "🗑️"))),
     ));
   });
 
@@ -300,6 +320,9 @@ function renderTenants() {
   // Selected tenant details
   if (state.selectedTenant) box.appendChild(renderTenantDetail());
 
+  // Tenant investigators panel
+  if (state.tenantInvs && state.tenantInvsFor) box.appendChild(renderTenantInvestigators());
+
   return box;
 }
 
@@ -317,6 +340,8 @@ function renderAddTenantForm() {
   );
   const emailI = el("input", { class: "form-control", type: "email", placeholder: "api@bank.example (اختياري)" });
   const phoneI = el("input", { class: "form-control", placeholder: "+967 77 123 4567 (اختياري)" });
+  const limitI = el("input", { class: "form-control", type: "number", value: "5", min: "0", max: "500" });
+  const tzI = el("input", { class: "form-control", value: "Asia/Aden", dir: "ltr" });
   const err = el("div", { style: "color:#FCA5A5;font-size:13px;margin-top:8px" });
 
   const btn = el("button", { class: "btn primary", style: "padding:12px 24px;font-size:14px" }, "✨ إنشاء + توليد المفاتيح");
@@ -333,6 +358,8 @@ function renderAddTenantForm() {
           plan: planI.value,
           contact_email: emailI.value.trim() || null,
           contact_phone: phoneI.value.trim() || null,
+          investigator_limit: Math.max(0, parseInt(limitI.value, 10) || 5),
+          timezone: tzI.value.trim() || "Asia/Aden",
         }});
         state.lastCreated = r;
         state.showAddForm = false;
@@ -352,6 +379,8 @@ function renderAddTenantForm() {
       el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "🎯 الخطة"), planI),
       el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "📧 بريد التواصل"), emailI),
       el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "📱 هاتف التواصل"), phoneI),
+      el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "👥 حد المحققين (الافتراضي 5)"), limitI),
+      el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "🌐 المنطقة الزمنية"), tzI),
     ),
     err,
     el("div", { style: "margin-top:14px;display:flex;gap:8px" }, btn),
@@ -446,6 +475,39 @@ const { decision, risk_score, reasoning_ar } = await r.json();`
       ),
     ),
   );
+}
+
+function renderTenantInvestigators() {
+  const tid = state.tenantInvsFor;
+  const data = state.tenantInvs || {};
+  const invs = data.investigators || [];
+  const limit = data.limit ?? 5, used = data.used ?? 0;
+  const nm = el("input", { class: "form-control", placeholder: "اسم المحقق" });
+  const em = el("input", { class: "form-control", type: "email", placeholder: "investigator@bank.com", dir: "ltr" });
+  const pw = el("input", { class: "form-control", type: "password", placeholder: "كلمة المرور (8+)" });
+  const rows = invs.map(v => el("tr", {},
+    el("td", { style: "font-size:12px" }, v.name),
+    el("td", { style: "font-size:12px" }, v.email),
+    el("td", {}, el("span", { class: "badge " + (v.status === "active" ? "allow" : "block") }, v.status === "active" ? "نشط" : v.status)),
+    el("td", { style: "font-size:11px" }, dt(v.created_at)),
+    el("td", { style: "font-size:11px" }, v.last_login_at ? dt(v.last_login_at) : "لم يدخل"),
+    el("td", {}, el("code", { style: "font-size:10.5px" }, tid)),
+    el("td", {}, el("div", { style: "display:flex;gap:4px;flex-wrap:wrap" },
+      v.status === "active" ? el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("إيقاف المحقق؟")) return; try { await api("/tenants/" + tid + "/investigators/" + v.investigator_id + "/suspend", { method: "POST", body: {} }); toast("أُوقف", "success"); await loadTenantInvestigators(tid); render(); } catch (e) { toast(e.message, "error"); } } }, "⏸ إيقاف")
+        : el("button", { class: "btn sm success", onclick: async () => { try { await api("/tenants/" + tid + "/investigators/" + v.investigator_id + "/activate", { method: "POST", body: {} }); toast("نُشط", "success"); await loadTenantInvestigators(tid); render(); } catch (e) { toast(e.message, "error"); } } }, "▶ تنشيط"),
+      el("button", { class: "btn sm", onclick: async () => { const np = prompt("كلمة المرور الجديدة (8+ أحرف)"); if (!np || np.length < 8) return; try { await api("/tenants/" + tid + "/investigators/" + v.investigator_id + "/reset-password", { method: "POST", body: { password: np } }); toast("تم تغيير كلمة المرور", "success"); } catch (e) { toast(e.message, "error"); } } }, "🔑"),
+      el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("حذف المحقق؟")) return; try { await api("/tenants/" + tid + "/investigators/" + v.investigator_id, { method: "DELETE" }); toast("حُذف", "success"); await loadTenantInvestigators(tid); render(); } catch (e) { toast(e.message, "error"); } } }, "🗑"))));
+  return el("div", { class: "card", style: "border-color:var(--accent);border-width:2px" },
+    el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:12px" },
+      el("h3", {}, "👥 محققو المؤسسة (" + (used) + "/" + limit + ")"),
+      el("button", { class: "btn", onclick: () => { state.tenantInvs = null; state.tenantInvsFor = null; render(); } }, "✕")),
+    el("div", { style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:10px" }, nm, em, pw),
+    el("button", { class: "btn primary", style: "margin-bottom:14px", onclick: async () => {
+      if (!em.value.trim() || !nm.value.trim()) { toast("أدخل البريد والاسم", "error"); return; }
+      try { await api("/tenants/" + tid + "/investigators", { method: "POST", body: { email: em.value.trim(), name: nm.value.trim(), password: pw.value } }); toast("تم إنشاء المحقق", "success"); nm.value = em.value = pw.value = ""; await loadTenantInvestigators(tid); render(); } catch (e) { toast(e.message, "error"); }
+    } }, "➕ إضافة محقق"),
+    rows.length === 0 ? el("div", { style: "color:var(--muted);text-align:center;padding:24px" }, "لا يوجد محققون لهذه المؤسسة")
+    : el("table", {}, el("thead", {}, el("tr", {}, ["الاسم", "البريد", "الحالة", "أُنشئ", "آخر دخول", "المؤسسة", "إجراءات"].map(h => el("th", {}, h)))), el("tbody", {}, ...rows)));
 }
 
 async function deleteTenant(tid) {

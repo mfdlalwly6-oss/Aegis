@@ -235,13 +235,15 @@ def _apply_statements(conn: "sqlite3.Connection", statements: list[str]) -> None
             try:
                 table, col = tokens[2], tokens[5]
             except IndexError:
-                conn.execute(sql)
+                conn.executescript(sql)
                 continue
             cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
             if col in cols:
                 continue
         try:
-            conn.execute(sql)
+            # executescript: _SCHEMA is one string containing MANY statements
+            # (SQLite rejects multi-statement strings via execute()).
+            conn.executescript(sql)
         except sqlite3.OperationalError as exc:
             if "duplicate column name" in str(exc):
                 continue  # legacy DB that already carries the column — safe skip

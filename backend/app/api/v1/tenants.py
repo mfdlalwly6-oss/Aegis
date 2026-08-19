@@ -554,11 +554,15 @@ def merchant_cases(merchant=Depends(require_merchant), registry=Depends(get_regi
 @router.get("/admin/merchant/manual-reviews")
 def merchant_manual_reviews(merchant=Depends(require_merchant),
                             registry=Depends(get_registry)):
-    """Manually-processed transactions — reviewer identity, timings, resolution."""
+    """Manually-processed transactions — reviewer identity, actor_type (stored
+    EXPLICITLY in alert notes, never inferred from email), timings, resolution."""
+    import json as _json
     rows = registry.db.query(
         "SELECT a.alert_id, a.tenant_id, a.tx_id, a.severity, a.title, a.status, "
-        "a.assignee, a.created_at, a.updated_at, a.resolution, t.amount, t.currency "
+        "a.assignee, a.created_at, a.updated_at, a.resolution, a.notes_json, "
+        "t.amount, t.currency, d.decision "
         "FROM alerts a LEFT JOIN transactions t ON t.tx_id = a.tx_id "
+        "LEFT JOIN decisions d ON d.tx_id = a.tx_id "
         "WHERE a.tenant_id=? AND a.status LIKE 'resolved%' "
         "ORDER BY a.updated_at DESC LIMIT 200",
         (merchant["tenant_id"],))
@@ -569,9 +573,23 @@ def merchant_manual_reviews(merchant=Depends(require_merchant),
             r["review_duration_min"] = round(dur, 1)
         except Exception:
             r["review_duration_min"] = None
-        r["actor_type"] = "institution_owner" if r.get("assignee") and \
-            "@" not in (r.get("assignee") or "") else "investigator"
-        r["role"] = "investigator"
+        notes = []
+        try:
+            notes = _json.loads(r.pop("notes_json", "[]") or "[]")
+        except Exception:
+            notes = []
+        r["notes"] = notes
+        r["actor_type"] = "system"
+        r["decided_by"] = None
+        if notes:
+            last = notes[-1]
+            r["decided_by"] = last.get("author")
+            r["actor_type"] = last.get("actor_type") or "investigator"
+        else:
+            r["decided_by"] = r.get("assignee")
+            r["actor_type"] = "investigator" if r.get("assignee") else "system"
+        r["processed_at"] = r["updated_at"]
+        r["assigned_to"] = r.get("assignee")
     return rows
 
 
@@ -660,4 +678,94 @@ def merchant_reset_password(inv_id: str, body: ResetPassword, request: Request,
                        "investigator.password_reset", "investigator", inv_id,
                        getattr(request.state, "request_id", None),
                        {"actor_type": merchant.get("role")})
+    return {"ok": True, "investigator_id": inv_id}
+
+
+# ═══════════════════ MERCHANT: UNIFIED TRANSACTION FEED (backend filters + real counts) ═══════════════════
+
+@router.get("/admin/merchant/feed")
+def merchant_feed(filter: str = "all", limit: int = 300,
+                  merchant=Depends(require_merchant), registry=Depends(get_registry)):
+    """One endpoint for the transaction tabs. Filters are applied by the BACKEND;
+    counts are real numbers from the DB — never client-side hardcoded."""
+    import json as _json
+    valid = {"all", "pending", "manual", "auto_allow", "needs_review", "blocked", "live"}
+    if filter not in valid:
+        raise HTTPException(400, f"invalid_filter:{filter}")
+    rows = registry.db.query(
+        "SELECT d.decision_id, d.tx_id, d.ts AS decision_ts, d.decision,"
+        " d.risk_score, d.risk_band, d.typology, d.reasoning_ar, d.ai_model,"
+        " t.amount, t.currency, t.sender_account_id, t.beneficiary_account_id,"
+        " t.ts AS tx_ts, a.alert_id, a.status AS alert_status, a.assignee,"
+        " a.created_at AS alert_created_at, a.updated_at AS alert_updated_at,"
+        " a.resolution, a.notes_json"
+        " FROM decisions d JOIN transactions t ON t.tx_id = d.tx_id"
+        " LEFT JOIN alerts a ON a.tx_id = d.tx_id AND a.tenant_id = d.tenant_id"
+        " WHERE d.tenant_id=? ORDER BY d.ts DESC LIMIT ?",
+        (merchant["tenant_id"], limit))
+    for r in rows:
+        try:
+            r["notes"] = _json.loads(r.pop("notes_json", "[]") or "[]")
+        except Exception:
+            r["notes"] = []
+    pend = [r for r in rows if r["decision"] == "review"
+            and not (r["alert_status"] or "").startswith("resolved")]
+    manual = [r for r in rows if (r["alert_status"] or "").startswith("resolved")]
+    auto_allow = [r for r in rows if r["decision"] == "allow"]
+    needs_review = [r for r in rows if r["decision"] in ("review", "challenge")]
+    blocked = [r for r in rows if r["decision"] == "block"]
+    live = [r for r in rows if r["decision"] in ("review", "challenge")]
+    sets = {"all": rows, "pending": pend, "manual": manual,
+            "auto_allow": auto_allow, "needs_review": needs_review,
+            "blocked": blocked, "live": live}
+    return {"tenant_id": merchant["tenant_id"], "filter": filter,
+            "counts": {k: len(v) for k, v in sets.items()},
+            "transactions": sets[filter]}
+
+
+class OwnerReviewDecision(BaseModel):
+    decision: str = Field(pattern="^(allow|deny)$")
+    note: str = ""
+
+
+@router.post("/admin/merchant/reviews/{alert_id}/decision")
+def merchant_owner_review(alert_id: str, body: OwnerReviewDecision, request: Request,
+                          merchant=Depends(require_merchant), registry=Depends(get_registry)):
+    """Institution Owner manually processes a pending review — actor_type=institution_owner.
+    allow -> resolved_false_positive (not fraud), deny -> resolved_true_positive (fraud)."""
+    tid = merchant["tenant_id"]
+    alert = registry.db.query_one(
+        "SELECT * FROM alerts WHERE alert_id=? AND tenant_id=?", (alert_id, tid))
+    if not alert:
+        raise HTTPException(404, "alert_not_found")
+    actor = merchant.get("name") or merchant.get("sub", "institution_owner")
+    if not (alert["status"] or "open").startswith("resolved"):
+        new_status = ("resolved_true_positive" if body.decision == "deny"
+                      else "resolved_false_positive")
+        registry.alerts.resolve(alert_id, new_status, body.note,
+                                author=actor, actor_type="institution_owner")
+    registry.audit.log(tid, actor, "alert.owner_decision", "alert", alert_id,
+                       getattr(request.state, "request_id", None),
+                       {"decision": body.decision,
+                        "actor_type": merchant.get("role", "institution_owner"),
+                        "tx_id": alert["tx_id"]})
+    return {"ok": True, "alert_id": alert_id, "tx_id": alert["tx_id"],
+            "decision": body.decision, "actor": actor,
+            "actor_type": "institution_owner"}
+
+
+# ═══════════════════ OWNER: RESET INVESTIGATOR PASSWORD (was missing on owner path) ═══════════════════
+
+@router.post("/admin/tenants/{tenant_id}/investigators/{inv_id}/reset-password")
+def owner_reset_investigator_password(tenant_id: str, inv_id: str, body: ResetPassword,
+                                      request: Request, owner=Depends(require_owner),
+                                      registry=Depends(get_registry)):
+    if not registry.tenants.get(tenant_id):
+        raise HTTPException(404, "tenant_not_found")
+    if not registry.investigators.reset_password(tenant_id, inv_id, body.password):
+        raise HTTPException(404, "investigator_not_found")
+    registry.audit.log(tenant_id, "owner", "investigator.password_reset",
+                       "investigator", inv_id,
+                       getattr(request.state, "request_id", None),
+                       {"actor_type": "owner"})
     return {"ok": True, "investigator_id": inv_id}

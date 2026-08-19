@@ -1,35 +1,44 @@
-"""Shared pytest fixtures — fresh ephemeral DB per session, owner token preset."""
-import os
+"""Shared test fixtures — isolated SQLite per test, real FastAPI TestClient.
+Each test gets a fresh DB and a freshly imported app (settings reloaded from env).
+"""
+from __future__ import annotations
+
 import sys
-import tempfile
-
-_DATA = tempfile.mkdtemp(prefix="aegis-test-")
-os.environ["AEGIS_ENV"] = "development"
-os.environ["AEGIS_DATA_DIR"] = _DATA
-os.environ["AEGIS_DB_PATH"] = os.path.join(_DATA, "aegis.db")
-os.environ["AEGIS_SECRET_KEY"] = "test-secret-key-0123456789abcdef"
-os.environ["AEGIS_OWNER_TOKEN"] = "test-owner-token"
-os.environ["AEGIS_PUBLIC_URL"] = "http://localhost:8000"
-os.environ["AEGIS_INVESTIGATOR_EMAIL"] = ""
-os.environ["AEGIS_INVESTIGATOR_PASSWORD"] = ""
-os.environ["AEGIS_INVESTIGATOR_NAME"] = ""
-
-for m in list(sys.modules):
-    if m.startswith("app"):
-        del sys.modules[m]
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-OWNER_HEADERS = {"X-Owner-Token": "test-owner-token"}
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture()
-def client():
+def client(tmp_path, monkeypatch):
+    monkeypatch.setenv("AEGIS_ENV", "development")
+    monkeypatch.setenv("AEGIS_OWNER_TOKEN", "test-owner-token-2026")
+    monkeypatch.setenv("AEGIS_SECRET_KEY", "test-secret-key-that-is-long-enough-for-hs256")
+    monkeypatch.setenv("AEGIS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("AEGIS_DB_PATH", str(tmp_path / "aegis-test.db"))
+    monkeypatch.setenv("AEGIS_PUBLIC_URL", "http://testserver")
+    monkeypatch.setenv("AEGIS_LEGACY_SECRET", "")
+    monkeypatch.setenv("OPENROUTER_KEYS", "")
+    monkeypatch.setenv("AI_ENABLED", "false")
+    monkeypatch.setenv("AEGIS_INVESTIGATOR_EMAIL", "")
+    monkeypatch.setenv("AEGIS_INVESTIGATOR_PASSWORD", "")
+    monkeypatch.setenv("AEGIS_INVESTIGATOR_NAME", "")
+
+    # Remove cached app modules so settings reload from the new env vars per test
+    for name in [k for k in sys.modules if k.startswith("app.") or k == "app"]:
+        del sys.modules[name]
+
     from app.main import app
+
     with TestClient(app) as c:
+        c.owner_headers = {"X-Owner-Token": "test-owner-token-2026"}
         yield c
+
+
+OWNER_HEADERS = {"X-Owner-Token": "test-owner-token-2026"}
 
 
 def create_tenant(client, **kw):

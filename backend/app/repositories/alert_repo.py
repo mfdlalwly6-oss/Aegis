@@ -66,14 +66,17 @@ class AlertRepository:
         return self.get(alert_id)
 
     def resolve(self, alert_id: str, resolution: str, note: str = "",
-                author: str = "investigator") -> dict | None:
-        """Lifecycle terminal state: resolved_true_positive / resolved_false_positive."""
+                author: str = "investigator",
+                actor_type: str = "investigator") -> dict | None:
+        """Lifecycle terminal state: resolved_true_positive / resolved_false_positive.
+        actor_type is STORED EXPLICITLY in the note (never inferred from email)."""
         alert = self.get(alert_id)
         if not alert:
             return None
         notes = alert["notes"]
         if note:
-            notes.append({"author": author, "text": note, "at": utcnow()})
+            notes.append({"author": author, "actor_type": actor_type,
+                          "text": note, "at": utcnow()})
         self.db.execute(
             "UPDATE alerts SET status=?, resolution=?, notes_json=?, updated_at=? "
             "WHERE alert_id=?",
