@@ -222,6 +222,11 @@ _MIGRATIONS: list[tuple[str, list[str]]] = [
         "ALTER TABLE tenants ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Asia/Aden'",
         "ALTER TABLE tenants ADD COLUMN review_message TEXT",
     ]),
+    ("004_legacy_column_backfill", [
+        "ALTER TABLE rules ADD COLUMN tenant_id TEXT",
+        "ALTER TABLE webhooks_seen ADD COLUMN tenant_id TEXT",
+        "ALTER TABLE webhooks_seen ADD COLUMN tx_id TEXT",
+    ]),
 ]
 
 
@@ -264,17 +269,6 @@ class Database:
                 "CREATE TABLE IF NOT EXISTS schema_migrations "
                 "(name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
             )
-            # Defensive indexes — safe to run on every boot.
-            for idx in (
-                "CREATE INDEX IF NOT EXISTS idx_inv_tenant ON investigators(tenant_id, status)",
-                "CREATE INDEX IF NOT EXISTS idx_al_tenant ON alerts(tenant_id, status)",
-                "CREATE INDEX IF NOT EXISTS idx_case_tenant ON cases(tenant_id, status)",
-                "CREATE INDEX IF NOT EXISTS idx_dec_tenant ON decisions(tenant_id, ts)",
-                "CREATE INDEX IF NOT EXISTS idx_tx_tenant ON transactions(tenant_id, ts)",
-                "CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log(tenant_id, ts)",
-                "CREATE INDEX IF NOT EXISTS idx_rules_tenant ON rules(tenant_id)",
-            ):
-                conn.execute(idx)
             from datetime import datetime, timezone
             for name, statements in _MIGRATIONS:
                 applied = conn.execute(
@@ -289,6 +283,23 @@ class Database:
                 )
                 conn.commit()
                 print(f"MIGRATION_APPLIED {name}")
+
+            # Defensive indexes — AFTER migrations, each guarded so a legacy
+            # schema missing a column can never crash startup.
+            for idx in (
+                "CREATE INDEX IF NOT EXISTS idx_inv_tenant ON investigators(tenant_id, status)",
+                "CREATE INDEX IF NOT EXISTS idx_al_tenant ON alerts(tenant_id, status)",
+                "CREATE INDEX IF NOT EXISTS idx_case_tenant ON cases(tenant_id, status)",
+                "CREATE INDEX IF NOT EXISTS idx_dec_tenant ON decisions(tenant_id, ts)",
+                "CREATE INDEX IF NOT EXISTS idx_tx_tenant ON transactions(tenant_id, ts)",
+                "CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log(tenant_id, ts)",
+                "CREATE INDEX IF NOT EXISTS idx_rules_tenant ON rules(tenant_id)",
+            ):
+                try:
+                    conn.execute(idx)
+                except sqlite3.OperationalError:
+                    pass
+            conn.commit()
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
