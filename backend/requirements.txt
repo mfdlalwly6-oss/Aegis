@@ -1,0 +1,34 @@
+# AEGIS Backend — Production Requirements
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pydantic==2.9.2
+pydantic-settings==2.5.2
+email-validator==2.2.0
+python-multipart==0.0.12
+
+# Auth & security
+python-jose[cryptography]==3.3.0
+
+# Config & logging
+structlog==24.4.0
+pyyaml==6.0.2
+tenacity==9.0.0
+
+# HTTP client
+httpx==0.27.2
+
+# Observability
+prometheus-client==0.21.0
+
+# ML core
+numpy==1.26.4
+scikit-learn==1.5.2
+networkx==3.3
+joblib==1.4.2
+
+# Optional integrations (fail-safe if service not present)
+redis==5.1.1
+aiokafka==0.11.0
+reportlab>=4.0
+arabic-reshaper>=3.0
+python-bidi>=0.4
