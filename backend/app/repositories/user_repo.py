@@ -60,3 +60,20 @@ class UserRepository:
     def deactivate(self, user_id: str) -> bool:
         self.db.execute("UPDATE users SET status='inactive' WHERE user_id=?", (user_id,))
         return True
+
+
+if not hasattr(UserRepository, "authenticate_global"):
+    def authenticate_global(self, email, password):
+        import hashlib, hmac as _hm
+        from app.core.config import settings
+        salt = settings.SECRET_KEY.encode()[:16]
+        h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 100_000).hex()
+        user = self.db.query_one(
+            "SELECT * FROM users WHERE email=? AND status='active' ORDER BY created_at LIMIT 1",
+            (email.strip().lower(),))
+        if not user or not user.get("password_hash"):
+            return None
+        if not _hm.compare_digest(h, user["password_hash"]):
+            return None
+        return user
+    UserRepository.authenticate_global = authenticate_global

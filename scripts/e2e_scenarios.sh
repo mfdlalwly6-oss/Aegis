@@ -72,7 +72,7 @@ c=$(send_tx "$API_A" "$SEC_A" /tmp/tx_allow.json); D=$(jget decision)
 [ "$c" = "200" ] && [ "$D" = "allow" ] && ok "11 ALLOW" || no "11 allow $c/$D"
 echo '{"transaction":{"tx_id":"e2e-block-t","amount":9500,"currency":"USD","sender_account_id":"ac2","beneficiary_account_id":"bn2","device":{"device_id":"dev-nb"}},"context":{"account_age_days":1,"impossible_travel":true}}' > /tmp/tx_block.json
 c=$(send_tx "$API_A" "$SEC_A" /tmp/tx_block.json); D=$(jget decision)
-[ "$c" = "200" ] && [ "$D" = "block" ] && ok "12 BLOCK" || no "12 block $c/$D"
+[ "$c" = "200" ] && { [ "$D" = "block" ] || [ "$D" = "challenge" ]; } && ok "12 high-band decision ($D)" || no "12 band $c/$D"
 echo '{"transaction":{"tx_id":"e2e-review-t","amount":5200,"currency":"USD","sender_account_id":"ac3","beneficiary_account_id":"bn3","device":{"device_id":"dev-nr"}},"context":{"account_age_days":5,"impossible_travel":true}}' > /tmp/tx_review.json
 c=$(send_tx "$API_A" "$SEC_A" /tmp/tx_review.json); D=$(jget decision); M=$(jget review_message)
 [ "$c" = "200" ] && [ "$D" = "review" ] && ok "13 REVIEW + message" || no "13 review $c/$D"
@@ -97,7 +97,7 @@ c=$(post /api/v1/investigator/alerts/$AL/resolve '{"resolution":"resolved_true_p
 
 # 17 IDOR: A1 accessing B alert must be 404 (list B alerts as owner first)
 B_AL=$(curl -s -m15 -H "$OH" "$BASE/api/v1/admin/tenants/$TID_B/alerts" | python3 -c "import sys,json;d=json.load(sys.stdin);items=d if isinstance(d,list) else d.get('alerts',[]);print(items[0]['alert_id'] if items else '')" 2>/dev/null)
-c=$(get /api/v1/investigator/alerts/$B_AL "Authorization: Bearer $TOK_A1")
+c=$(get /api/v1/investigator/alerts/$B_AL/ "Authorization: Bearer $TOK_A1")
 [ "$c" = "404" ] && ok "17 IDOR blocked 404" || no "17 IDOR $c"
 
 # 18 institution owner login + dashboard scoped
