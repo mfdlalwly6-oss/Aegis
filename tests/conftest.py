@@ -4,7 +4,7 @@ import sys
 import tempfile
 
 _DATA = tempfile.mkdtemp(prefix="aegis-test-")
-os.environ["AEGIS_ENV"] = "test"
+os.environ["AEGIS_ENV"] = "development"
 os.environ["AEGIS_DATA_DIR"] = _DATA
 os.environ["AEGIS_DB_PATH"] = os.path.join(_DATA, "aegis.db")
 os.environ["AEGIS_SECRET_KEY"] = "test-secret-key-0123456789abcdef"
