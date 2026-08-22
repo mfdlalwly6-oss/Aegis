@@ -1,12 +1,14 @@
 {
-  "version": "2026.08.13",
-  "trained_at": "2026-08-13T23:43:20.098930+00:00",
+  "version": "v20260822",
+  "trained_at": "2026-08-22T22:26:22.770555+00:00",
+  "sklearn_version": "1.5.2",
+  "n_features": 23,
   "features": [
-    "amount",
+    "amount_ref",
     "hour_sin",
     "hour_cos",
-    "tx_per_min",
-    "amount_5m",
+    "tx_per_min_card",
+    "amount_5min_account",
     "distinct_merchants_1h",
     "new_device",
     "shared_device_count",
@@ -19,15 +21,46 @@
     "previous_chargebacks",
     "high_risk_merchant",
     "off_hours",
-    "round_amount",
-    "structuring_pattern",
-    "suspicious_events_30d"
+    "is_round_native",
+    "structuring_gt2",
+    "suspicious_events_30d",
+    "cross_currency_count_24h",
+    "unique_beneficiaries_24h",
+    "unique_devices_24h"
   ],
-  "dataset": "synthetic — NOT real fraud data",
+  "dataset": "synthetic_not_production",
+  "dataset_sha256_16": "14ddabaf12436e59",
+  "split": "temporal (train=earlier days, test=latest 25%)",
+  "class_balance_train": 0.1333,
+  "leakage_flags": [],
   "metrics": {
-    "accuracy": 1.0,
     "precision": 1.0,
     "recall": 1.0,
-    "roc_auc": 1.0
-  }
+    "roc_auc": 1.0,
+    "pr_auc": 1.0
+  },
+  "per_currency": {
+    "SAR": {
+      "n": 973,
+      "precision": 1.0,
+      "recall": 1.0,
+      "roc_auc": 1.0
+    },
+    "USD": {
+      "n": 1050,
+      "precision": 1.0,
+      "recall": 1.0,
+      "roc_auc": 1.0
+    },
+    "YER": {
+      "n": 977,
+      "precision": 1.0,
+      "recall": 1.0,
+      "roc_auc": 1.0
+    }
+  },
+  "per_typology": {
+    "structuring_band_recall": 1.0
+  },
+  "status": "EXPERIMENTAL — synthetic data; do NOT treat as production-grade"
 }

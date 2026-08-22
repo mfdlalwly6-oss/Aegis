@@ -24,6 +24,7 @@ class FeatureExtractor:
         vel_1m = self.tx_repo.velocity(tid, sender, 60)
         vel_5m = self.tx_repo.velocity(tid, sender, 300)
         vel_1h = self.tx_repo.velocity(tid, sender, 3600)
+        vel_24h = self.tx_repo.velocity(tid, sender, 86400)
 
         device_id = tx.device.device_id if tx.device else None
         ip = str(tx.device.ip) if tx.device and tx.device.ip else None
@@ -42,8 +43,20 @@ class FeatureExtractor:
         meta = tx.metadata or {}
         hour = tx.timestamp.hour if tx.timestamp else datetime.now(timezone.utc).hour
 
+        # Reference (currency-normalized) value for risk; raw amount kept for display only.
+        ref_amount = tx.money.reference_amount if tx.money else None
+        ccy = (tx.currency or "").upper()
+        # Roundness is currency-specific: a round number in the ORIGINAL currency
+        # (1000 USD / 1000 SAR / 100000 YER) — never on the cross-currency reference.
+        round_units = {"USD": 1000, "SAR": 1000, "YER": 100000}
+        ru = round_units.get(ccy, 1000)
+        raw = float(tx.amount)
+        is_round_native = (raw % ru == 0) and raw >= ru
+
         return {
             "amount": float(tx.amount),
+            "reference_amount": ref_amount,
+            "currency": ccy,
             "hour_sin": math.sin((hour / 24) * 2 * math.pi),
             "hour_cos": math.cos((hour / 24) * 2 * math.pi),
             "velocity": {
@@ -52,6 +65,11 @@ class FeatureExtractor:
                 "tx_count_5min": vel_5m["count"],
                 "tx_count_1h": vel_1h["count"],
                 "amount_1h": vel_1h["total_amount"],
+                "tx_count_24h": vel_24h["count"],
+                "amount_24h": vel_24h["total_amount"],
+                "cross_currency_count_24h": vel_24h["currencies"],
+                "unique_beneficiaries_24h": vel_24h["beneficiaries"],
+                "unique_devices_24h": vel_24h["devices"],
                 "distinct_merchants_1h": meta.get("distinct_merchants_1h", 0),
                 "card_declines_1h": meta.get("card_declines_1h", 0),
                 "count_9k_10k_30d": structuring,
@@ -88,7 +106,8 @@ class FeatureExtractor:
                 "beneficiary_sanctioned": False,
             },
             "amount_flags": {
-                "is_round_1000": float(tx.amount) % 1000 == 0 and float(tx.amount) >= 1000,
+                "is_round_native": is_round_native,
+                "is_round_1000": is_round_native,  # legacy alias kept for old stored rules
             },
             "history": {
                 "suspicious_events_30d": suspicious,
@@ -102,8 +121,11 @@ class FeatureExtractor:
 
     def vector(self, tx: Transaction, features: dict) -> list[float]:
         f = features
+        # ML vector uses the normalized reference amount (currency-neutral), never
+        # the raw number — prevents the model from learning "YER = risky".
+        ref = features.get("reference_amount")
         v = [
-            float(tx.amount),
+            float(ref if ref is not None else tx.amount),
             f["hour_sin"], f["hour_cos"],
             float(f["velocity"]["tx_per_min_card"]),
             float(f["velocity"]["amount_5min_account"]),
@@ -119,8 +141,11 @@ class FeatureExtractor:
             float(f["history"]["previous_chargebacks"]),
             float(bool(tx.metadata.get("high_risk_merchant"))),
             float(tx.timestamp.hour < 6 or tx.timestamp.hour > 22 if tx.timestamp else False),
-            float(f["amount_flags"]["is_round_1000"]),
+            float(f["amount_flags"]["is_round_native"]),
             float(f["velocity"]["count_9k_10k_30d"] > 2),
             float(f["history"]["suspicious_events_30d"]),
+            float(f["velocity"]["cross_currency_count_24h"]),
+            float(f["velocity"]["unique_beneficiaries_24h"]),
+            float(f["velocity"]["unique_devices_24h"]),
         ]
         return v

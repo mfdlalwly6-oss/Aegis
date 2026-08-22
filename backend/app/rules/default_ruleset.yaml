@@ -43,7 +43,7 @@ rules:
     when:
       "and":
         - {"==": [{"var": "features.device.first_seen_today"}, true]}
-        - {">": [{"var": "tx.amount"}, 1000]}
+        - {">": [{"var": "tx.money.reference_amount"}, 1000]}
   - id: R-DEV-002
     name: Emulator or rooted device
     severity: critical
@@ -70,7 +70,7 @@ rules:
     when:
       "and":
         - {"==": [{"var": "tx.device.vpn"}, true]}
-        - {">": [{"var": "tx.amount"}, 500]}
+        - {">": [{"var": "tx.money.reference_amount"}, 500]}
         - {"==": [{"var": "features.beneficiary.new"}, true]}
   - id: R-DEV-005
     name: Shared device across accounts
@@ -92,14 +92,20 @@ rules:
     score: 0.40
     tags: [behavior]
     description: "عدم تطابق البصمة السلوكية"
-    when: {"<": [{"var": "tx.behavior.biometric_match_score"}, 0.4]}
+    when:
+      "and":
+        - {"!=": [{"var": "tx.behavior.biometric_match_score"}, None]}
+        - {"<": [{"var": "tx.behavior.biometric_match_score"}, 0.4]}
   - id: R-BEH-002
     name: Robotic keystroke entropy
     severity: medium
     score: 0.25
     tags: [behavior]
     description: "إيقاع كتابة آلي"
-    when: {"<": [{"var": "tx.behavior.keystroke_entropy"}, 1.2]}
+    when:
+      "and":
+        - {"!=": [{"var": "tx.behavior.keystroke_entropy"}, None]}
+        - {"<": [{"var": "tx.behavior.keystroke_entropy"}, 1.2]}
   - id: R-ATO-001
     name: Password change before transfer
     severity: critical
@@ -109,7 +115,7 @@ rules:
     when:
       "and":
         - {"<": [{"var": "features.account.seconds_since_password_change"}, 600]}
-        - {">": [{"var": "tx.amount"}, 1000]}
+        - {">": [{"var": "tx.money.reference_amount"}, 1000]}
   - id: R-ATO-002
     name: MFA disabled + new beneficiary
     severity: critical
@@ -128,8 +134,8 @@ rules:
     description: "نمط تجزئة مبالغ تحت العتبة"
     when:
       "and":
-        - {">=": [{"var": "tx.amount"}, 9000]}
-        - {"<": [{"var": "tx.amount"}, 10000]}
+        - {">=": [{"var": "tx.money.reference_amount"}, 9000]}
+        - {"<": [{"var": "tx.money.reference_amount"}, 10000]}
         - {">": [{"var": "features.velocity.count_9k_10k_30d"}, 2]}
   - id: R-AML-002
     name: Rapid pass-through
@@ -149,7 +155,7 @@ rules:
     description: "مبلغ دائري إلى حساب خارجي"
     when:
       "and":
-        - {"==": [{"var": "features.amount_flags.is_round_1000"}, true]}
+        - {"==": [{"var": "features.amount_flags.is_round_native"}, true]}
         - {"==": [{"var": "features.beneficiary.offshore"}, true]}
   - id: R-CT-001
     name: Card testing pattern
@@ -160,14 +166,17 @@ rules:
     when:
       "and":
         - {">": [{"var": "features.velocity.card_declines_1h"}, 5]}
-        - {"<": [{"var": "tx.amount"}, 5]}
+        - {"<": [{"var": "tx.money.reference_amount"}, 5]}
   - id: R-SE-001
     name: Coached call pattern
     severity: high
     score: 0.35
     tags: [social_engineering]
     description: "بقاء طويل على شاشة التحويل (احتمال توجيه)"
-    when: {">": [{"var": "tx.behavior.session_duration_ms"}, 600000]}
+    when:
+      "and":
+        - {"!=": [{"var": "tx.behavior.session_duration_ms"}, None]}
+        - {">": [{"var": "tx.behavior.session_duration_ms"}, 600000]}
   - id: R-NEW-001
     name: New account high-value first transaction
     severity: high
@@ -177,4 +186,4 @@ rules:
     when:
       "and":
         - {"<": [{"var": "features.account.account_age_days"}, 7]}
-        - {">": [{"var": "tx.amount"}, 5000]}
+        - {">": [{"var": "tx.money.reference_amount"}, 5000]}

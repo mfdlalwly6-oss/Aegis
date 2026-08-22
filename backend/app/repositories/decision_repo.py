@@ -18,28 +18,63 @@ class DecisionRepository:
     def create(self, assessment: dict, idempotency_key: str | None = None) -> dict:
         did = generate_id("dec")
         now = utcnow()
-        self.db.execute(
-            "INSERT INTO decisions "
-            "(decision_id,tx_id,tenant_id,ts,decision,risk_score,risk_band,"
-            "latency_ms,rule_score,ml_score,graph_score,aml_score,behavior_score,"
-            "rules_json,ml_json,graph_json,aml_json,top_reasons_json,typology,"
-            "reasoning_ar,ai_model,idempotency_key,created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (did, assessment["tx_id"], assessment["tenant_id"],
-             assessment.get("timestamp", now), assessment["decision"],
-             assessment["risk_score"], assessment["risk_band"],
-             assessment.get("latency_ms", 0),
-             assessment.get("rule_score", 0), assessment.get("ml_score", 0),
-             assessment.get("graph_score", 0), assessment.get("aml_score", 0),
-             assessment.get("behavior_score", 0),
-             json.dumps(assessment.get("rules", []), default=str),
-             json.dumps(assessment.get("ml_models", assessment.get("ml", [])), default=str),
-             json.dumps(assessment.get("graph_signal", assessment.get("graph", {})), default=str),
-             json.dumps(assessment.get("aml_signal", assessment.get("aml", {})), default=str),
-             json.dumps(assessment.get("top_reasons", []), ensure_ascii=False),
-             assessment.get("typology"), assessment.get("reasoning_ar"),
-             assessment.get("ai_model"), idempotency_key, now),
-        )
+        # Immutable decision snapshot (additive columns; safe on legacy schema via
+        # guarded fallback). Enables "why was this decided?" months later.
+        tx_snap = assessment.get("tx_snapshot")
+        feat_snap = assessment.get("features_snapshot")
+        fx_proof = assessment.get("fx_proof")
+        try:
+            self.db.execute(
+                "INSERT INTO decisions "
+                "(decision_id,tx_id,tenant_id,ts,decision,risk_score,risk_band,"
+                "latency_ms,rule_score,ml_score,graph_score,aml_score,behavior_score,"
+                "rules_json,ml_json,graph_json,aml_json,top_reasons_json,typology,"
+                "reasoning_ar,ai_model,idempotency_key,created_at,"
+                "tx_snapshot_json,features_snapshot_json,fx_proof_json) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (did, assessment["tx_id"], assessment["tenant_id"],
+                 assessment.get("timestamp", now), assessment["decision"],
+                 assessment["risk_score"], assessment["risk_band"],
+                 assessment.get("latency_ms", 0),
+                 assessment.get("rule_score", 0), assessment.get("ml_score", 0),
+                 assessment.get("graph_score", 0), assessment.get("aml_score", 0),
+                 assessment.get("behavior_score", 0),
+                 json.dumps(assessment.get("rules", []), default=str),
+                 json.dumps(assessment.get("ml_models", assessment.get("ml", [])), default=str),
+                 json.dumps(assessment.get("graph_signal", assessment.get("graph", {})), default=str),
+                 json.dumps(assessment.get("aml_signal", assessment.get("aml", {})), default=str),
+                 json.dumps(assessment.get("top_reasons", []), ensure_ascii=False),
+                 assessment.get("typology"), assessment.get("reasoning_ar"),
+                 assessment.get("ai_model"), idempotency_key, now,
+                 json.dumps(tx_snap, default=str) if tx_snap is not None else None,
+                 json.dumps(feat_snap, default=str) if feat_snap is not None else None,
+                 json.dumps(fx_proof, default=str) if fx_proof is not None else None),
+            )
+        except Exception:
+            # Legacy schema without snapshot columns — insert without them (no data loss
+            # of the decision itself; snapshot is additive audit enrichment).
+            self.db.execute(
+                "INSERT INTO decisions "
+                "(decision_id,tx_id,tenant_id,ts,decision,risk_score,risk_band,"
+                "latency_ms,rule_score,ml_score,graph_score,aml_score,behavior_score,"
+                "rules_json,ml_json,graph_json,aml_json,top_reasons_json,typology,"
+                "reasoning_ar,ai_model,idempotency_key,created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (did, assessment["tx_id"], assessment["tenant_id"],
+                 assessment.get("timestamp", now), assessment["decision"],
+                 assessment["risk_score"], assessment["risk_band"],
+                 assessment.get("latency_ms", 0),
+                 assessment.get("rule_score", 0), assessment.get("ml_score", 0),
+                 assessment.get("graph_score", 0), assessment.get("aml_score", 0),
+                 assessment.get("behavior_score", 0),
+                 json.dumps(assessment.get("rules", []), default=str),
+                 json.dumps(assessment.get("ml_models", assessment.get("ml", [])), default=str),
+                 json.dumps(assessment.get("graph_signal", assessment.get("graph", {})), default=str),
+                 json.dumps(assessment.get("aml_signal", assessment.get("aml", {})), default=str),
+                 json.dumps(assessment.get("top_reasons", []), ensure_ascii=False),
+                 assessment.get("typology"), assessment.get("reasoning_ar"),
+                 assessment.get("ai_model"), idempotency_key, now),
+            )
         return {"decision_id": did, **assessment}
 
     def get_by_tx(self, tx_id: str) -> dict | None:

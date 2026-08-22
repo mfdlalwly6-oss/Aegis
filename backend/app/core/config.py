@@ -13,6 +13,9 @@ class Settings(BaseSettings):
 
     VERSION: str = "2.0.0"
     ENV: Literal["development", "staging", "production"] = "development"
+    # API docs/OpenAPI are disabled by default (attack-surface reduction);
+    # enable explicitly via AEGIS_ENABLE_DOCS=true in dev only.
+    ENABLE_DOCS: bool = False
     WORKERS: int = 1
     PORT: int = 8000
 
@@ -50,6 +53,14 @@ class Settings(BaseSettings):
     # Rate limit
     RATE_LIMIT_PER_MIN: int = 240
     CORS_ORIGINS: str = "http://localhost:8000"
+
+    # FX / multi-currency (risk reference layer)
+    REFERENCE_CURRENCY: str = "USD"          # single decision reference (FATF-equivalent)
+    DISPLAY_CURRENCY: str = "YER"            # local display/policy reference (derived, not stored truth)
+    FX_DEFAULT_REGION: str = "global"        # data-driven; Yemen regions live in fx_rates rows
+    FX_STALE_HOURS: int = 24                 # rate older than this => FX_STALE
+    FX_DIVERGENCE_PCT: float = 3.0           # institution rate deviation => FX_DIVERGENT flag
+    FX_MISSING_DECISION: str = "review"      # unknown currency => never silent ALLOW, never blind BLOCK
 
     # Observability
     OTEL_ENDPOINT: str = ""

@@ -17,7 +17,24 @@ from app.models.schemas import ModelScore
 
 logger = structlog.get_logger(__name__)
 
-MODELS_DIR = Path(__file__).parent.parent.parent.parent / "models" / "trained"
+def _find_models_dir() -> Path:
+    """Locate models/trained by walking upward from this file.
+
+    The old fixed 4-level ascent broke in the container layout (/app/app/ml/)
+    where it resolved to /models/trained (filesystem root) instead of
+    /app/models/trained. Upward search is layout-agnostic and works in both
+    the repo (backend/app/ml/) and the container (/app/app/ml/).
+    """
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "models" / "trained"
+        if candidate.is_dir():
+            return candidate
+    # Fallback: legacy relative resolution (may not exist; scorer degrades to
+    # the labeled heuristic rather than crashing).
+    return Path(__file__).parent.parent.parent.parent / "models" / "trained"
+
+
+MODELS_DIR = _find_models_dir()
 
 
 class EnsembleScorer:
@@ -55,6 +72,15 @@ class EnsembleScorer:
 
     def score(self, features: list[float]) -> tuple[float, list[ModelScore]]:
         X = np.array(features, dtype=np.float32).reshape(1, -1)
+
+        # Guard: feature-vector length must match what the trained model expects.
+        # A mismatch (e.g. new features added before retraining) must NOT be fed to
+        # the model — fall back to the labeled heuristic instead of corrupt scores.
+        expected = self._metadata.get("n_features")
+        if self.ready and expected is not None and X.shape[1] != int(expected):
+            logger.warning("ml.feature_length_mismatch",
+                           got=int(X.shape[1]), expected=int(expected))
+            return self._heuristic_score(X)
 
         if self.ready and self._gb is not None and self._iso is not None:
             return self._real_score(X)

@@ -33,27 +33,48 @@ class AMLService:
                 score += 0.20
                 flags.append(f"HIGH_RISK_COUNTRY:{beneficiary_country}")
 
-        amount = float(tx.amount)
+        # All value-based AML comparisons use the currency-normalized reference amount
+        # (never the raw number). If the tx cannot be valued (FX_MISSING), value checks
+        # are skipped rather than guessed — the orchestrator floors that to REVIEW.
+        ref = tx.money.reference_amount if tx.money else None
+        amount = float(ref) if ref is not None else None
         vel = features.get("velocity", {})
 
         structuring_count = vel.get("count_9k_10k_30d", 0)
-        if 9000 <= amount < 10000 and structuring_count >= 2:
+        if amount is not None and 9000 <= amount < 10000 and structuring_count >= 2:
             signal.typology_matches.append("structuring_smurfing")
             score += 0.30
             flags.append("STRUCTURING_PATTERN")
+
+        # Micro-structuring: many small sub-threshold transactions whose combined
+        # reference value crosses a reporting threshold within 24h.
+        tx_24h = vel.get("tx_count_24h", 0)
+        amt_24h = vel.get("amount_24h", 0.0)
+        if amount is not None and amount < 1000 and tx_24h >= 10 and amt_24h > 9500:
+            signal.typology_matches.append("micro_structuring")
+            score += 0.30
+            flags.append("MICRO_STRUCTURING")
+
+        # Cross-currency layering: rapid currency switching across 3+ currencies with
+        # a new beneficiary and meaningful combined value.
+        cross_ccy = vel.get("cross_currency_count_24h", 0)
+        if cross_ccy >= 3 and features.get("beneficiary", {}).get("new") and amt_24h > 5000:
+            signal.typology_matches.append("cross_currency_layering")
+            score += 0.30
+            flags.append("CROSS_CURRENCY_LAYERING")
 
         if vel.get("tx_count_1h", 0) >= 8 and vel.get("amount_1h", 0) > 20000:
             signal.typology_matches.append("rapid_movement_of_funds")
             score += 0.25
             flags.append("RAPID_FUND_MOVEMENT")
 
-        if features.get("amount_flags", {}).get("is_round_1000") and features.get("beneficiary", {}).get("offshore"):
+        if features.get("amount_flags", {}).get("is_round_native") and features.get("beneficiary", {}).get("offshore"):
             signal.typology_matches.append("round_amount_offshore")
             score += 0.15
             flags.append("ROUND_AMOUNT_OFFSHORE")
 
         if features.get("device", {}).get("tor") or features.get("device", {}).get("vpn"):
-            if amount > 5000:
+            if amount is not None and amount > 5000:
                 signal.typology_matches.append("anonymity_tool_high_value")
                 score += 0.10
                 flags.append("ANONYMITY_TOOL_HIGH_VALUE")

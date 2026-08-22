@@ -11,10 +11,12 @@ from .rule_repo import RuleRepository
 from .watchlist_repo import WatchlistRepository
 from .user_repo import UserRepository
 from .investigator_repo import InvestigatorRepository
+from .fx_rate_repo import FxRateRepository
+from .currency_repo import CurrencyRepository
 
 __all__ = [
     "TenantRepository", "TransactionRepository", "DecisionRepository",
     "AlertRepository", "CaseRepository", "AuditRepository",
     "RuleRepository", "WatchlistRepository", "UserRepository",
-    "InvestigatorRepository",
+    "InvestigatorRepository", "FxRateRepository", "CurrencyRepository",
 ]

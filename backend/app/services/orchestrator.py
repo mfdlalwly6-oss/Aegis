@@ -9,7 +9,8 @@ from typing import Any
 import structlog
 
 from app.core.config import settings
-from app.models.schemas import Decision, RiskAssessment, RiskBand, Transaction
+from app.models.schemas import (Decision, FxStatus, RiskAssessment, RiskBand,
+                                Transaction)
 
 logger = structlog.get_logger(__name__)
 
@@ -18,7 +19,11 @@ class DecisionOrchestrator:
     def __init__(
         self, *, rules, ml, graph, aml_service, features,
         transactions, decisions, alerts, cases, audit, events, notifications,
+        fx_service=None, policy_engine=None, tenants_repo=None,
     ):
+        self.fx_service = fx_service
+        self.policy_engine = policy_engine
+        self.tenants_repo = tenants_repo
         self.rules = rules
         self.ml = ml
         self.graph = graph
@@ -31,7 +36,20 @@ class DecisionOrchestrator:
         self.audit = audit
         self.events = events
         self.notifications = notifications
-        self.policy_version = "policy@2.0.0"
+        from app.services.policy_engine import POLICY_SCHEMA_VERSION
+        self.policy_version = POLICY_SCHEMA_VERSION
+
+    def _resolve_policy(self, tenant_id: str) -> dict:
+        """Effective tenant policy (clamped, safe). Falls back to settings defaults."""
+        if self.policy_engine is None:
+            return None
+        tenant = None
+        if self.tenants_repo is not None:
+            try:
+                tenant = self.tenants_repo.get(tenant_id)
+            except Exception:
+                tenant = None
+        return self.policy_engine.resolve(tenant)
 
     def _behavior_score(self, tx: Transaction) -> float:
         if not tx.behavior:
@@ -45,23 +63,25 @@ class DecisionOrchestrator:
             score += 0.15
         return min(score, 1.0)
 
-    def _band(self, score: float) -> RiskBand:
-        if score >= settings.DECISION_THRESHOLD_BLOCK:
+    def _band(self, score: float, th: dict | None = None) -> RiskBand:
+        th = th or {}
+        if score >= th.get("block", settings.DECISION_THRESHOLD_BLOCK):
             return RiskBand.CRITICAL
-        if score >= settings.DECISION_THRESHOLD_REVIEW:
+        if score >= th.get("review", settings.DECISION_THRESHOLD_REVIEW):
             return RiskBand.HIGH
-        if score >= settings.DECISION_THRESHOLD_CHALLENGE:
+        if score >= th.get("challenge", settings.DECISION_THRESHOLD_CHALLENGE):
             return RiskBand.MEDIUM
         return RiskBand.LOW
 
-    def _decide(self, score: float, aml_hit: bool) -> Decision:
+    def _decide(self, score: float, aml_hit: bool, th: dict | None = None) -> Decision:
+        th = th or {}
         if aml_hit:
             return Decision.BLOCK
-        if score >= settings.DECISION_THRESHOLD_BLOCK:
+        if score >= th.get("block", settings.DECISION_THRESHOLD_BLOCK):
             return Decision.BLOCK
-        if score >= settings.DECISION_THRESHOLD_REVIEW:
+        if score >= th.get("review", settings.DECISION_THRESHOLD_REVIEW):
             return Decision.REVIEW
-        if score >= settings.DECISION_THRESHOLD_CHALLENGE:
+        if score >= th.get("challenge", settings.DECISION_THRESHOLD_CHALLENGE):
             return Decision.CHALLENGE
         return Decision.ALLOW
 
@@ -78,11 +98,31 @@ class DecisionOrchestrator:
                 if cached:
                     return {**cached, "duplicate": True}
 
+        # 1b. Money normalization — resolve FX + reference value BEFORE any risk logic.
+        # The institution-reported rate is stored for comparison but never drives risk.
+        if self.fx_service is not None and tx.money is None:
+            inst_rate = None
+            try:
+                raw_ir = (tx.metadata or {}).get("institution_fx_rate")
+                inst_rate = float(raw_ir) if raw_ir is not None else None
+            except (TypeError, ValueError):
+                inst_rate = None
+            tx.money = self.fx_service.normalize(
+                tx.amount, tx.currency, region=tx.region,
+                institution_rate=inst_rate, at=tx.timestamp)
+
         # 2. Feature extraction (real queries against SQLite history)
         features = self.features.extract(tx)
 
-        # 3. Rule engine (real rules from DB/YAML)
+        # 2b. Resolve effective tenant policy (safe-bounded) — drives fusion + decision.
+        policy = self._resolve_policy(tx.tenant_id)
+
+        # 3. Rule engine (real rules from DB/YAML), honoring policy-disabled rules
+        # (protected core rules can never be disabled — enforced in PolicyEngine).
         rules_hits = self.rules.evaluate(tx, features)
+        if policy and policy.get("disabled_rules"):
+            disabled = set(policy["disabled_rules"])
+            rules_hits = [h for h in rules_hits if h.rule_id not in disabled]
         rule_score = min(1.0, sum(h.score_contribution for h in rules_hits))
 
         # 4. ML scoring (real model if trained, graceful fallback)
@@ -98,19 +138,40 @@ class DecisionOrchestrator:
         # 7. Behavior score
         behavior_score = self._behavior_score(tx)
 
-        # 8. Weighted fusion
+        # 8. Weighted fusion — policy weights (bounded) + risk sensitivity.
+        w = (policy or {}).get("weights") or {}
         final = min(1.0, max(0.0,
-            rule_score * settings.WEIGHT_RULES +
-            ml_prob * settings.WEIGHT_ML +
-            graph_sig.score * settings.WEIGHT_GRAPH +
-            aml_sig.score * settings.WEIGHT_AML +
-            behavior_score * settings.WEIGHT_BEHAVIOR
+            rule_score * w.get("rules", settings.WEIGHT_RULES) +
+            ml_prob * w.get("ml", settings.WEIGHT_ML) +
+            graph_sig.score * w.get("graph", settings.WEIGHT_GRAPH) +
+            aml_sig.score * w.get("aml", settings.WEIGHT_AML) +
+            behavior_score * w.get("behavior", settings.WEIGHT_BEHAVIOR)
         ))
+        sensitivity = (policy or {}).get("risk_sensitivity", 1.0)
+        if sensitivity != 1.0:
+            final = min(1.0, max(0.0, final * sensitivity))
+
+        th = (policy or {}).get("thresholds")
 
         # 9. Decision — sanctions hit forces BLOCK and reflects as critical score/band
-        decision = self._decide(final, aml_sig.sanctions_hit)
-        if aml_sig.sanctions_hit and final < settings.DECISION_THRESHOLD_BLOCK:
-            final = settings.DECISION_THRESHOLD_BLOCK  # reported risk floor for hard blocks
+        decision = self._decide(final, aml_sig.sanctions_hit, th)
+        block_floor = (th or {}).get("block", settings.DECISION_THRESHOLD_BLOCK)
+        if aml_sig.sanctions_hit and final < block_floor:
+            final = block_floor  # reported risk floor for hard blocks
+
+        # 9b. FX-status floor — a transaction that cannot be reliably valued must not
+        # silently ALLOW; and a divergent institution rate must never lower risk.
+        fx_status = tx.money.fx.status if (tx.money and tx.money.fx) else None
+        if fx_status == FxStatus.MISSING and decision in (Decision.ALLOW, Decision.CHALLENGE):
+            # Policy-controlled: default REVIEW, may be strengthened to BLOCK,
+            # but NEVER weakened to a silent ALLOW.
+            action = (policy or {}).get("fx_missing_action", "review")
+            decision = Decision.BLOCK if action == "block" else Decision.REVIEW
+            final = max(final, (th or {}).get("review", settings.DECISION_THRESHOLD_REVIEW))
+        elif fx_status == FxStatus.DIVERGENT:
+            final = min(1.0, final + 0.10)   # divergence raises risk, never lowers it
+            if decision == Decision.ALLOW:
+                decision = Decision.CHALLENGE
         latency_ms = (time.perf_counter() - started) * 1000
 
         # 10. Top reasons
@@ -157,7 +218,8 @@ class DecisionOrchestrator:
             model_id="aegis-ensemble@2.0.0", policy_version=self.policy_version,
         )
 
-        # 13. Persist transaction + decision
+        # 13. Persist transaction (with reference money + FX + event) + decision snapshot
+        money = tx.money
         tx_row = {
             "tx_id": tx.tx_id, "tenant_id": tx.tenant_id,
             "timestamp": tx.timestamp.isoformat(), "channel": tx.channel.value,
@@ -171,9 +233,24 @@ class DecisionOrchestrator:
             "device_id": tx.device.device_id if tx.device else None,
             "ip": str(tx.device.ip) if tx.device and tx.device.ip else None,
             "ip_country": tx.device.ip_country if tx.device else None,
+            # reference money + FX proof + financial-event semantics
+            "reference_amount": (money.reference_amount if money else None),
+            "reference_currency": (money.reference_currency if money else None),
+            "fx_snapshot_id": (money.fx.snapshot_id if money and money.fx else None),
+            "fx_status": (money.fx.status.value if money and money.fx else None),
+            "region": tx.region,
+            "event_type": (tx.event_type.value if tx.event_type else "transfer"),
+            "direction": tx.direction,
+            "is_internal": 1 if tx.is_internal else 0,
+            "linked_tx_id": tx.linked_tx_id,
         }
         self.transactions.create(tx_row, features, raw_payload)
-        self.decisions.create(assessment.model_dump(mode="json"), idempotency_key=idempotency_key)
+        # Immutable audit snapshot: what the engine saw at decision time.
+        dec_payload = assessment.model_dump(mode="json")
+        dec_payload["tx_snapshot"] = tx.model_dump(mode="json")
+        dec_payload["features_snapshot"] = features
+        dec_payload["fx_proof"] = (money.fx.model_dump(mode="json") if money and money.fx else None)
+        self.decisions.create(dec_payload, idempotency_key=idempotency_key)
 
         # 14. Feed graph for future scoring
         self.graph.add_transaction(tx)
@@ -209,6 +286,16 @@ class DecisionOrchestrator:
         await self.events.publish("decision.created", assessment.model_dump(mode="json"))
 
         result = assessment.model_dump(mode="json")
+        # Surface money/FX context to the caller for transparency (reference value,
+        # not a re-statement of the financial truth which stays original).
+        if tx.money:
+            result["money"] = {
+                "original_amount": tx.money.original_amount,
+                "original_currency": tx.money.original_currency,
+                "reference_amount": tx.money.reference_amount,
+                "reference_currency": tx.money.reference_currency,
+                "fx_status": (tx.money.fx.status.value if tx.money.fx else None),
+            }
         result["alert"] = created_alert
         result["case"] = created_case
         return result

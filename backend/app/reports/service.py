@@ -65,8 +65,15 @@ class ReportBuilder:
             "SELECT * FROM decisions WHERE tenant_id=? AND ts>=? AND ts<=? "
             "ORDER BY ts DESC", (tenant_id, start_utc.isoformat(), end_utc.isoformat()))
         tx_count = db.query_one(
-            "SELECT COUNT(*) AS c, COALESCE(SUM(amount),0) AS s FROM transactions "
-            "WHERE tenant_id=? AND ts>=? AND ts<=?",
+            "SELECT COUNT(*) AS c, "
+            "COALESCE(SUM(COALESCE(reference_amount, amount)),0) AS s "
+            "FROM transactions WHERE tenant_id=? AND ts>=? AND ts<=?",
+            (tenant_id, start_utc.isoformat(), end_utc.isoformat()))
+        # Per-currency breakdown — never sum raw amounts across currencies as one
+        # meaningless number; the reference total (USD) is the comparable figure.
+        by_ccy_rows = db.query(
+            "SELECT currency, COUNT(*) AS c, COALESCE(SUM(amount),0) AS s "
+            "FROM transactions WHERE tenant_id=? AND ts>=? AND ts<=? GROUP BY currency",
             (tenant_id, start_utc.isoformat(), end_utc.isoformat()))
 
         decision_counts = Counter(r["decision"] for r in dec_rows)
@@ -162,7 +169,15 @@ class ReportBuilder:
             "executive_summary": " ".join(summary_parts),
             "volume": {
                 "transactions": tx_count["c"] if tx_count else 0,
+                # Normalized total (reference currency = USD) — comparable across
+                # currencies. Raw amounts remain per-currency in the breakdown below.
                 "amount_sum": round(tx_count["s"] or 0, 2) if tx_count else 0,
+                "amount_sum_currency": "USD",
+                "by_currency": [
+                    {"currency": r["currency"], "transactions": r["c"],
+                     "amount_sum": round(r["s"] or 0, 2)}
+                    for r in by_ccy_rows
+                ],
                 "decisions": total,
                 "allow": allow,
                 "block": block,

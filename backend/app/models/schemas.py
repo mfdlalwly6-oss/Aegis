@@ -92,6 +92,69 @@ class Transaction(BaseModel):
     session_id: str | None = None
     metadata: dict[str, Any] = {}
 
+    # Multi-currency money model + financial-event semantics (additive, optional).
+    # `amount`/`currency` above remain the ORIGINAL truth and are never overwritten.
+    money: "Money | None" = None
+    event_type: "EventType | None" = None   # default applied in normalize
+    direction: str = "out"                  # in | out | internal
+    is_internal: bool = False
+    linked_tx_id: str | None = None
+    region: str | None = None               # data-driven FX region (aden/sanaa/global...)
+
+
+class EventType(str, Enum):
+    PAYMENT = "payment"
+    TRANSFER = "transfer"
+    CASH_IN = "cash_in"
+    CASH_OUT = "cash_out"
+    REMITTANCE = "remittance"
+    WALLET_TO_WALLET = "wallet_to_wallet"
+    BANK_TO_WALLET = "bank_to_wallet"
+    WALLET_TO_BANK = "wallet_to_bank"
+    FX_CONVERSION = "fx_conversion"
+    REFUND = "refund"
+    REVERSAL = "reversal"
+    SETTLEMENT = "settlement"
+    FEE = "fee"
+    ADJUSTMENT = "adjustment"
+
+
+class FxStatus(str, Enum):
+    OK = "FX_OK"
+    STALE = "FX_STALE"
+    MISSING = "FX_MISSING"
+    DIVERGENT = "FX_DIVERGENT"
+    LEGACY = "LEGACY_DATA"
+    NATIVE = "FX_NATIVE"          # transaction already in reference currency
+
+
+class FxSnapshot(BaseModel):
+    """Immutable FX context captured at decision time. Never recomputed later."""
+    snapshot_id: str = Field(default_factory=lambda: str(uuid4()))
+    base_ccy: str
+    quote_ccy: str
+    rate: float | None = None
+    rate_type: str = "mid"                # buy | sell | mid | official | institution
+    source: str = "aegis_reference"       # aegis_reference | institution | provider:<name> | manual
+    region: str = "global"                # data-driven: aden | sanaa | global | ...
+    spread_pct: float | None = None
+    fetched_at: datetime | None = None
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    is_stale: bool = False
+    status: FxStatus = FxStatus.OK
+    institution_rate: float | None = None  # sender-reported rate — stored, never drives risk alone
+    divergence_pct: float | None = None
+
+
+class Money(BaseModel):
+    """Financial truth: original never changes; reference is for risk/analysis only."""
+    original_amount: float
+    original_currency: str
+    reference_amount: float | None = None     # normalized value (default ref = USD)
+    reference_currency: str = "USD"
+    fx: FxSnapshot | None = None
+
 
 class RuleHit(BaseModel):
     rule_id: str

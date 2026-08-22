@@ -49,11 +49,20 @@ class RuleRepository:
         return cur.rowcount > 0
 
     def seed_defaults(self, rules: list[dict]) -> int:
+        """Insert missing platform rules AND refresh platform-owned rules whose
+        definition changed in the YAML (e.g. amount -> money.reference_amount).
+        Tenant-specific overrides (tenant_id NOT NULL) are never touched."""
         count = 0
         for rule in rules:
             existing = self.db.query_one(
-                "SELECT 1 FROM rules WHERE rule_id=?", (rule["id"],))
+                "SELECT when_json FROM rules WHERE rule_id=? AND tenant_id IS NULL",
+                (rule["id"],))
             if not existing:
                 self.upsert(rule, tenant_id=None)
                 count += 1
+            else:
+                new_when = json.dumps(rule["when"])
+                if existing["when_json"] != new_when:
+                    self.upsert(rule, tenant_id=None)  # refresh platform default
+                    count += 1
         return count
