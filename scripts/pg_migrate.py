@@ -80,7 +80,7 @@ def main() -> int:
         cols = [r[1] for r in src.execute(f'PRAGMA table_info("{table}")')]
         if not cols:
             continue
-        n_src = src.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()['count']
+        n_src = src.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]  # sqlite3 -> tuple
         n_dst = dst.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()['count']
         if n_dst and not args.wipe:
             print(f"SKIP {table}: target non-empty ({n_dst}); use --wipe to force")
