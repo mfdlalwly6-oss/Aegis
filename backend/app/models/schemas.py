@@ -33,6 +33,39 @@ class RiskBand(str, Enum):
     CRITICAL = "critical"
 
 
+class FxStatus(str, Enum):
+    OK = "ok"
+    NATIVE = "native"
+    STALE = "stale"
+    DIVERGENT = "divergent"
+    MISSING = "missing"
+
+
+class FxSnapshot(BaseModel):
+    base_ccy: str
+    quote_ccy: str
+    rate: float | None = None
+    rate_type: str = "mid"
+    source: str = "aegis_reference"
+    region: str = "global"
+    spread_pct: float | None = None
+    fetched_at: datetime | None = None
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    is_stale: bool = False
+    status: FxStatus = FxStatus.OK
+    institution_rate: float | None = None
+    divergence_pct: float | None = None
+
+
+class Money(BaseModel):
+    original_amount: float
+    original_currency: str
+    reference_amount: float | None = None
+    reference_currency: str = "USD"
+    fx: FxSnapshot | None = None
+
+
 class DeviceContext(BaseModel):
     device_id: str | None = None
     fingerprint_hash: str | None = None

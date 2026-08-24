@@ -20,15 +20,18 @@ class TransactionRepository:
             "(tx_id,tenant_id,ts,channel,amount,currency,sender_account_id,"
             "sender_user_id,beneficiary_account_id,beneficiary_user_id,"
             "beneficiary_country,merchant_id,merchant_name,device_id,ip,"
-            "ip_country,raw_json,features_json,created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "ip_country,raw_json,features_json,created_at,"
+            "reference_amount,reference_currency,fx_snapshot_id,fx_status) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (row["tx_id"], row["tenant_id"], row["timestamp"], row["channel"],
              row["amount"], row["currency"], row["sender_account_id"],
              row.get("sender_user_id"), row["beneficiary_account_id"],
              row.get("beneficiary_user_id"), row.get("beneficiary_country"),
              row.get("merchant_id"), row.get("merchant_name"),
              row.get("device_id"), row.get("ip"), row.get("ip_country"),
-             json.dumps(raw, default=str), json.dumps(features, default=str), utcnow()),
+             json.dumps(raw, default=str), json.dumps(features, default=str), utcnow(),
+             row.get("reference_amount"), row.get("reference_currency"),
+             row.get("fx_snapshot_id"), row.get("fx_status")),
         )
         return row
 

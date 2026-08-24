@@ -13,6 +13,9 @@ from app.api.deps import get_registry
 from app.core.config import settings
 from app.models.schemas import BehaviorSignals, DeviceContext, GeoPoint, Transaction
 from app.security import verify_signature
+from app.services.fx_service import FxService
+from app.repositories.fx_rate_repo import FxRateRepository
+from app.repositories.currency_repo import CurrencyRepository
 
 router = APIRouter()
 
@@ -74,6 +77,17 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
     if isinstance(metadata.get("customer"), dict):
         metadata.setdefault("billing_country", metadata["customer"].get("billing_country"))
         metadata.pop("customer", None)
+
+    # FX normalization: produce Money with reference_amount + fx proof
+    ccy = src.get("currency", "USD").upper()
+    region = src.get("region") or ctx.get("region") or settings.FX_DEFAULT_REGION
+    fx_repo = FxRateRepository(registry.db) if hasattr(registry, 'db') else None
+    fx_svc = FxService(fx_repo, currency_checker=lambda c: CurrencyRepository(registry.db).is_known(c)) if fx_repo else None
+    money = fx_svc.normalize(amount, ccy, region=region) if fx_svc else None
+    fx_status = money.fx.status.value if money and money.fx else None
+    fx_snapshot_id = money.fx.rate_id if money and money.fx and hasattr(money.fx, 'rate_id') else None
+    reference_amount = money.reference_amount if money else None
+    reference_currency = money.reference_currency if money else settings.REFERENCE_CURRENCY
 
     return Transaction(
         tx_id=str(src.get("tx_id") or src.get("transaction_id") or uuid.uuid4()),
