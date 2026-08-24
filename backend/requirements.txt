@@ -26,6 +26,9 @@ scikit-learn==1.5.2
 networkx==3.3
 joblib==1.4.2
 
+# PostgreSQL (Task 1 — production storage backend)
+psycopg[binary]==3.2.3
+
 # Optional integrations (fail-safe if service not present)
 redis==5.1.1
 aiokafka==0.11.0
