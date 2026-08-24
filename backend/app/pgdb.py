@@ -61,7 +61,7 @@ class PGDatabase:
         conn = getattr(self._local, "conn", None) if hasattr(self, "_local") else None
         if conn is None or conn.closed:
             self._local = threading.local()
-            conn = psycopg.connect(self.url, row_factory=dict_row, connect_timeout=10)
+            conn = psycopg.connect(self.url, row_factory=dict_row, connect_timeout=10, autocommit=True)
             self._local.conn = conn
         return conn
 

@@ -64,7 +64,7 @@ def main() -> int:
 
     src = sqlite3.connect(f"file:{args.sqlite}?mode=ro", uri=True)
     src.row_factory = sqlite3.Row
-    dst = psycopg.connect(args.url, row_factory=dict_row)
+    dst = psycopg.connect(args.url, row_factory=dict_row, autocommit=True)
     dst.execute("SET session_replication_role = replica")
     dst.execute("SET session_replication_role = replica")  # tolerate legacy FK quirks during load
 
@@ -96,8 +96,8 @@ def main() -> int:
         qcols = ",".join(f'"{c}"' for c in cols)
         ph = ",".join(["%s"] * len(cols))
         ins = f'INSERT INTO "{table}" ({qcols}) VALUES ({ph})'
-        valid_tx = {r[0] for r in dst.execute("SELECT tx_id FROM transactions")} if table == "decisions" else None
-        valid_ten = {r[0] for r in dst.execute("SELECT tenant_id FROM tenants")} if table in ("users","transactions","alerts","cases") else None
+        valid_tx = {r["tx_id"] for r in dst.execute("SELECT tx_id FROM transactions")} if table == "decisions" else None
+        valid_ten = {r["tenant_id"] for r in dst.execute("SELECT tenant_id FROM tenants")} if table in ("users","transactions","alerts","cases") else None
         skipped = 0
         with dst.cursor() as cur:
             batch: list[tuple] = []
