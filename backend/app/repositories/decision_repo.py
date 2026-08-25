@@ -23,8 +23,9 @@ class DecisionRepository:
             "(decision_id,tx_id,tenant_id,ts,decision,risk_score,risk_band,"
             "latency_ms,rule_score,ml_score,graph_score,aml_score,behavior_score,"
             "rules_json,ml_json,graph_json,aml_json,top_reasons_json,typology,"
-            "reasoning_ar,ai_model,idempotency_key,created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "reasoning_ar,ai_model,idempotency_key,created_at,"
+            "fx_proof_json,tx_snapshot_json,features_snapshot_json) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (did, assessment["tx_id"], assessment["tenant_id"],
              assessment.get("timestamp", now), assessment["decision"],
              assessment["risk_score"], assessment["risk_band"],
@@ -38,7 +39,10 @@ class DecisionRepository:
              json.dumps(assessment.get("aml_signal", assessment.get("aml", {})), default=str),
              json.dumps(assessment.get("top_reasons", []), ensure_ascii=False),
              assessment.get("typology"), assessment.get("reasoning_ar"),
-             assessment.get("ai_model"), idempotency_key, now),
+             assessment.get("ai_model"), idempotency_key, now,
+             json.dumps(assessment.get("fx_proof", {}), default=str),
+             json.dumps(assessment.get("tx_snapshot", {}), default=str),
+             json.dumps(assessment.get("features_snapshot", {}), default=str)),
         )
         return {"decision_id": did, **assessment}
 

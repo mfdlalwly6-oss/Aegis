@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.api.deps import get_registry, require_owner
-from app.api.v1.webhook import normalize_transaction
+from app.api.v1.webhook import normalize_transaction, _apply_fx
 
 router = APIRouter()
 
@@ -24,6 +24,7 @@ async def score_transaction(
         raise HTTPException(404, "tenant_not_found")
 
     tx = normalize_transaction(body, tenant_id)
+    tx = _apply_fx(registry, tx, body)
 
     idem_key = request.headers.get("x-idempotency-key")
     if not idem_key:

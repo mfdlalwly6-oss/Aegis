@@ -107,8 +107,18 @@ class DecisionOrchestrator:
             behavior_score * settings.WEIGHT_BEHAVIOR
         ))
 
-        # 9. Decision — sanctions hit forces BLOCK and reflects as critical score/band
-        decision = self._decide(final, aml_sig.sanctions_hit)
+        # 9. Decision — sanctions hit forces BLOCK; FX missing forces review
+        fx_missing = getattr(tx, "fx_status", None) == "missing"
+        if fx_missing:
+            fx_missing_action = self._resolve_policy(tx.tenant_id).get("fx_missing_action", "review")
+            if fx_missing_action == "block":
+                decision = Decision.BLOCK
+                final = max(final, settings.DECISION_THRESHOLD_BLOCK)
+            else:
+                decision = Decision.REVIEW
+                final = max(final, settings.DECISION_THRESHOLD_REVIEW)
+        else:
+            decision = self._decide(final, aml_sig.sanctions_hit)
         if aml_sig.sanctions_hit and final < settings.DECISION_THRESHOLD_BLOCK:
             final = settings.DECISION_THRESHOLD_BLOCK  # reported risk floor for hard blocks
         latency_ms = (time.perf_counter() - started) * 1000
@@ -140,7 +150,15 @@ class DecisionOrchestrator:
             except Exception as e:
                 logger.warning("ai.explanation_failed", error=str(e))
 
-        # 12. Build assessment
+        # 12. Build assessment (with FX proof for audit)
+        fx_proof = {
+            "original_amount": tx.amount,
+            "original_currency": tx.currency,
+            "reference_amount": getattr(tx, "reference_amount", None),
+            "reference_currency": getattr(tx, "reference_currency", None),
+            "fx_snapshot_id": getattr(tx, "fx_snapshot_id", None),
+            "fx_status": getattr(tx, "fx_status", None),
+        }
         assessment = RiskAssessment(
             tx_id=tx.tx_id, tenant_id=tx.tenant_id, timestamp=tx.timestamp,
             decision=decision, risk_score=round(final, 4),
@@ -156,6 +174,8 @@ class DecisionOrchestrator:
                      ("high_risk" if final >= settings.DECISION_THRESHOLD_REVIEW else "normal"),
             model_id="aegis-ensemble@2.0.0", policy_version=self.policy_version,
         )
+        # Attach FX proof to assessment dict (DecisionRepository reads it)
+        assessment.fx_proof = fx_proof
 
         # 13. Persist transaction + decision
         tx_row = {

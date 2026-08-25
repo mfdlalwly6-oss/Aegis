@@ -94,10 +94,12 @@ class GeoPoint(BaseModel):
 
 class Transaction(BaseModel):
     """Universal transaction schema — accepts card, wire, wallet, P2P, crypto."""
-    model_config = ConfigDict(json_schema_extra={"example": {
-        "amount": 199.99, "currency": "USD", "channel": "wallet",
-        "sender_account_id": "acct_1", "beneficiary_account_id": "acct_2",
-    }})
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={"example": {
+            "amount": 199.99, "currency": "USD", "channel": "wallet",
+            "sender_account_id": "acct_1", "beneficiary_account_id": "acct_2",
+        }})
 
     tx_id: str = Field(default_factory=lambda: str(uuid4()))
     tenant_id: str = "default"
@@ -124,6 +126,12 @@ class Transaction(BaseModel):
     geo: GeoPoint | None = None
     session_id: str | None = None
     metadata: dict[str, Any] = {}
+
+    # FX / Money normalization (populated by FxService at ingestion time)
+    reference_amount: float | None = None
+    reference_currency: str | None = None
+    fx_snapshot_id: str | None = None
+    fx_status: str | None = None  # ok | native | stale | divergent | missing
 
 
 class RuleHit(BaseModel):

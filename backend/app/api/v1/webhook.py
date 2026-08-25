@@ -13,9 +13,6 @@ from app.api.deps import get_registry
 from app.core.config import settings
 from app.models.schemas import BehaviorSignals, DeviceContext, GeoPoint, Transaction
 from app.security import verify_signature
-from app.services.fx_service import FxService
-from app.repositories.fx_rate_repo import FxRateRepository
-from app.repositories.currency_repo import CurrencyRepository
 
 router = APIRouter()
 
@@ -78,17 +75,6 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
         metadata.setdefault("billing_country", metadata["customer"].get("billing_country"))
         metadata.pop("customer", None)
 
-    # FX normalization: produce Money with reference_amount + fx proof
-    ccy = src.get("currency", "USD").upper()
-    region = src.get("region") or ctx.get("region") or settings.FX_DEFAULT_REGION
-    fx_repo = FxRateRepository(registry.db) if hasattr(registry, 'db') else None
-    fx_svc = FxService(fx_repo, currency_checker=lambda c: CurrencyRepository(registry.db).is_known(c)) if fx_repo else None
-    money = fx_svc.normalize(amount, ccy, region=region) if fx_svc else None
-    fx_status = money.fx.status.value if money and money.fx else None
-    fx_snapshot_id = money.fx.rate_id if money and money.fx and hasattr(money.fx, 'rate_id') else None
-    reference_amount = money.reference_amount if money else None
-    reference_currency = money.reference_currency if money else settings.REFERENCE_CURRENCY
-
     return Transaction(
         tx_id=str(src.get("tx_id") or src.get("transaction_id") or uuid.uuid4()),
         tenant_id=tenant_id,
@@ -114,6 +100,24 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
         session_id=src.get("session_id") or ctx.get("session_id"),
         metadata=metadata,
     )
+
+
+def _apply_fx(registry, tx: Transaction, body: dict) -> Transaction:
+    """Populate FX fields on a Transaction after creation. Called by webhook/score endpoints.
+    Mutates tx in place; returns tx for chaining."""
+    src = body.get("transaction", body)
+    ctx = body.get("context", {})
+    ccy = (tx.currency or "USD").upper()
+    region = src.get("region") or ctx.get("region") or settings.FX_DEFAULT_REGION
+    institution_rate = src.get("institution_rate") or ctx.get("institution_rate")
+    institution_rate = float(institution_rate) if institution_rate else None
+    money = registry.fx.normalize(
+        tx.amount, ccy, region=region, institution_rate=institution_rate)
+    tx.reference_amount = money.reference_amount
+    tx.reference_currency = money.reference_currency
+    tx.fx_status = money.fx.status.value if money.fx else None
+    tx.fx_snapshot_id = getattr(money.fx, "rate_id", None) if money.fx else None
+    return tx
 
 
 @router.post("/wallet/webhook", summary="Multi-tenant fraud check webhook")

@@ -23,6 +23,9 @@ from app.repositories import (
 )
 from app.rules.engine import RuleEngine
 from app.services.orchestrator import DecisionOrchestrator
+from app.services.fx_service import FxService
+from app.repositories.currency_repo import CurrencyRepository
+from app.repositories.fx_rate_repo import FxRateRepository
 from app.streaming import EventBus
 
 logger = structlog.get_logger(__name__)
@@ -68,6 +71,12 @@ class ServiceRegistry:
         self.watchlist_repo = WatchlistRepository(self.db)
         self.user_repo = UserRepository(self.db)
         self.investigators = InvestigatorRepository(self.db)
+        self.currency_repo = CurrencyRepository(self.db)
+        self.fx_rate_repo = FxRateRepository(self.db)
+        self.currency_repo.seed_defaults()
+        self.fx = FxService(
+            self.fx_rate_repo,
+            currency_checker=lambda c: self.currency_repo.is_known(c))
 
         # Bootstrap a first investigator from env when none exists (dev convenience).
         # Investigators are tenant-scoped: use INVESTIGATOR_TENANT_ID, else first
