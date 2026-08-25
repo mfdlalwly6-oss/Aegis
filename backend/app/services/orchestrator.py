@@ -173,9 +173,10 @@ class DecisionOrchestrator:
             typology=aml_sig.typology_matches[0] if aml_sig.typology_matches else
                      ("high_risk" if final >= settings.DECISION_THRESHOLD_REVIEW else "normal"),
             model_id="aegis-ensemble@2.0.0", policy_version=self.policy_version,
+            fx_proof=fx_proof,
+            tx_snapshot=tx.model_dump(mode="json"),
+            features_snapshot=features if isinstance(features, dict) else {},
         )
-        # Attach FX proof to assessment dict (DecisionRepository reads it)
-        assessment.fx_proof = fx_proof
 
         # 13. Persist transaction + decision
         tx_row = {

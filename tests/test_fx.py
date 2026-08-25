@@ -57,7 +57,8 @@ class TestFxConversion:
         assert abs(money.reference_amount - 31.85) < 0.01
 
     def test_cross_rate_via_reference(self, fx_svc, fx_db):
-        # EUR -> SAR: no direct pair, but EUR->USD and USD->SAR exist
+        # EUR -> USD direct pair; EUR must be registered as a known currency first
+        CurrencyRepository(fx_db).add("EUR", "Euro", minor_unit=2)
         fx_repo = FxRateRepository(fx_db)
         fx_repo.add("EUR", "USD", 1.08, source="aegis_reference", region="global")
         money = fx_svc.normalize(100.0, "EUR", region="global")
@@ -72,15 +73,18 @@ class TestFxConversion:
         assert money.fx.status.value == "missing"
 
     def test_stale_rate_flag(self, fx_svc, fx_db):
+        CurrencyRepository(fx_db).add("GBP", "Pound Sterling", minor_unit=2)
         fx_repo = FxRateRepository(fx_db)
+        row = fx_repo.add("GBP", "USD", 1.25, source="aegis_reference", region="global")
+        # Backdate fetched_at so the rate is older than FX_STALE_HOURS
         old_time = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
-        fx_repo.add("GBP", "USD", 1.25, source="aegis_reference", region="global",
-                    valid_from=old_time)
+        fx_db.execute("UPDATE fx_rates SET fetched_at=? WHERE rate_id=?", (old_time, row["rate_id"]))
         money = fx_svc.normalize(100.0, "GBP", region="global")
         assert money.reference_amount is not None
         assert money.fx.status.value == "stale"
 
     def test_divergent_rate_flag(self, fx_svc, fx_db):
+        CurrencyRepository(fx_db).add("JPY", "Japanese Yen", minor_unit=0)
         fx_repo = FxRateRepository(fx_db)
         fx_repo.add("JPY", "USD", 0.0067, source="aegis_reference", region="global")
         # institution reports 0.0070 (>3% divergence from 0.0067)
@@ -91,11 +95,13 @@ class TestFxConversion:
         assert money.fx.divergence_pct > 3.0
 
     def test_region_specific_rate(self, fx_svc):
-        # Aden rate (600) should be preferred over global (1570) for YER
+        # Region "aden" pair (YER->USD@aden = 0.000636942675) must win over "global".
         money = fx_svc.normalize(100000.0, "YER", region="aden")
         assert money.reference_amount is not None
-        # 100000 YER / 600 USD/YER = 166.67 USD
-        assert abs(money.reference_amount - 166.67) < 0.01
+        assert abs(money.reference_amount - 63.6943) < 0.01
+        # And it must DIFFER from the global-region result (proves region routing works)
+        money_g = fx_svc.normalize(100000.0, "YER", region="global")
+        assert abs(money_g.reference_amount - money.reference_amount) > 0.001
 
     def test_fx_snapshot_immutable(self, fx_svc):
         money1 = fx_svc.normalize(1000.0, "SAR", region="global")
