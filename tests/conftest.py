@@ -19,6 +19,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("AEGIS_SECRET_KEY", "test-secret-key-that-is-long-enough-for-hs256")
     monkeypatch.setenv("AEGIS_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("AEGIS_DB_PATH", str(tmp_path / "aegis-test.db"))
+    monkeypatch.setenv("AEGIS_DB_DRIVER", "sqlite")  # hard isolation: tests never touch live PG
     monkeypatch.setenv("AEGIS_PUBLIC_URL", "http://testserver")
     monkeypatch.setenv("AEGIS_LEGACY_SECRET", "")
     monkeypatch.setenv("OPENROUTER_KEYS", "")

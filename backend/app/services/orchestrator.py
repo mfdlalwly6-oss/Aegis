@@ -110,7 +110,8 @@ class DecisionOrchestrator:
         # 9. Decision — sanctions hit forces BLOCK; FX missing forces review
         fx_missing = getattr(tx, "fx_status", None) == "missing"
         if fx_missing:
-            fx_missing_action = self._resolve_policy(tx.tenant_id).get("fx_missing_action", "review")
+            _pol = self._resolve_policy(tx.tenant_id) if hasattr(self, "_resolve_policy") else {}
+            fx_missing_action = _pol.get("fx_missing_action", settings.FX_MISSING_DECISION)
             if fx_missing_action == "block":
                 decision = Decision.BLOCK
                 final = max(final, settings.DECISION_THRESHOLD_BLOCK)
