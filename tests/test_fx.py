@@ -15,6 +15,7 @@ def fx_db(tmp_path, monkeypatch):
     monkeypatch.setenv("AEGIS_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("AEGIS_DB_PATH", str(tmp_path / "aegis-test.db"))
     monkeypatch.setenv("AEGIS_ENV", "development")
+    monkeypatch.setenv("AEGIS_DB_DRIVER", "sqlite")  # isolate: never touch live PG
     from app.core.config import clear_settings_cache
     clear_settings_cache()
     db = Database()
@@ -30,10 +31,8 @@ def fx_svc(fx_db):
     currency_repo.seed_defaults()
     # Seed reference rates
     fx_repo.add("SAR", "USD", 0.266666666667, source="aegis_reference", region="global")
-    fx_repo.add("USD", "YER", 1570.0, source="aegis_reference", region="global")
-    fx_repo.add("USD", "YER", 600.0, source="aegis_reference", region="aden")
-    fx_repo.add("YER", "USD", 0.000636942675, source="aegis_reference", region="global")
-    fx_repo.add("YER", "USD", 0.000636942675, source="aegis_reference", region="aden")
+    fx_repo.add("YER", "USD", 0.000636942675, source="aegis_reference", region="global")  # 1/1570
+    fx_repo.add("YER", "USD", 0.001666666667, source="aegis_reference", region="aden")     # 1/600
     return FxService(fx_repo, currency_checker=lambda c: currency_repo.is_known(c))
 
 
@@ -95,13 +94,15 @@ class TestFxConversion:
         assert money.fx.divergence_pct > 3.0
 
     def test_region_specific_rate(self, fx_svc):
-        # Region "aden" pair (YER->USD@aden = 0.000636942675) must win over "global".
+        # aden rate 1/600 -> 166.67 USD; global rate 1/1570 -> 63.69 USD. Must differ.
         money = fx_svc.normalize(100000.0, "YER", region="aden")
         assert money.reference_amount is not None
-        assert abs(money.reference_amount - 63.6943) < 0.01
-        # And it must DIFFER from the global-region result (proves region routing works)
+        assert abs(money.reference_amount - 166.6667) < 0.01
+        assert money.fx.region == "aden"
         money_g = fx_svc.normalize(100000.0, "YER", region="global")
-        assert abs(money_g.reference_amount - money.reference_amount) > 0.001
+        assert abs(money_g.reference_amount - 63.6943) < 0.01
+        assert money_g.fx.region == "global"
+        assert abs(money_g.reference_amount - money.reference_amount) > 100.0
 
     def test_fx_snapshot_immutable(self, fx_svc):
         money1 = fx_svc.normalize(1000.0, "SAR", region="global")
