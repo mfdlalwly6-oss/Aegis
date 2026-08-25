@@ -1,6 +1,7 @@
 """Shared test fixtures — isolated SQLite per test, real FastAPI TestClient.
 Each test gets a fresh DB and a freshly imported app (settings reloaded from env).
 """
+
 from __future__ import annotations
 
 import sys

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.db import Database
 
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class RuleRepository:
@@ -22,37 +22,51 @@ class RuleRepository:
             "severity=excluded.severity,score=excluded.score,enabled=excluded.enabled,"
             "tags_json=excluded.tags_json,description=excluded.description,"
             "when_json=excluded.when_json",
-            (rule["id"], tenant_id, rule["name"], rule.get("severity", "medium"),
-             float(rule.get("score", 0.2)), int(rule.get("enabled", True)),
-             json.dumps(rule.get("tags", [])), rule.get("description", ""),
-             json.dumps(rule["when"]), utcnow()))
+            (
+                rule["id"],
+                tenant_id,
+                rule["name"],
+                rule.get("severity", "medium"),
+                float(rule.get("score", 0.2)),
+                int(rule.get("enabled", True)),
+                json.dumps(rule.get("tags", [])),
+                rule.get("description", ""),
+                json.dumps(rule["when"]),
+                utcnow(),
+            ),
+        )
 
     def list_all(self, tenant_id: str | None = None) -> list[dict]:
         """Platform rules (tenant_id IS NULL) + tenant-specific overrides."""
-        rows = self.db.query(
-            "SELECT * FROM rules WHERE tenant_id IS NULL OR tenant_id=?",
-            (tenant_id or "",))
+        rows = self.db.query("SELECT * FROM rules WHERE tenant_id IS NULL OR tenant_id=?", (tenant_id or "",))
         out = []
         for r in rows:
-            out.append({
-                "id": r["rule_id"], "tenant_id": r["tenant_id"], "name": r["name"],
-                "severity": r["severity"], "score": r["score"],
-                "enabled": bool(r["enabled"]), "tags": json.loads(r["tags_json"]),
-                "description": r["description"], "when": json.loads(r["when_json"]),
-            })
+            out.append(
+                {
+                    "id": r["rule_id"],
+                    "tenant_id": r["tenant_id"],
+                    "name": r["name"],
+                    "severity": r["severity"],
+                    "score": r["score"],
+                    "enabled": bool(r["enabled"]),
+                    "tags": json.loads(r["tags_json"]),
+                    "description": r["description"],
+                    "when": json.loads(r["when_json"]),
+                }
+            )
         return out
 
     def delete(self, rule_id: str, tenant_id: str | None = None) -> bool:
         cur = self.db.execute(
             "DELETE FROM rules WHERE rule_id=? AND (tenant_id IS NULL OR tenant_id=?)",
-            (rule_id, tenant_id or ""))
+            (rule_id, tenant_id or ""),
+        )
         return cur.rowcount > 0
 
     def seed_defaults(self, rules: list[dict]) -> int:
         count = 0
         for rule in rules:
-            existing = self.db.query_one(
-                "SELECT 1 FROM rules WHERE rule_id=?", (rule["id"],))
+            existing = self.db.query_one("SELECT 1 FROM rules WHERE rule_id=?", (rule["id"],))
             if not existing:
                 self.upsert(rule, tenant_id=None)
                 count += 1

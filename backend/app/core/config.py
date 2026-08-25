@@ -1,6 +1,7 @@
 """Central configuration — 12-factor, environment-driven.
 All values come from environment variables or .env. No secrets in code.
 """
+
 from functools import lru_cache
 from typing import Literal
 
@@ -26,8 +27,8 @@ class Settings(BaseSettings):
     OWNER_TOKEN: str = "aegis-dev-owner-token"
     DATA_DIR: str = "/tmp/aegis-data"
     DB_PATH: str = ""
-    DB_DRIVER: str = "sqlite"          # sqlite | postgres (TASK 1)
-    DATABASE_URL: str = ""             # postgresql://user:pass@host:5432/db when postgres (TASK 1)
+    DB_DRIVER: str = "sqlite"  # sqlite | postgres (TASK 1)
+    DATABASE_URL: str = ""  # postgresql://user:pass@host:5432/db when postgres (TASK 1)
     LEGACY_SECRET: str = ""
     PUBLIC_URL: str = "http://localhost:8000"
 
@@ -57,12 +58,12 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:8000"
 
     # FX / multi-currency (risk reference layer)
-    REFERENCE_CURRENCY: str = "USD"          # single decision reference (FATF-equivalent)
-    DISPLAY_CURRENCY: str = "YER"            # local display/policy reference (derived, not stored truth)
-    FX_DEFAULT_REGION: str = "global"        # data-driven; Yemen regions live in fx_rates rows
-    FX_STALE_HOURS: int = 24                 # rate older than this => FX_STALE
-    FX_DIVERGENCE_PCT: float = 3.0           # institution rate deviation => FX_DIVERGENT flag
-    FX_MISSING_DECISION: str = "review"      # unknown currency => never silent ALLOW, never blind BLOCK
+    REFERENCE_CURRENCY: str = "USD"  # single decision reference (FATF-equivalent)
+    DISPLAY_CURRENCY: str = "YER"  # local display/policy reference (derived, not stored truth)
+    FX_DEFAULT_REGION: str = "global"  # data-driven; Yemen regions live in fx_rates rows
+    FX_STALE_HOURS: int = 24  # rate older than this => FX_STALE
+    FX_DIVERGENCE_PCT: float = 3.0  # institution rate deviation => FX_DIVERGENT flag
+    FX_MISSING_DECISION: str = "review"  # unknown currency => never silent ALLOW, never blind BLOCK
 
     # Observability
     OTEL_ENDPOINT: str = ""
@@ -89,6 +90,7 @@ class Settings(BaseSettings):
     @property
     def openrouter_keys(self) -> list[str]:
         import os
+
         raw = os.environ.get("OPENROUTER_KEYS", "").strip()
         if not raw or raw.startswith("your-"):
             return []

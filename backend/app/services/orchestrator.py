@@ -1,10 +1,10 @@
 """AEGIS Decision Orchestrator — unified fraud pipeline.
 Transaction → Features → Rules → ML → Graph → AML → Behavior → Fuse → Decide → Persist → Alert → Audit
 """
+
 from __future__ import annotations
 
 import time
-from typing import Any
 
 import structlog
 
@@ -16,8 +16,20 @@ logger = structlog.get_logger(__name__)
 
 class DecisionOrchestrator:
     def __init__(
-        self, *, rules, ml, graph, aml_service, features,
-        transactions, decisions, alerts, cases, audit, events, notifications,
+        self,
+        *,
+        rules,
+        ml,
+        graph,
+        aml_service,
+        features,
+        transactions,
+        decisions,
+        alerts,
+        cases,
+        audit,
+        events,
+        notifications,
     ):
         self.rules = rules
         self.ml = ml
@@ -66,8 +78,12 @@ class DecisionOrchestrator:
         return Decision.ALLOW
 
     async def evaluate_and_persist(
-        self, tx: Transaction, raw_payload: dict, actor: str,
-        request_id: str | None = None, idempotency_key: str | None = None,
+        self,
+        tx: Transaction,
+        raw_payload: dict,
+        actor: str,
+        request_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict:
         started = time.perf_counter()
 
@@ -99,13 +115,17 @@ class DecisionOrchestrator:
         behavior_score = self._behavior_score(tx)
 
         # 8. Weighted fusion
-        final = min(1.0, max(0.0,
-            rule_score * settings.WEIGHT_RULES +
-            ml_prob * settings.WEIGHT_ML +
-            graph_sig.score * settings.WEIGHT_GRAPH +
-            aml_sig.score * settings.WEIGHT_AML +
-            behavior_score * settings.WEIGHT_BEHAVIOR
-        ))
+        final = min(
+            1.0,
+            max(
+                0.0,
+                rule_score * settings.WEIGHT_RULES
+                + ml_prob * settings.WEIGHT_ML
+                + graph_sig.score * settings.WEIGHT_GRAPH
+                + aml_sig.score * settings.WEIGHT_AML
+                + behavior_score * settings.WEIGHT_BEHAVIOR,
+            ),
+        )
 
         # 9. Decision — sanctions hit forces BLOCK; FX missing forces review
         fx_missing = getattr(tx, "fx_status", None) == "missing"
@@ -139,6 +159,7 @@ class DecisionOrchestrator:
         if final >= settings.AI_MIN_SCORE and settings.AI_ENABLED:
             try:
                 from app.agents.fraud_agent import FraudAgent
+
                 agent = FraudAgent()
                 ai_out = await agent.analyze(
                     tx.model_dump(mode="json"),
@@ -161,19 +182,30 @@ class DecisionOrchestrator:
             "fx_status": getattr(tx, "fx_status", None),
         }
         assessment = RiskAssessment(
-            tx_id=tx.tx_id, tenant_id=tx.tenant_id, timestamp=tx.timestamp,
-            decision=decision, risk_score=round(final, 4),
-            risk_band=self._band(final), latency_ms=round(latency_ms, 2),
-            rule_score=round(rule_score, 4), ml_score=round(ml_prob, 4),
-            graph_score=round(graph_sig.score, 4), aml_score=round(aml_sig.score, 4),
+            tx_id=tx.tx_id,
+            tenant_id=tx.tenant_id,
+            timestamp=tx.timestamp,
+            decision=decision,
+            risk_score=round(final, 4),
+            risk_band=self._band(final),
+            latency_ms=round(latency_ms, 2),
+            rule_score=round(rule_score, 4),
+            ml_score=round(ml_prob, 4),
+            graph_score=round(graph_sig.score, 4),
+            aml_score=round(aml_sig.score, 4),
             behavior_score=round(behavior_score, 4),
-            rules=rules_hits, ml_models=ml_reports,
-            graph_signal=graph_sig, aml_signal=aml_sig,
-            top_reasons=top_reasons, reasoning_ar=reasoning_ar,
+            rules=rules_hits,
+            ml_models=ml_reports,
+            graph_signal=graph_sig,
+            aml_signal=aml_sig,
+            top_reasons=top_reasons,
+            reasoning_ar=reasoning_ar,
             ai_model=ai_model,
-            typology=aml_sig.typology_matches[0] if aml_sig.typology_matches else
-                     ("high_risk" if final >= settings.DECISION_THRESHOLD_REVIEW else "normal"),
-            model_id="aegis-ensemble@2.0.0", policy_version=self.policy_version,
+            typology=aml_sig.typology_matches[0]
+            if aml_sig.typology_matches
+            else ("high_risk" if final >= settings.DECISION_THRESHOLD_REVIEW else "normal"),
+            model_id="aegis-ensemble@2.0.0",
+            policy_version=self.policy_version,
             fx_proof=fx_proof,
             tx_snapshot=tx.model_dump(mode="json"),
             features_snapshot=features if isinstance(features, dict) else {},
@@ -182,9 +214,12 @@ class DecisionOrchestrator:
 
         # 13. Persist transaction + decision
         tx_row = {
-            "tx_id": tx.tx_id, "tenant_id": tx.tenant_id,
-            "timestamp": tx.timestamp.isoformat(), "channel": tx.channel.value,
-            "amount": tx.amount, "currency": tx.currency,
+            "tx_id": tx.tx_id,
+            "tenant_id": tx.tenant_id,
+            "timestamp": tx.timestamp.isoformat(),
+            "channel": tx.channel.value,
+            "amount": tx.amount,
+            "currency": tx.currency,
             "reference_amount": getattr(tx, "reference_amount", None),
             "reference_currency": getattr(tx, "reference_currency", None),
             "fx_snapshot_id": getattr(tx, "fx_snapshot_id", None),
@@ -194,7 +229,8 @@ class DecisionOrchestrator:
             "beneficiary_account_id": tx.beneficiary_account_id,
             "beneficiary_user_id": tx.beneficiary_user_id,
             "beneficiary_country": tx.beneficiary_country,
-            "merchant_id": tx.merchant_id, "merchant_name": tx.merchant_name,
+            "merchant_id": tx.merchant_id,
+            "merchant_name": tx.merchant_name,
             "device_id": tx.device.device_id if tx.device else None,
             "ip": str(tx.device.ip) if tx.device and tx.device.ip else None,
             "ip_country": tx.device.ip_country if tx.device else None,
@@ -209,26 +245,46 @@ class DecisionOrchestrator:
         created_alert = None
         created_case = None
         if decision in (Decision.CHALLENGE, Decision.REVIEW, Decision.BLOCK):
-            severity = "critical" if decision == Decision.BLOCK else \
-                       "high" if decision == Decision.REVIEW else "medium"
+            severity = (
+                "critical"
+                if decision == Decision.BLOCK
+                else "high"
+                if decision == Decision.REVIEW
+                else "medium"
+            )
             created_alert = self.alerts.create(
-                tx.tenant_id, tx.tx_id, severity,
-                f"{decision.value.upper()} — risk={final:.2f}",
-                reasoning_ar)
+                tx.tenant_id, tx.tx_id, severity, f"{decision.value.upper()} — risk={final:.2f}", reasoning_ar
+            )
             if decision in (Decision.REVIEW, Decision.BLOCK):
                 created_case = self.cases.create(
-                    tx.tenant_id, f"Case: {tx.tx_id[:16]}",
-                    priority=severity, narrative=reasoning_ar,
-                    tx_ids=[tx.tx_id], alert_ids=[created_alert["alert_id"]])
+                    tx.tenant_id,
+                    f"Case: {tx.tx_id[:16]}",
+                    priority=severity,
+                    narrative=reasoning_ar,
+                    tx_ids=[tx.tx_id],
+                    alert_ids=[created_alert["alert_id"]],
+                )
 
         # 16. Audit
-        self.audit.log(tx.tenant_id, actor, "transaction.scored",
-                       "transaction", tx.tx_id, request_id,
-                       {"decision": decision.value, "risk_score": final})
+        self.audit.log(
+            tx.tenant_id,
+            actor,
+            "transaction.scored",
+            "transaction",
+            tx.tx_id,
+            request_id,
+            {"decision": decision.value, "risk_score": final},
+        )
         if created_alert:
-            self.audit.log(tx.tenant_id, actor, "alert.created",
-                           "alert", created_alert["alert_id"], request_id,
-                           {"tx_id": tx.tx_id, "severity": severity})
+            self.audit.log(
+                tx.tenant_id,
+                actor,
+                "alert.created",
+                "alert",
+                created_alert["alert_id"],
+                request_id,
+                {"tx_id": tx.tx_id, "severity": severity},
+            )
 
         # 17. Notify + publish event
         if created_alert:

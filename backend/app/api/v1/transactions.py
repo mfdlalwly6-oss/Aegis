@@ -1,8 +1,9 @@
 """Transaction ingestion & scoring API — owner-secured direct scoring."""
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.api.deps import get_registry, require_owner
-from app.api.v1.webhook import normalize_transaction, _apply_fx
+from app.api.v1.webhook import _apply_fx, normalize_transaction
 
 router = APIRouter()
 

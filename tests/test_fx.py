@@ -1,12 +1,13 @@
 """FX service tests — conversion, staleness, missing, divergent, cross-rate, inverse."""
-from datetime import datetime, timezone, timedelta
+
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from app.db import Database
-from app.services.fx_service import FxService
-from app.repositories.fx_rate_repo import FxRateRepository
 from app.repositories.currency_repo import CurrencyRepository
-from app.core.config import settings
+from app.repositories.fx_rate_repo import FxRateRepository
+from app.services.fx_service import FxService
 
 
 @pytest.fixture()
@@ -17,6 +18,7 @@ def fx_db(tmp_path, monkeypatch):
     monkeypatch.setenv("AEGIS_ENV", "development")
     monkeypatch.setenv("AEGIS_DB_DRIVER", "sqlite")  # isolate: never touch live PG
     from app.core.config import clear_settings_cache
+
     clear_settings_cache()
     db = Database()
     db.migrate()
@@ -32,7 +34,7 @@ def fx_svc(fx_db):
     # Seed reference rates
     fx_repo.add("SAR", "USD", 0.266666666667, source="aegis_reference", region="global")
     fx_repo.add("YER", "USD", 0.000636942675, source="aegis_reference", region="global")  # 1/1570
-    fx_repo.add("YER", "USD", 0.001666666667, source="aegis_reference", region="aden")     # 1/600
+    fx_repo.add("YER", "USD", 0.001666666667, source="aegis_reference", region="aden")  # 1/600
     return FxService(fx_repo, currency_checker=lambda c: currency_repo.is_known(c))
 
 
@@ -76,7 +78,7 @@ class TestFxConversion:
         fx_repo = FxRateRepository(fx_db)
         row = fx_repo.add("GBP", "USD", 1.25, source="aegis_reference", region="global")
         # Backdate fetched_at so the rate is older than FX_STALE_HOURS
-        old_time = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+        old_time = (datetime.now(UTC) - timedelta(hours=48)).isoformat()
         fx_db.execute("UPDATE fx_rates SET fetched_at=? WHERE rate_id=?", (old_time, row["rate_id"]))
         money = fx_svc.normalize(100.0, "GBP", region="global")
         assert money.reference_amount is not None

@@ -1,1 +1,3 @@
-from .providers import NotificationProvider, ConsoleNotificationProvider, WebhookNotificationProvider
+from .providers import ConsoleNotificationProvider as ConsoleNotificationProvider
+from .providers import NotificationProvider as NotificationProvider
+from .providers import WebhookNotificationProvider as WebhookNotificationProvider

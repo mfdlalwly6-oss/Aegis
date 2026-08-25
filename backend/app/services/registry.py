@@ -1,6 +1,7 @@
 """Service registry — instantiates and wires all AEGIS core services.
 All external dependencies are optional and fail gracefully.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,15 +18,22 @@ from app.graph.engine import GraphEngine
 from app.ml.ensemble import EnsembleScorer
 from app.notifications.providers import ConsoleNotificationProvider
 from app.repositories import (
-    AlertRepository, AuditRepository, CaseRepository, DecisionRepository,
-    InvestigatorRepository, RuleRepository, TenantRepository,
-    TransactionRepository, UserRepository, WatchlistRepository,
+    AlertRepository,
+    AuditRepository,
+    CaseRepository,
+    DecisionRepository,
+    InvestigatorRepository,
+    RuleRepository,
+    TenantRepository,
+    TransactionRepository,
+    UserRepository,
+    WatchlistRepository,
 )
-from app.rules.engine import RuleEngine
-from app.services.orchestrator import DecisionOrchestrator
-from app.services.fx_service import FxService
 from app.repositories.currency_repo import CurrencyRepository
 from app.repositories.fx_rate_repo import FxRateRepository
+from app.rules.engine import RuleEngine
+from app.services.fx_service import FxService
+from app.services.orchestrator import DecisionOrchestrator
 from app.streaming import EventBus
 
 logger = structlog.get_logger(__name__)
@@ -74,9 +82,7 @@ class ServiceRegistry:
         self.currency_repo = CurrencyRepository(self.db)
         self.fx_rate_repo = FxRateRepository(self.db)
         self.currency_repo.seed_defaults()
-        self.fx = FxService(
-            self.fx_rate_repo,
-            currency_checker=lambda c: self.currency_repo.is_known(c))
+        self.fx = FxService(self.fx_rate_repo, currency_checker=lambda c: self.currency_repo.is_known(c))
 
         # Bootstrap a first investigator from env when none exists (dev convenience).
         # Investigators are tenant-scoped: use INVESTIGATOR_TENANT_ID, else first
@@ -87,13 +93,11 @@ class ServiceRegistry:
             tenant_id = getattr(settings, "INVESTIGATOR_TENANT_ID", "") or ""
             if not tenant_id:
                 tenants = self.tenants.list()
-                tenant_id = next((t["tenant_id"] for t in tenants if t["status"] == "active"),
-                                 "platform")
-            self.investigators.create(tenant_id, inv_email,
-                                      getattr(settings, "INVESTIGATOR_NAME", "") or "محقق الاحتيال",
-                                      inv_pass)
-            logger.info("investigator.bootstrapped", email=inv_email,
-                        tenant_id=tenant_id)
+                tenant_id = next((t["tenant_id"] for t in tenants if t["status"] == "active"), "platform")
+            self.investigators.create(
+                tenant_id, inv_email, getattr(settings, "INVESTIGATOR_NAME", "") or "محقق الاحتيال", inv_pass
+            )
+            logger.info("investigator.bootstrapped", email=inv_email, tenant_id=tenant_id)
 
         # 3. Seed default rules from YAML into DB
         rules_path = Path(__file__).parent.parent / "rules" / "default_ruleset.yaml"
@@ -132,11 +136,18 @@ class ServiceRegistry:
 
         # 11. Orchestrator (unified pipeline)
         self.orchestrator = DecisionOrchestrator(
-            rules=self.rule_engine, ml=self.ml_scorer, graph=self.graph_engine,
-            aml_service=self.aml_service, features=self.features,
-            transactions=self.transactions, decisions=self.decisions,
-            alerts=self.alerts, cases=self.cases,
-            audit=self.audit, events=self.events, notifications=self.notifications,
+            rules=self.rule_engine,
+            ml=self.ml_scorer,
+            graph=self.graph_engine,
+            aml_service=self.aml_service,
+            features=self.features,
+            transactions=self.transactions,
+            decisions=self.decisions,
+            alerts=self.alerts,
+            cases=self.cases,
+            audit=self.audit,
+            events=self.events,
+            notifications=self.notifications,
         )
         logger.info("aegis.initialized", version=settings.VERSION)
 

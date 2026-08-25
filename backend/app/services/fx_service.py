@@ -9,9 +9,10 @@ Principles (enforced here, not by convention):
 - Missing rate for unknown currency  -> FX_MISSING (policy: REVIEW, never silent ALLOW).
 - Institution rate diverging from reference beyond threshold -> FX_DIVERGENT flag.
 """
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 
@@ -28,36 +29,54 @@ class FxService:
         # currency_checker(code)->bool tells whether the currency is known/active.
         self._is_known_currency = currency_checker or (lambda code: True)
 
-    def normalize(self, amount: float, currency: str, *,
-                  region: str | None = None,
-                  institution_rate: float | None = None,
-                  at: datetime | None = None) -> Money:
+    def normalize(
+        self,
+        amount: float,
+        currency: str,
+        *,
+        region: str | None = None,
+        institution_rate: float | None = None,
+        at: datetime | None = None,
+    ) -> Money:
         """Produce the Money object: original untouched + reference value + FX proof."""
         ccy = (currency or "").upper()
         ref_ccy = settings.REFERENCE_CURRENCY.upper()
         region = region or settings.FX_DEFAULT_REGION
-        at = at or datetime.now(timezone.utc)
+        at = at or datetime.now(UTC)
 
-        money = Money(original_amount=amount, original_currency=ccy,
-                      reference_currency=ref_ccy)
+        money = Money(original_amount=amount, original_currency=ccy, reference_currency=ref_ccy)
 
         # Native reference currency — no conversion needed, no FX risk.
         if ccy == ref_ccy:
             money.reference_amount = amount
-            money.fx = FxSnapshot(rate_id="native", base_ccy=ccy, quote_ccy=ref_ccy, rate=1.0,
-                                  rate_type="native", source="aegis_reference",
-                                  region=region, fetched_at=at, valid_from=at,
-                                  status=FxStatus.NATIVE,
-                                  institution_rate=institution_rate)
+            money.fx = FxSnapshot(
+                rate_id="native",
+                base_ccy=ccy,
+                quote_ccy=ref_ccy,
+                rate=1.0,
+                rate_type="native",
+                source="aegis_reference",
+                region=region,
+                fetched_at=at,
+                valid_from=at,
+                status=FxStatus.NATIVE,
+                institution_rate=institution_rate,
+            )
             return money
 
         # Unknown currency entirely — cannot be valued. Never invent a rate.
         if not self._is_known_currency(ccy):
             money.reference_amount = None
-            money.fx = FxSnapshot(base_ccy=ccy, quote_ccy=ref_ccy, rate=None,
-                                  source="none", region=region, fetched_at=at,
-                                  status=FxStatus.MISSING,
-                                  institution_rate=institution_rate)
+            money.fx = FxSnapshot(
+                base_ccy=ccy,
+                quote_ccy=ref_ccy,
+                rate=None,
+                source="none",
+                region=region,
+                fetched_at=at,
+                status=FxStatus.MISSING,
+                institution_rate=institution_rate,
+            )
             logger.warning("fx.missing_currency", currency=ccy, region=region)
             return money
 
@@ -70,14 +89,21 @@ class FxService:
             rate_row, inverted = self.cross_rate(ccy, ref_ccy, region=region, at=at)
         if rate_row is None:
             # Fallback: newest known rate regardless of validity window, flagged STALE.
-            stale_row = self.fx_repo.latest_valid(ccy, ref_ccy, region=region,
-                                                  at=datetime.max.replace(tzinfo=timezone.utc))
+            stale_row = self.fx_repo.latest_valid(
+                ccy, ref_ccy, region=region, at=datetime.max.replace(tzinfo=UTC)
+            )
             if stale_row is None:
                 money.reference_amount = None
-                money.fx = FxSnapshot(base_ccy=ccy, quote_ccy=ref_ccy, rate=None,
-                                      source="none", region=region, fetched_at=at,
-                                      status=FxStatus.MISSING,
-                                      institution_rate=institution_rate)
+                money.fx = FxSnapshot(
+                    base_ccy=ccy,
+                    quote_ccy=ref_ccy,
+                    rate=None,
+                    source="none",
+                    region=region,
+                    fetched_at=at,
+                    status=FxStatus.MISSING,
+                    institution_rate=institution_rate,
+                )
                 return money
             rate_row = stale_row
             is_stale = True
@@ -99,27 +125,37 @@ class FxService:
             divergence_pct = abs(institution_rate - ref_rate) / ref_rate * 100.0
             if divergence_pct > settings.FX_DIVERGENCE_PCT:
                 status = FxStatus.DIVERGENT
-                logger.warning("fx.divergent", currency=ccy, region=region,
-                               institution_rate=institution_rate, ref_rate=ref_rate,
-                               divergence_pct=round(divergence_pct, 2))
+                logger.warning(
+                    "fx.divergent",
+                    currency=ccy,
+                    region=region,
+                    institution_rate=institution_rate,
+                    ref_rate=ref_rate,
+                    divergence_pct=round(divergence_pct, 2),
+                )
 
         money.fx = FxSnapshot(
             rate_id=rate_row.get("rate_id"),
-            base_ccy=ccy, quote_ccy=ref_ccy, rate=ref_rate,
+            base_ccy=ccy,
+            quote_ccy=ref_ccy,
+            rate=ref_rate,
             rate_type=rate_row.get("rate_type", "mid"),
-            source=rate_row["source"], region=rate_row["region"],
+            source=rate_row["source"],
+            region=rate_row["region"],
             spread_pct=rate_row.get("spread_pct"),
             fetched_at=datetime.fromisoformat(rate_row["fetched_at"]),
             valid_from=datetime.fromisoformat(rate_row["valid_from"]),
-            valid_to=(datetime.fromisoformat(rate_row["valid_to"])
-                      if rate_row.get("valid_to") else None),
-            is_stale=is_stale, status=status,
-            institution_rate=institution_rate, divergence_pct=divergence_pct,
+            valid_to=(datetime.fromisoformat(rate_row["valid_to"]) if rate_row.get("valid_to") else None),
+            is_stale=is_stale,
+            status=status,
+            institution_rate=institution_rate,
+            divergence_pct=divergence_pct,
         )
         return money
 
-    def _lookup(self, base: str, quote: str, *, region: str | None,
-                at: datetime | None) -> tuple[dict | None, bool]:
+    def _lookup(
+        self, base: str, quote: str, *, region: str | None, at: datetime | None
+    ) -> tuple[dict | None, bool]:
         """Find a usable rate row. Returns (row, inverted). Tries direct pair,
         then the inverse pair which is inverted to serve the requested direction."""
         row = self.fx_repo.latest_valid(base, quote, region=region, at=at)
@@ -130,8 +166,9 @@ class FxService:
             return inv, True
         return None, False
 
-    def cross_rate(self, base: str, quote: str, *, region: str | None = None,
-                   at: datetime | None = None) -> tuple[dict | None, bool]:
+    def cross_rate(
+        self, base: str, quote: str, *, region: str | None = None, at: datetime | None = None
+    ) -> tuple[dict | None, bool]:
         """Find a cross rate via the reference currency when no direct pair exists.
         Example: YER->SAR when only YER->USD and USD->SAR are stored.
         Returns (synthetic_row, inverted) or (None, False)."""
@@ -145,13 +182,16 @@ class FxService:
             return None, False
         rate1 = float(row1["rate"])
         rate2 = float(row2["rate"])
-        if inv1: rate1 = 1.0 / rate1
-        if inv2: rate2 = 1.0 / rate2
+        if inv1:
+            rate1 = 1.0 / rate1
+        if inv2:
+            rate2 = 1.0 / rate2
         cross_rate_val = rate1 * rate2
         # Build a synthetic row for the snapshot
         synthetic = {
             "rate_id": f"cross_{base}_{quote}",
-            "base_ccy": base, "quote_ccy": quote,
+            "base_ccy": base,
+            "quote_ccy": quote,
             "rate": cross_rate_val,
             "rate_type": "cross",
             "source": f"cross:{row1['source']}+{row2['source']}",
@@ -170,9 +210,9 @@ class FxService:
             return money.original_amount
         if money.reference_amount is None:
             return None
-        row, inverted = self._lookup(settings.REFERENCE_CURRENCY, disp,
-                                     region=region or settings.FX_DEFAULT_REGION,
-                                     at=None)
+        row, inverted = self._lookup(
+            settings.REFERENCE_CURRENCY, disp, region=region or settings.FX_DEFAULT_REGION, at=None
+        )
         if row is None:
             return None
         rate = float(row["rate"])

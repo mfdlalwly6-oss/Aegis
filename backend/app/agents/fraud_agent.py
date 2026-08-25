@@ -1,11 +1,15 @@
 """FraudAgent — optional AI explanation via OpenRouter.
 Used ONLY for explanations; never overrides the deterministic decision.
 """
+
 from __future__ import annotations
-import json, re
-from typing import Any
-from .openrouter import OpenRouterClient
+
+import json
+import re
+
 import structlog
+
+from .openrouter import OpenRouterClient
 
 logger = structlog.get_logger(__name__)
 
@@ -19,15 +23,21 @@ def _extract_json(text: str) -> dict | None:
         pass
     m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
     if m:
-        try: return json.loads(m.group(1))
-        except Exception: pass
+        try:
+            return json.loads(m.group(1))
+        except Exception:
+            pass
     m = re.search(r"(\{[\s\S]*\})", text)
     if m:
-        try: return json.loads(m.group(1))
-        except Exception: pass
+        try:
+            return json.loads(m.group(1))
+        except Exception:
+            pass
     cleaned = re.sub(r",\s*}", "}", text).strip()
-    try: return json.loads(cleaned)
-    except Exception: pass
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
     return None
 
 
@@ -36,9 +46,7 @@ class FraudAgent:
         self.client = OpenRouterClient()
 
     async def analyze(self, tx: dict, rules_hits: list, ml_prob: float) -> dict:
-        rules_safe = [
-            (h.model_dump() if hasattr(h, "model_dump") else h) for h in (rules_hits or [])
-        ]
+        rules_safe = [(h.model_dump() if hasattr(h, "model_dump") else h) for h in (rules_hits or [])]
         prompt = (
             "أنت محلل احتيال مالي. أجب بـ JSON فقط بدون أي نص إضافي.\n"
             f"transaction: {json.dumps(tx, default=str, ensure_ascii=False)[:600]}\n"

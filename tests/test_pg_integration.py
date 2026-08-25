@@ -13,6 +13,7 @@ Coverage:
   * restart persistence: a fresh connection still sees committed rows
   * unique constraint enforcement (api_key) raises instead of corrupting
 """
+
 import threading
 
 import pytest
@@ -37,9 +38,22 @@ def _insert_tenant(db, tenant_id, api_key):
     db.execute(
         "INSERT INTO tenants (tenant_id,name,type,country,plan,contact_email,contact_phone,api_key,hmac_secret,status,policy_json,created_at,investigator_limit,timezone) "
         "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-        (tenant_id, f"Tenant {tenant_id}", "wallet", "YE", "sandbox", None, None,
-         api_key, f"sec-{tenant_id}", "active", "{}",
-         "2026-08-24T00:00:00+00:00", 5, "Asia/Aden"),
+        (
+            tenant_id,
+            f"Tenant {tenant_id}",
+            "wallet",
+            "YE",
+            "sandbox",
+            None,
+            None,
+            api_key,
+            f"sec-{tenant_id}",
+            "active",
+            "{}",
+            "2026-08-24T00:00:00+00:00",
+            5,
+            "Asia/Aden",
+        ),
     )
 
 
@@ -79,14 +93,34 @@ def test_crud_roundtrip(db):
     db.execute(
         "INSERT INTO transactions (tx_id,tenant_id,ts,channel,amount,currency,sender_account_id,beneficiary_account_id,raw_json,features_json,created_at) "
         "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-        ("pg-crud-tx1", "pg-crud-t1", "2026-08-24T00:00:00+00:00", "wallet",
-         1234.5678, "USD", "a1", "b1", "{}", "{}", "2026-08-24T00:00:00+00:00"),
+        (
+            "pg-crud-tx1",
+            "pg-crud-t1",
+            "2026-08-24T00:00:00+00:00",
+            "wallet",
+            1234.5678,
+            "USD",
+            "a1",
+            "b1",
+            "{}",
+            "{}",
+            "2026-08-24T00:00:00+00:00",
+        ),
     )
     db.execute(
         "INSERT INTO decisions (decision_id,tx_id,tenant_id,ts,decision,risk_score,risk_band,latency_ms,created_at) "
         "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-        ("pg-crud-d1", "pg-crud-tx1", "pg-crud-t1", "2026-08-24T00:00:00+00:00",
-         "allow", 0.25, "low", 12.5, "2026-08-24T00:00:00+00:00"),
+        (
+            "pg-crud-d1",
+            "pg-crud-tx1",
+            "pg-crud-t1",
+            "2026-08-24T00:00:00+00:00",
+            "allow",
+            0.25,
+            "low",
+            12.5,
+            "2026-08-24T00:00:00+00:00",
+        ),
     )
     got = db.query_one("SELECT amount, currency FROM transactions WHERE tx_id=%s", ("pg-crud-tx1",))
     assert got and float(got["amount"]) == 1234.5678 and got["currency"] == "USD"
@@ -107,8 +141,19 @@ def test_tenant_isolation_sql_layer(db):
         db.execute(
             "INSERT INTO transactions (tx_id,tenant_id,ts,channel,amount,currency,sender_account_id,beneficiary_account_id,raw_json,features_json,created_at) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (f"pg-iso-{tid}", tid, "2026-08-24T00:00:00+00:00", "wallet", 100, "USD",
-             "s", "b", "{}", "{}", "2026-08-24T00:00:00+00:00"),
+            (
+                f"pg-iso-{tid}",
+                tid,
+                "2026-08-24T00:00:00+00:00",
+                "wallet",
+                100,
+                "USD",
+                "s",
+                "b",
+                "{}",
+                "{}",
+                "2026-08-24T00:00:00+00:00",
+            ),
         )
     a = db.query("SELECT tx_id FROM transactions WHERE tenant_id=%s", ("pg-iso-a",))
     b = db.query("SELECT tx_id FROM transactions WHERE tenant_id=%s", ("pg-iso-b",))
@@ -157,6 +202,7 @@ def test_unique_constraint_enforced(db):
     db.execute("DELETE FROM tenants WHERE tenant_id='pg-uniq'")
     _insert_tenant(db, "pg-uniq", "api_pg_uniq_same")
     from psycopg.errors import UniqueViolation
+
     with pytest.raises(UniqueViolation):
         _insert_tenant(db, "pg-uniq-2", "api_pg_uniq_same")  # same api_key
     db.execute("DELETE FROM tenants WHERE tenant_id IN ('pg-uniq','pg-uniq-2')")

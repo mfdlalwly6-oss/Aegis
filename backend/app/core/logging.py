@@ -1,4 +1,5 @@
 """Structured logging with request-id + tenant-id correlation."""
+
 import logging
 import sys
 

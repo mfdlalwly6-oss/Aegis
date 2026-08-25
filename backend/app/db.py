@@ -2,10 +2,12 @@
 Thread-safe via check_same_thread=False + explicit transactions.
 Swappable to PostgreSQL later: all access goes through app/repositories/.
 """
+
 from __future__ import annotations
 
 import sqlite3
 import threading
+from datetime import UTC
 from pathlib import Path
 
 from app.core.config import settings
@@ -261,46 +263,58 @@ CREATE TABLE IF NOT EXISTS account_profiles (
 
 _MIGRATIONS: list[tuple[str, list[str]]] = [
     ("001_init", [_SCHEMA]),
-    ("002_investigator_workflow", [
-        "ALTER TABLE alerts ADD COLUMN notes_json TEXT NOT NULL DEFAULT '[]'",
-        "ALTER TABLE alerts ADD COLUMN resolution TEXT",
-        "ALTER TABLE cases ADD COLUMN resolution TEXT",
-    ]),
-    ("003_tenant_scoped_investigators", [
-        "ALTER TABLE investigators ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'platform'",
-        "ALTER TABLE tenants ADD COLUMN investigator_limit INTEGER NOT NULL DEFAULT 5",
-        "ALTER TABLE tenants ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Asia/Aden'",
-        "ALTER TABLE tenants ADD COLUMN review_message TEXT",
-    ]),
-    ("005_money_fx", [
-        _MONEY_FX_DDL,
-        # transactions: reference money + FX proof + financial-event semantics.
-        # All nullable — legacy rows stay valid, original (amount, currency) untouched.
-        "ALTER TABLE transactions ADD COLUMN reference_amount REAL",
-        "ALTER TABLE transactions ADD COLUMN reference_currency TEXT",
-        "ALTER TABLE transactions ADD COLUMN fx_snapshot_id TEXT",
-        "ALTER TABLE transactions ADD COLUMN fx_status TEXT",
-        "ALTER TABLE transactions ADD COLUMN region TEXT",
-        "ALTER TABLE transactions ADD COLUMN event_type TEXT NOT NULL DEFAULT 'transfer'",
-        "ALTER TABLE transactions ADD COLUMN direction TEXT NOT NULL DEFAULT 'out'",
-        "ALTER TABLE transactions ADD COLUMN is_internal INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE transactions ADD COLUMN linked_tx_id TEXT",
-        # decisions: immutable audit snapshot of what the engine saw at decision time.
-        "ALTER TABLE decisions ADD COLUMN tx_snapshot_json TEXT",
-        "ALTER TABLE decisions ADD COLUMN features_snapshot_json TEXT",
-        "ALTER TABLE decisions ADD COLUMN fx_proof_json TEXT",
-        # speed up per-account velocity/aggregation on the reference value.
-        "CREATE INDEX IF NOT EXISTS idx_tx_sender_ts ON transactions(tenant_id, sender_account_id, ts)",
-        "CREATE INDEX IF NOT EXISTS idx_tx_ref ON transactions(tenant_id, reference_amount)",
-    ]),
-    ("011_audit_hashchain", [
-        "ALTER TABLE audit_log ADD COLUMN prev_hash TEXT",
-        "ALTER TABLE audit_log ADD COLUMN entry_hash TEXT",
-        "ALTER TABLE decisions ADD COLUMN rule_set_version TEXT",
-        "ALTER TABLE decisions ADD COLUMN model_version TEXT",
-        "ALTER TABLE decisions ADD COLUMN config_version TEXT",
-        "ALTER TABLE decisions ADD COLUMN request_id TEXT",
-    ]),
+    (
+        "002_investigator_workflow",
+        [
+            "ALTER TABLE alerts ADD COLUMN notes_json TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE alerts ADD COLUMN resolution TEXT",
+            "ALTER TABLE cases ADD COLUMN resolution TEXT",
+        ],
+    ),
+    (
+        "003_tenant_scoped_investigators",
+        [
+            "ALTER TABLE investigators ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'platform'",
+            "ALTER TABLE tenants ADD COLUMN investigator_limit INTEGER NOT NULL DEFAULT 5",
+            "ALTER TABLE tenants ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Asia/Aden'",
+            "ALTER TABLE tenants ADD COLUMN review_message TEXT",
+        ],
+    ),
+    (
+        "005_money_fx",
+        [
+            _MONEY_FX_DDL,
+            # transactions: reference money + FX proof + financial-event semantics.
+            # All nullable — legacy rows stay valid, original (amount, currency) untouched.
+            "ALTER TABLE transactions ADD COLUMN reference_amount REAL",
+            "ALTER TABLE transactions ADD COLUMN reference_currency TEXT",
+            "ALTER TABLE transactions ADD COLUMN fx_snapshot_id TEXT",
+            "ALTER TABLE transactions ADD COLUMN fx_status TEXT",
+            "ALTER TABLE transactions ADD COLUMN region TEXT",
+            "ALTER TABLE transactions ADD COLUMN event_type TEXT NOT NULL DEFAULT 'transfer'",
+            "ALTER TABLE transactions ADD COLUMN direction TEXT NOT NULL DEFAULT 'out'",
+            "ALTER TABLE transactions ADD COLUMN is_internal INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE transactions ADD COLUMN linked_tx_id TEXT",
+            # decisions: immutable audit snapshot of what the engine saw at decision time.
+            "ALTER TABLE decisions ADD COLUMN tx_snapshot_json TEXT",
+            "ALTER TABLE decisions ADD COLUMN features_snapshot_json TEXT",
+            "ALTER TABLE decisions ADD COLUMN fx_proof_json TEXT",
+            # speed up per-account velocity/aggregation on the reference value.
+            "CREATE INDEX IF NOT EXISTS idx_tx_sender_ts ON transactions(tenant_id, sender_account_id, ts)",
+            "CREATE INDEX IF NOT EXISTS idx_tx_ref ON transactions(tenant_id, reference_amount)",
+        ],
+    ),
+    (
+        "011_audit_hashchain",
+        [
+            "ALTER TABLE audit_log ADD COLUMN prev_hash TEXT",
+            "ALTER TABLE audit_log ADD COLUMN entry_hash TEXT",
+            "ALTER TABLE decisions ADD COLUMN rule_set_version TEXT",
+            "ALTER TABLE decisions ADD COLUMN model_version TEXT",
+            "ALTER TABLE decisions ADD COLUMN config_version TEXT",
+            "ALTER TABLE decisions ADD COLUMN request_id TEXT",
+        ],
+    ),
 ]
 
 
@@ -314,7 +328,7 @@ ALTER TABLE decisions ADD COLUMN request_id TEXT;
 """
 
 
-def _apply_statements(conn: "sqlite3.Connection", statements: list[str]) -> None:
+def _apply_statements(conn: sqlite3.Connection, statements: list[str]) -> None:
     """Apply DDL defensively — ALTER ADD COLUMN is skipped when the column exists,
     so re-runs and pre-existing schemas never break (forward-only, idempotent)."""
     for sql in statements:
@@ -365,17 +379,16 @@ class Database:
                 "CREATE TABLE IF NOT EXISTS schema_migrations "
                 "(name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
             )
-            from datetime import datetime, timezone
+            from datetime import datetime
+
             for name, statements in _MIGRATIONS:
-                applied = conn.execute(
-                    "SELECT 1 FROM schema_migrations WHERE name=?", (name,)
-                ).fetchone()
+                applied = conn.execute("SELECT 1 FROM schema_migrations WHERE name=?", (name,)).fetchone()
                 if applied:
                     continue
                 _apply_statements(conn, statements)
                 conn.execute(
                     "INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)",
-                    (name, datetime.now(timezone.utc).isoformat()),
+                    (name, datetime.now(UTC).isoformat()),
                 )
                 conn.commit()
                 print(f"MIGRATION_APPLIED {name}")

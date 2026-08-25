@@ -1,4 +1,5 @@
 """OpenTelemetry setup — optional; auto-disabled if package/endpoint unavailable."""
+
 import structlog
 
 from app.core.config import settings
@@ -20,9 +21,9 @@ def setup_telemetry(app) -> None:
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
         provider = TracerProvider(resource=Resource.create({"service.name": "aegis-backend"}))
-        provider.add_span_processor(BatchSpanProcessor(
-            OTLPSpanExporter(endpoint=settings.OTEL_ENDPOINT, insecure=True)
-        ))
+        provider.add_span_processor(
+            BatchSpanProcessor(OTLPSpanExporter(endpoint=settings.OTEL_ENDPOINT, insecure=True))
+        )
         trace.set_tracer_provider(provider)
         FastAPIInstrumentor.instrument_app(app)
         logger.info("telemetry.enabled", endpoint=settings.OTEL_ENDPOINT)

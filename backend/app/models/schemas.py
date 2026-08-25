@@ -1,8 +1,9 @@
 """Pydantic domain schemas — the contract for the fraud pipeline."""
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, IPvAnyAddress
 
@@ -95,16 +96,23 @@ class GeoPoint(BaseModel):
 
 class Transaction(BaseModel):
     """Universal transaction schema — accepts card, wire, wallet, P2P, crypto."""
+
     model_config = ConfigDict(
         populate_by_name=True,
-        json_schema_extra={"example": {
-            "amount": 199.99, "currency": "USD", "channel": "wallet",
-            "sender_account_id": "acct_1", "beneficiary_account_id": "acct_2",
-        }})
+        json_schema_extra={
+            "example": {
+                "amount": 199.99,
+                "currency": "USD",
+                "channel": "wallet",
+                "sender_account_id": "acct_1",
+                "beneficiary_account_id": "acct_2",
+            }
+        },
+    )
 
     tx_id: str = Field(default_factory=lambda: str(uuid4()))
     tenant_id: str = "default"
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     channel: Channel = Channel.WALLET
     amount: float = Field(gt=0)
     currency: str = Field(min_length=3, max_length=3)
@@ -174,10 +182,11 @@ class AMLSignal(BaseModel):
 
 class RiskAssessment(BaseModel):
     """The final unified risk assessment returned to the caller."""
+
     model_config = ConfigDict(protected_namespaces=())
     tx_id: str
     tenant_id: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     decision: Decision
     risk_score: float = Field(ge=0.0, le=1.0)
     risk_band: RiskBand

@@ -1,9 +1,9 @@
 """Notification providers — adapter pattern.
 Default is Console (logs). Webhook provider available if URL configured.
 """
+
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import httpx
@@ -19,8 +19,12 @@ class NotificationProvider:
 
 class ConsoleNotificationProvider(NotificationProvider):
     async def send(self, event_type: str, payload: dict[str, Any]) -> bool:
-        logger.info("notification.console", event_type=event_type,
-                    alert_id=payload.get("alert_id"), tenant_id=payload.get("tenant_id"))
+        logger.info(
+            "notification.console",
+            event_type=event_type,
+            alert_id=payload.get("alert_id"),
+            tenant_id=payload.get("tenant_id"),
+        )
         return True
 
 
@@ -31,10 +35,13 @@ class WebhookNotificationProvider(NotificationProvider):
     async def send(self, event_type: str, payload: dict[str, Any]) -> bool:
         try:
             async with httpx.AsyncClient(timeout=5) as cli:
-                r = await cli.post(self.url, json={
-                    "event_type": event_type,
-                    "payload": payload,
-                })
+                r = await cli.post(
+                    self.url,
+                    json={
+                        "event_type": event_type,
+                        "payload": payload,
+                    },
+                )
                 return r.status_code < 400
         except Exception as e:
             logger.warning("notification.webhook_failed", error=str(e))

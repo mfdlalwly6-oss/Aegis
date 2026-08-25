@@ -1,6 +1,7 @@
 """AEGIS — Fraud Detection Platform · Entry point
 Serves: FastAPI backend + 3 static portals (admin, merchant, investigator)
 """
+
 import asyncio
 import json
 from contextlib import asynccontextmanager
@@ -14,11 +15,11 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import make_asgi_app
 
-from app.api.deps import get_registry, require_investigator, require_owner
+from app.api.deps import require_investigator, require_owner
 from app.api.v1 import router as v1_router
 from app.core.config import settings
 from app.core.logging import configure_logging
-from app.core.middleware import RequestContextMiddleware, RateLimitMiddleware, SecurityHeadersMiddleware
+from app.core.middleware import RateLimitMiddleware, RequestContextMiddleware, SecurityHeadersMiddleware
 from app.core.telemetry import setup_telemetry
 from app.services.registry import ServiceRegistry
 
@@ -63,6 +64,7 @@ app.add_middleware(
 
 app.include_router(v1_router, prefix="/api/v1")
 app.mount("/metrics", make_asgi_app())
+
 
 def _find_portals_dir():
     base = Path(__file__).resolve()
@@ -142,7 +144,7 @@ def _sse_gen(request: Request, registry):
                 try:
                     item = await asyncio.wait_for(queue.get(), timeout=15)
                     yield f"event: {item['event_type']}\ndata: {json.dumps(item['payload'], ensure_ascii=False, default=str)}\n\n"
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": keep-alive\n\n"
         finally:
             registry.events.unsubscribe(queue)
@@ -154,14 +156,11 @@ def _sse_gen(request: Request, registry):
 async def stream(request: Request, owner: str = Depends(require_owner)):
     """SSE stream of live decisions — owner only."""
     registry = request.app.state.registry
-    return StreamingResponse(_sse_gen(request, registry),
-                             media_type="text/event-stream")
+    return StreamingResponse(_sse_gen(request, registry), media_type="text/event-stream")
 
 
 @app.get("/api/v1/investigator/stream")
-async def investigator_stream(request: Request,
-                              inv: dict = Depends(require_investigator)):
+async def investigator_stream(request: Request, inv: dict = Depends(require_investigator)):
     """SSE stream of live risk events — authenticated, tenant-scoped investigators only."""
     registry = request.app.state.registry
-    return StreamingResponse(_sse_gen(request, registry),
-                             media_type="text/event-stream")
+    return StreamingResponse(_sse_gen(request, registry), media_type="text/event-stream")

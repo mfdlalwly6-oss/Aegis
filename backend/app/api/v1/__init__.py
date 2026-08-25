@@ -1,6 +1,19 @@
 from fastapi import APIRouter
-from . import (transactions, alerts, cases, rules, models, graph, health, auth,
-               tenants, webhook, investigator, reports)
+
+from . import (
+    alerts,
+    auth,
+    cases,
+    graph,
+    health,
+    investigator,
+    models,
+    reports,
+    rules,
+    tenants,
+    transactions,
+    webhook,
+)
 
 router = APIRouter()
 router.include_router(auth.router, prefix="/auth", tags=["auth"])

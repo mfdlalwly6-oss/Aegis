@@ -1,8 +1,15 @@
 """
 OpenRouter AI Client — يدير 8 مفاتيح مع round-robin وfallback تلقائي.
 """
+
 from __future__ import annotations
-import os, asyncio, httpx, structlog, itertools, time
+
+import itertools
+import os
+import time
+
+import httpx
+import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -52,11 +59,17 @@ class OpenRouterClient:
                 async with httpx.AsyncClient(timeout=timeout) as cli:
                     r = await cli.post(
                         self.ENDPOINT,
-                        headers={"Authorization": f"Bearer {key}", "HTTP-Referer": "https://aegis-security.io"},
+                        headers={
+                            "Authorization": f"Bearer {key}",
+                            "HTTP-Referer": "https://aegis-security.io",
+                        },
                         json={
                             "model": model,
                             "messages": [
-                                {"role": "system", "content": "أنت محلل احتيال مالي. أجب بـ JSON فقط، بدون أي نص إضافي."},
+                                {
+                                    "role": "system",
+                                    "content": "أنت محلل احتيال مالي. أجب بـ JSON فقط، بدون أي نص إضافي.",
+                                },
                                 {"role": "user", "content": prompt},
                             ],
                             "response_format": {"type": "json_object"},

@@ -1,11 +1,12 @@
 """Fraud check webhook — used by any connected bank/wallet via api_key + HMAC-SHA256.
 Pipeline: auth → signature → idempotency → normalize → orchestrator → persist → respond.
 """
+
 from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -17,8 +18,8 @@ from app.security import verify_signature
 router = APIRouter()
 
 DEFAULT_REVIEW_MESSAGE = (
-    "تم تعليق العملية مؤقتًا للمراجعة الأمنية. يرجى التواصل مع البنك أو "
-    "المؤسسة المالية لإتمام المراجعة.")
+    "تم تعليق العملية مؤقتًا للمراجعة الأمنية. يرجى التواصل مع البنك أو المؤسسة المالية لإتمام المراجعة."
+)
 
 
 def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
@@ -37,9 +38,11 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
 
     ts_raw = src.get("timestamp") or src.get("ts") or body.get("timestamp")
     try:
-        timestamp = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00")) if ts_raw else datetime.now(timezone.utc)
+        timestamp = (
+            datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00")) if ts_raw else datetime.now(UTC)
+        )
     except Exception:
-        timestamp = datetime.now(timezone.utc)
+        timestamp = datetime.now(UTC)
 
     amount = src.get("amount")
     if amount is None:
@@ -49,10 +52,21 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
     for k in ("velocity", "account", "beneficiary", "geo", "customer"):
         if isinstance(ctx.get(k), dict):
             metadata.setdefault(k, ctx[k])
-    for k in ("account_age_days", "seconds_since_password_change", "previous_declines",
-              "previous_chargebacks", "high_risk_merchant", "impossible_travel",
-              "offshore", "emulator", "rooted", "mfa_recently_disabled",
-              "distinct_merchants_1h", "card_declines_1h", "billing_country"):
+    for k in (
+        "account_age_days",
+        "seconds_since_password_change",
+        "previous_declines",
+        "previous_chargebacks",
+        "high_risk_merchant",
+        "impossible_travel",
+        "offshore",
+        "emulator",
+        "rooted",
+        "mfa_recently_disabled",
+        "distinct_merchants_1h",
+        "card_declines_1h",
+        "billing_country",
+    ):
         if k in ctx:
             metadata.setdefault(k, ctx[k])
     for section in ("velocity", "account"):
@@ -82,20 +96,33 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
         channel=src.get("channel", "wallet"),
         amount=float(amount),
         currency=src.get("currency", "USD"),
-        sender_account_id=str(src.get("sender_account_id") or src.get("account_id")
-                              or src.get("from_account") or src.get("sender") or "unknown_sender"),
+        sender_account_id=str(
+            src.get("sender_account_id")
+            or src.get("account_id")
+            or src.get("from_account")
+            or src.get("sender")
+            or "unknown_sender"
+        ),
         sender_user_id=src.get("sender_user_id") or src.get("user_id"),
-        beneficiary_account_id=str(src.get("beneficiary_account_id") or src.get("to_account")
-                                   or src.get("receiver") or src.get("merchant_id")
-                                   or "unknown_beneficiary"),
+        beneficiary_account_id=str(
+            src.get("beneficiary_account_id")
+            or src.get("to_account")
+            or src.get("receiver")
+            or src.get("merchant_id")
+            or "unknown_beneficiary"
+        ),
         beneficiary_user_id=src.get("beneficiary_user_id"),
         beneficiary_country=src.get("beneficiary_country") or metadata.get("country"),
         merchant_id=src.get("merchant_id"),
         merchant_name=src.get("merchant_name"),
-        device=DeviceContext(**{k: v for k, v in device_raw.items()
-                                if k in DeviceContext.model_fields}) if device_raw else None,
-        behavior=BehaviorSignals(**{k: v for k, v in behavior_raw.items()
-                                    if k in BehaviorSignals.model_fields}) if behavior_raw else None,
+        device=DeviceContext(**{k: v for k, v in device_raw.items() if k in DeviceContext.model_fields})
+        if device_raw
+        else None,
+        behavior=BehaviorSignals(
+            **{k: v for k, v in behavior_raw.items() if k in BehaviorSignals.model_fields}
+        )
+        if behavior_raw
+        else None,
         geo=GeoPoint(**geo_raw) if geo_raw and "lat" in geo_raw and "lon" in geo_raw else None,
         session_id=src.get("session_id") or ctx.get("session_id"),
         metadata=metadata,
@@ -111,8 +138,7 @@ def _apply_fx(registry, tx: Transaction, body: dict) -> Transaction:
     region = src.get("region") or ctx.get("region") or settings.FX_DEFAULT_REGION
     institution_rate = src.get("institution_rate") or ctx.get("institution_rate")
     institution_rate = float(institution_rate) if institution_rate else None
-    money = registry.fx.normalize(
-        tx.amount, ccy, region=region, institution_rate=institution_rate)
+    money = registry.fx.normalize(tx.amount, ccy, region=region, institution_rate=institution_rate)
     tx.reference_amount = money.reference_amount
     tx.reference_currency = money.reference_currency
     tx.fx_status = money.fx.status.value if money.fx else None
@@ -134,27 +160,46 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
         if legacy:
             tenant = {"tenant_id": "legacy", "name": "Legacy", "hmac_secret": legacy}
         else:
-            registry.audit.log(None, api_key[:10], "authentication.failure",
-                               "wallet_webhook", None, request_id, {"reason": "invalid_api_key"})
+            registry.audit.log(
+                None,
+                api_key[:10],
+                "authentication.failure",
+                "wallet_webhook",
+                None,
+                request_id,
+                {"reason": "invalid_api_key"},
+            )
             raise HTTPException(401, "invalid_api_key")
 
     raw = await request.body()
     if not verify_signature(tenant["hmac_secret"], raw, signature):
-        registry.audit.log(tenant["tenant_id"], tenant["name"], "authentication.failure",
-                           "wallet_webhook", None, request_id, {"reason": "invalid_signature"})
+        registry.audit.log(
+            tenant["tenant_id"],
+            tenant["name"],
+            "authentication.failure",
+            "wallet_webhook",
+            None,
+            request_id,
+            {"reason": "invalid_signature"},
+        )
         raise HTTPException(401, "invalid_signature")
 
     # Replay guard on transaction timestamp: reject far-future (>5min) or very
     # stale (>72h) events — bounds replay and clock-drift abuse. Reads the
     # timestamp from the raw (already signature-verified) body.
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     try:
         _payload = json.loads(raw.decode("utf-8"))
         _src = _payload.get("transaction", _payload) if isinstance(_payload, dict) else {}
-        body_ts = (_payload.get("timestamp") if isinstance(_payload, dict) else None) or _src.get("timestamp") or _src.get("ts")
+        body_ts = (
+            (_payload.get("timestamp") if isinstance(_payload, dict) else None)
+            or _src.get("timestamp")
+            or _src.get("ts")
+        )
         if body_ts:
             ts = datetime.fromisoformat(str(body_ts).replace("Z", "+00:00"))
-            skew = (ts - datetime.now(timezone.utc)).total_seconds()
+            skew = (ts - datetime.now(UTC)).total_seconds()
             if skew > 300:
                 raise HTTPException(422, "timestamp_in_future")
             if skew < -72 * 3600:
@@ -166,8 +211,15 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
 
     # Suspended/deleted tenants are hard-blocked at ingestion time.
     if tenant.get("status") != "active":
-        registry.audit.log(tenant["tenant_id"], tenant["name"], "transaction.rejected",
-                           "wallet_webhook", None, request_id, {"reason": "tenant_suspended"})
+        registry.audit.log(
+            tenant["tenant_id"],
+            tenant["name"],
+            "transaction.rejected",
+            "wallet_webhook",
+            None,
+            request_id,
+            {"reason": "tenant_suspended"},
+        )
         raise HTTPException(403, "tenant_suspended")
 
     try:
@@ -180,12 +232,19 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
 
     idem_key = request.headers.get("x-idempotency-key") or f"{tenant['tenant_id']}:{tx.tx_id}"
     result = await registry.orchestrator.evaluate_and_persist(
-        tx, body, actor=tenant["name"], request_id=request_id,
+        tx,
+        body,
+        actor=tenant["name"],
+        request_id=request_id,
         idempotency_key=idem_key,
     )
     if result.pop("duplicate", False):
-        return {"tx_id": result["tx_id"], "decision": result["decision"],
-                "risk_score": result["risk_score"], "duplicate": True}
+        return {
+            "tx_id": result["tx_id"],
+            "decision": result["decision"],
+            "risk_score": result["risk_score"],
+            "duplicate": True,
+        }
 
     review_message = None
     if result["decision"] == "review":
@@ -209,14 +268,22 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
 
 
 @router.get("/decisions/recent")
-async def recent_decisions(limit: int = 20, request: Request = None,
-                           registry=Depends(get_registry)):
+async def recent_decisions(limit: int = 20, request: Request = None, registry=Depends(get_registry)):
     """Public read of recent decisions — intentionally limited fields.
     Owner sees full data via /admin/decisions/recent. Merchants via /admin/merchant/decisions.
     """
     rows = registry.decisions.recent(limit=min(limit, 100))
-    return [{"tx_id": r["tx_id"], "tenant_id": r["tenant_id"], "ts": r["ts"],
-             "decision": r["decision"], "risk_score": r["risk_score"],
-             "risk_band": r["risk_band"], "typology": r["typology"],
-             "reasoning_ar": r["reasoning_ar"], "ai_model": r["ai_model"]}
-            for r in rows]
+    return [
+        {
+            "tx_id": r["tx_id"],
+            "tenant_id": r["tenant_id"],
+            "ts": r["ts"],
+            "decision": r["decision"],
+            "risk_score": r["risk_score"],
+            "risk_band": r["risk_band"],
+            "typology": r["typology"],
+            "reasoning_ar": r["reasoning_ar"],
+            "ai_model": r["ai_model"],
+        }
+        for r in rows
+    ]

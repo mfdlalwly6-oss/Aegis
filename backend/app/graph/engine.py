@@ -1,6 +1,7 @@
 """AEGIS Graph Intelligence Engine — NetworkX-based, fed from transaction history.
 Detects shared devices, shared IPs, known-fraud hops, and community rings.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -50,13 +51,15 @@ class GraphEngine:
         self._account_links.setdefault(tx["sender_account_id"], set()).add(tx["beneficiary_account_id"])
 
     def add_transaction(self, tx: Transaction) -> None:
-        self._add_dict({
-            "tx_id": tx.tx_id,
-            "sender_account_id": tx.sender_account_id,
-            "beneficiary_account_id": tx.beneficiary_account_id,
-            "device_id": tx.device.device_id if tx.device else None,
-            "ip": str(tx.device.ip) if tx.device and tx.device.ip else None,
-        })
+        self._add_dict(
+            {
+                "tx_id": tx.tx_id,
+                "sender_account_id": tx.sender_account_id,
+                "beneficiary_account_id": tx.beneficiary_account_id,
+                "device_id": tx.device.device_id if tx.device else None,
+                "ip": str(tx.device.ip) if tx.device and tx.device.ip else None,
+            }
+        )
 
     def mark_fraud(self, account_id: str) -> None:
         self._known_fraud.add(f"acct:{account_id}")
@@ -85,27 +88,38 @@ class GraphEngine:
             score = min(1.0, score + 0.30)
 
         reasons = []
-        if shared_dev: reasons.append(f"shared_device_{shared_dev}")
-        if shared_ip: reasons.append(f"shared_ip_{shared_ip}")
-        if linked >= 5: reasons.append(f"linked_accounts_{linked}")
-        if hops is not None and hops <= 2: reasons.append(f"within_{hops}_hops_of_fraud")
+        if shared_dev:
+            reasons.append(f"shared_device_{shared_dev}")
+        if shared_ip:
+            reasons.append(f"shared_ip_{shared_ip}")
+        if linked >= 5:
+            reasons.append(f"linked_accounts_{linked}")
+        if hops is not None and hops <= 2:
+            reasons.append(f"within_{hops}_hops_of_fraud")
 
         return GraphSignal(
             score=round(score, 4),
             reason=", ".join(reasons) if reasons else None,
-            shared_device_count=shared_dev, shared_ip_count=shared_ip,
-            linked_accounts=linked, hops_to_known_fraud=hops,
-            ring_size=None, pagerank_score=None,
+            shared_device_count=shared_dev,
+            shared_ip_count=shared_ip,
+            linked_accounts=linked,
+            hops_to_known_fraud=hops,
+            ring_size=None,
+            pagerank_score=None,
         )
 
     def find_rings(self, min_size: int = 5) -> list[dict[str, Any]]:
         try:
             from networkx.algorithms.community import louvain_communities
+
             comms = louvain_communities(self._g.to_undirected(as_view=True), seed=42)
         except Exception:
             return []
-        return [{"community_id": i, "size": len(c), "members": sorted(c)[:20]}
-                for i, c in enumerate(comms) if len(c) >= min_size]
+        return [
+            {"community_id": i, "size": len(c), "members": sorted(c)[:20]}
+            for i, c in enumerate(comms)
+            if len(c) >= min_size
+        ]
 
     @property
     def node_count(self) -> int:
@@ -118,17 +132,25 @@ class GraphEngine:
     def insights(self, top_n: int = 10) -> dict[str, Any]:
         """Aggregated graph intelligence for the investigator workbench."""
         shared_devices = sorted(
-            ({"device_id": d, "accounts": sorted(accs), "account_count": len(accs)}
-             for d, accs in self._device_accounts.items() if len(accs) > 1),
-            key=lambda x: -x["account_count"])[:top_n]
+            (
+                {"device_id": d, "accounts": sorted(accs), "account_count": len(accs)}
+                for d, accs in self._device_accounts.items()
+                if len(accs) > 1
+            ),
+            key=lambda x: -x["account_count"],
+        )[:top_n]
         shared_ips = sorted(
-            ({"ip": ip, "accounts": sorted(accs), "account_count": len(accs)}
-             for ip, accs in self._ip_accounts.items() if len(accs) > 1),
-            key=lambda x: -x["account_count"])[:top_n]
+            (
+                {"ip": ip, "accounts": sorted(accs), "account_count": len(accs)}
+                for ip, accs in self._ip_accounts.items()
+                if len(accs) > 1
+            ),
+            key=lambda x: -x["account_count"],
+        )[:top_n]
         top_linked = sorted(
-            ({"account_id": a, "beneficiaries": len(b)}
-             for a, b in self._account_links.items()),
-            key=lambda x: -x["beneficiaries"])[:top_n]
+            ({"account_id": a, "beneficiaries": len(b)} for a, b in self._account_links.items()),
+            key=lambda x: -x["beneficiaries"],
+        )[:top_n]
         return {
             "nodes": self._g.number_of_nodes(),
             "edges": self._g.number_of_edges(),
@@ -143,17 +165,13 @@ class GraphEngine:
         node = f"acct:{account_id}"
         if node not in self._g:
             return {"account_id": account_id, "in_graph": False}
-        devices = sorted({d for d, accs in self._device_accounts.items()
-                          if account_id in accs})
-        ips = sorted({ip for ip, accs in self._ip_accounts.items()
-                      if account_id in accs})
+        devices = sorted({d for d, accs in self._device_accounts.items() if account_id in accs})
+        ips = sorted({ip for ip, accs in self._ip_accounts.items() if account_id in accs})
         linked = sorted(self._account_links.get(account_id, set()))
-        shared_via_device = sorted({a for d in devices
-                                    for a in self._device_accounts.get(d, set())
-                                    if a != account_id})
-        shared_via_ip = sorted({a for ip in ips
-                                for a in self._ip_accounts.get(ip, set())
-                                if a != account_id})
+        shared_via_device = sorted(
+            {a for d in devices for a in self._device_accounts.get(d, set()) if a != account_id}
+        )
+        shared_via_ip = sorted({a for ip in ips for a in self._ip_accounts.get(ip, set()) if a != account_id})
         hops = None
         for f in self._known_fraud:
             if f not in self._g:

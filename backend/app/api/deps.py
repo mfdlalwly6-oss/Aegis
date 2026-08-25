@@ -4,6 +4,7 @@
 - require_merchant: Institution owner/merchant (JWT, tenant-scoped, active status enforced)
 - require_investigator: Institution investigator (JWT, tenant-scoped, active status enforced)
 """
+
 from __future__ import annotations
 
 from fastapi import Depends, HTTPException, Request
@@ -27,8 +28,7 @@ def _decode(token: str) -> dict | None:
     if not token:
         return None
     try:
-        return jwt.decode(token, settings.SECRET_KEY,
-                          algorithms=[settings.JWT_ALGORITHM])
+        return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
     except Exception:
         return None
 
@@ -50,8 +50,7 @@ def require_owner(request: Request) -> str:
     raise HTTPException(401, "owner_token_required")
 
 
-def require_merchant(request: Request,
-                     registry=Depends(get_registry)) -> dict:
+def require_merchant(request: Request, registry=Depends(get_registry)) -> dict:
     """Institution (merchant/owner/admin) — JWT roles: merchant (API key),
     institution_owner, tenant_admin. Must carry tenant_id; suspended tenants
     are hard-blocked here, on every request."""
@@ -71,8 +70,7 @@ def require_merchant(request: Request,
     return claims
 
 
-def require_investigator(request: Request,
-                         registry=Depends(get_registry)) -> dict:
+def require_investigator(request: Request, registry=Depends(get_registry)) -> dict:
     """Institution investigator — JWT role=investigator, tenant_id claim,
     active account, belonging to the claimed tenant."""
     claims = _decode(_bearer(request))

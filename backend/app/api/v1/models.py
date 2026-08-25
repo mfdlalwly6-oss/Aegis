@@ -11,8 +11,7 @@ def list_models(request: Request, owner=Depends(require_owner), registry=Depends
 
 
 @router.get("/status")
-def models_status(request: Request, owner=Depends(require_owner),
-                  registry=Depends(get_registry)):
+def models_status(request: Request, owner=Depends(require_owner), registry=Depends(get_registry)):
     """Full ML readiness card for the Models screen."""
     scorer = registry.ml_scorer
     if not scorer:

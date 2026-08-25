@@ -4,11 +4,12 @@ monthly (since local 1st 00:00). All DB timestamps are stored UTC (ISO);
 window boundaries are converted to UTC before querying.
 Hijri display date is computed arithmetically (tabular) for presentation only.
 """
+
 from __future__ import annotations
 
 import json
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 PERIODS = ("daily", "weekly", "monthly")
@@ -17,9 +18,13 @@ PERIOD_LABELS = {"daily": "يومي", "weekly": "أسبوعي", "monthly": "شه
 
 def _gregorian_to_hijri(y: int, m: int, d: int) -> tuple[int, int, int]:
     """Arithmetic (tabular) Islamic calendar conversion — display only."""
-    jd = ((1461 * (y + 4800 + (m - 14) // 12)) // 4
-          + (367 * (m - 2 - 12 * ((m - 14) // 12))) // 12
-          - (3 * ((y + 4900 + (m - 14) // 12) // 100)) // 4 + d - 32075)
+    jd = (
+        (1461 * (y + 4800 + (m - 14) // 12)) // 4
+        + (367 * (m - 2 - 12 * ((m - 14) // 12))) // 12
+        - (3 * ((y + 4900 + (m - 14) // 12) // 100)) // 4
+        + d
+        - 32075
+    )
     l = jd - 1948440 + 10632
     n = (l - 1) // 10631
     l2 = l - 10631 * n + 354
@@ -57,17 +62,19 @@ class ReportBuilder:
         else:
             start_local = today.replace(day=1)
 
-        start_utc = start_local.astimezone(timezone.utc)
-        end_utc = now_local.astimezone(timezone.utc)
+        start_utc = start_local.astimezone(UTC)
+        end_utc = now_local.astimezone(UTC)
 
         db = self.registry.db
         dec_rows = db.query(
-            "SELECT * FROM decisions WHERE tenant_id=? AND ts>=? AND ts<=? "
-            "ORDER BY ts DESC", (tenant_id, start_utc.isoformat(), end_utc.isoformat()))
+            "SELECT * FROM decisions WHERE tenant_id=? AND ts>=? AND ts<=? ORDER BY ts DESC",
+            (tenant_id, start_utc.isoformat(), end_utc.isoformat()),
+        )
         tx_count = db.query_one(
             "SELECT COUNT(*) AS c, COALESCE(SUM(amount),0) AS s FROM transactions "
             "WHERE tenant_id=? AND ts>=? AND ts<=?",
-            (tenant_id, start_utc.isoformat(), end_utc.isoformat()))
+            (tenant_id, start_utc.isoformat(), end_utc.isoformat()),
+        )
 
         decision_counts = Counter(r["decision"] for r in dec_rows)
         bands = Counter(r["risk_band"] for r in dec_rows)
@@ -83,17 +90,20 @@ class ReportBuilder:
 
         alerts = db.query(
             "SELECT * FROM alerts WHERE tenant_id=? AND created_at>=? AND created_at<=?",
-            (tenant_id, start_utc.isoformat(), end_utc.isoformat()))
+            (tenant_id, start_utc.isoformat(), end_utc.isoformat()),
+        )
         cases = db.query(
             "SELECT * FROM cases WHERE tenant_id=? AND created_at>=? AND created_at<=?",
-            (tenant_id, start_utc.isoformat(), end_utc.isoformat()))
+            (tenant_id, start_utc.isoformat(), end_utc.isoformat()),
+        )
         manual = [a for a in alerts if a["status"].startswith("resolved_")]
         durations = []
         sla_breach = 0
         for a in manual:
             try:
-                dur = (datetime.fromisoformat(a["updated_at"]) -
-                       datetime.fromisoformat(a["created_at"])).total_seconds() / 60
+                dur = (
+                    datetime.fromisoformat(a["updated_at"]) - datetime.fromisoformat(a["created_at"])
+                ).total_seconds() / 60
                 durations.append(dur)
                 if dur > 1440:
                     sla_breach += 1
@@ -122,17 +132,16 @@ class ReportBuilder:
         review = decision_counts.get("review", 0)
         block = decision_counts.get("block", 0)
         allow = decision_counts.get("allow", 0)
-        summary_parts.append(
-            f"خلال فترة التقرير ({PERIOD_LABELS[period]}) تم تقييم {total} عملية.")
+        summary_parts.append(f"خلال فترة التقرير ({PERIOD_LABELS[period]}) تم تقييم {total} عملية.")
         if total:
             summary_parts.append(
-                f"تمت الموافقة على {allow} عملية تلقائيًا ({round(100*allow/total)}%)، "
-                f"وحظر {block} عملية ({round(100*block/total)}%)، "
-                f"وإحالة {review} عملية للمراجعة ({round(100*review/total)}%).")
+                f"تمت الموافقة على {allow} عملية تلقائيًا ({round(100 * allow / total)}%)، "
+                f"وحظر {block} عملية ({round(100 * block / total)}%)، "
+                f"وإحالة {review} عملية للمراجعة ({round(100 * review / total)}%)."
+            )
         if manual:
             avg = round(sum(durations) / len(durations), 1)
-            summary_parts.append(
-                f"تمت معالجة {len(manual)} حالة يدويًا بمتوسط {avg} دقيقة للمراجعة.")
+            summary_parts.append(f"تمت معالجة {len(manual)} حالة يدويًا بمتوسط {avg} دقيقة للمراجعة.")
         else:
             summary_parts.append("لم توجد حالات معالجة يدويًا خلال الفترة.")
         if alerts:
@@ -155,7 +164,7 @@ class ReportBuilder:
             "end_local": now_local_str,
             "start_utc": start_utc.isoformat(),
             "end_utc": end_utc.isoformat(),
-            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "generated_at_utc": datetime.now(UTC).isoformat(),
             "generated_at_local": now_local_str,
             "gregorian_date": now_local.strftime("%Y-%m-%d"),
             "hijri_date": f"{hd:02d}/{hm:02d}/{hy} هـ",
@@ -175,26 +184,34 @@ class ReportBuilder:
                 "avg_score": round(sum(scores) / len(scores), 3),
                 "bands": dict(bands),
             },
-            "top_reasons": [{"reason": k, "count": v}
-                            for k, v in reasons.most_common(8)],
+            "top_reasons": [{"reason": k, "count": v} for k, v in reasons.most_common(8)],
             "alerts": {
                 "total": len(alerts),
-                "by_status": {s: sum(1 for a in alerts if a["status"] == s)
-                              for s in ("open", "assigned", "in_review", "escalated",
-                                        "resolved_true_positive", "resolved_false_positive")},
+                "by_status": {
+                    s: sum(1 for a in alerts if a["status"] == s)
+                    for s in (
+                        "open",
+                        "assigned",
+                        "in_review",
+                        "escalated",
+                        "resolved_true_positive",
+                        "resolved_false_positive",
+                    )
+                },
             },
             "cases": {
                 "total": len(cases),
-                "by_status": {s: sum(1 for c in cases if c["status"] == s)
-                              for s in ("open", "in_progress", "escalated", "closed")},
+                "by_status": {
+                    s: sum(1 for c in cases if c["status"] == s)
+                    for s in ("open", "in_progress", "escalated", "closed")
+                },
             },
             "manual_reviews": {
                 "total": len(manual),
                 "avg_duration_min": round(sum(durations) / len(durations), 1) if durations else 0,
                 "sla_breach_over_24h": sla_breach,
             },
-            "investigator_activity": [{"actor": k, "actions": v}
-                                      for k, v in inv_activity.most_common(10)],
+            "investigator_activity": [{"actor": k, "actions": v} for k, v in inv_activity.most_common(10)],
             "system": {
                 "rules_loaded": rules_count,
                 "ml_ready": ml_ready,

@@ -1,15 +1,16 @@
 """Feature extraction — computes signals from transaction + historical data.
 All features are real: they query the actual transaction history in SQLite.
 """
+
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.models.schemas import Transaction
-from app.repositories.transaction_repo import TransactionRepository
 from app.repositories.decision_repo import DecisionRepository
+from app.repositories.transaction_repo import TransactionRepository
 
 
 class FeatureExtractor:
@@ -40,7 +41,7 @@ class FeatureExtractor:
         suspicious = hist["by_decision"].get("block", 0) + hist["by_decision"].get("review", 0)
 
         meta = tx.metadata or {}
-        hour = tx.timestamp.hour if tx.timestamp else datetime.now(timezone.utc).hour
+        hour = tx.timestamp.hour if tx.timestamp else datetime.now(UTC).hour
 
         return {
             "amount": float(tx.amount),
@@ -104,7 +105,8 @@ class FeatureExtractor:
         f = features
         v = [
             float(tx.amount),
-            f["hour_sin"], f["hour_cos"],
+            f["hour_sin"],
+            f["hour_cos"],
             float(f["velocity"]["tx_per_min_card"]),
             float(f["velocity"]["amount_5min_account"]),
             float(f["velocity"]["distinct_merchants_1h"]),

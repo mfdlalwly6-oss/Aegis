@@ -1,10 +1,11 @@
 """Security primitives — HMAC verification, JWT issuing/verification, key generation."""
+
 from __future__ import annotations
 
 import hashlib
 import hmac
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from jose import jwt
 
@@ -39,7 +40,7 @@ def verify_api_key_secret(api_secret_plain: str, secret_stored: str) -> bool:
 
 
 def issue_jwt(subject: str, role: str, ttl_sec: int, extra: dict | None = None) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": subject,
         "role": role,

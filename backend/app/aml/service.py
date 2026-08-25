@@ -1,6 +1,7 @@
 """AML screening — technical detection platform, NOT a legal compliance substitute.
 Uses DB-backed watchlists + pattern detection on transaction data.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -18,9 +19,7 @@ class AMLService:
         score = 0.0
         flags: list[str] = []
 
-        beneficiary_country = tx.beneficiary_country or (
-            tx.device.ip_country if tx.device else None
-        )
+        beneficiary_country = tx.beneficiary_country or (tx.device.ip_country if tx.device else None)
         if beneficiary_country:
             hit = self.watchlist.check("sanctions", beneficiary_country.upper())
             if hit:
@@ -47,7 +46,9 @@ class AMLService:
             score += 0.25
             flags.append("RAPID_FUND_MOVEMENT")
 
-        if features.get("amount_flags", {}).get("is_round_1000") and features.get("beneficiary", {}).get("offshore"):
+        if features.get("amount_flags", {}).get("is_round_1000") and features.get("beneficiary", {}).get(
+            "offshore"
+        ):
             signal.typology_matches.append("round_amount_offshore")
             score += 0.15
             flags.append("ROUND_AMOUNT_OFFSHORE")

@@ -1,4 +1,5 @@
 """Event bus — async pub/sub for real-time dashboard updates via SSE."""
+
 from __future__ import annotations
 
 import asyncio

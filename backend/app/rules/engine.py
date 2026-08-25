@@ -10,13 +10,15 @@ Rules are JSONLogic-inspired (see https://jsonlogic.com/) with AEGIS extensions:
 The engine returns every rule that fires plus its `score_contribution`, so the
 final risk model can fuse rule signals with ML probability.
 """
+
 from __future__ import annotations
 
 import math
 import operator
 import re
-from datetime import datetime, timedelta
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import datetime
+from typing import Any
 
 import structlog
 
@@ -26,12 +28,21 @@ logger = structlog.get_logger(__name__)
 
 # ─────────────────────────── Operator Registry ────────────────────────────
 _OPS: dict[str, Callable[..., Any]] = {
-    "==": operator.eq, "!=": operator.ne,
-    ">": operator.gt, ">=": operator.ge,
-    "<": operator.lt, "<=": operator.le,
-    "and": lambda *a: all(a), "or": lambda *a: any(a), "not": lambda a: not a,
-    "in": lambda a, b: a in b, "matches": lambda a, p: bool(re.search(p, str(a))),
-    "sum": lambda *a: sum(a), "abs": abs, "min": min, "max": max,
+    "==": operator.eq,
+    "!=": operator.ne,
+    ">": operator.gt,
+    ">=": operator.ge,
+    "<": operator.lt,
+    "<=": operator.le,
+    "and": lambda *a: all(a),
+    "or": lambda *a: any(a),
+    "not": lambda a: not a,
+    "in": lambda a, b: a in b,
+    "matches": lambda a, p: bool(re.search(p, str(a))),
+    "sum": lambda *a: sum(a),
+    "abs": abs,
+    "min": min,
+    "max": max,
 }
 
 
@@ -157,9 +168,11 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def impossible_travel(
-    prev_geo: dict[str, float], prev_time: datetime,
-    cur_geo: dict[str, float], cur_time: datetime,
-    max_speed_kmh: float = 900.0,   # commercial jet
+    prev_geo: dict[str, float],
+    prev_time: datetime,
+    cur_geo: dict[str, float],
+    cur_time: datetime,
+    max_speed_kmh: float = 900.0,  # commercial jet
 ) -> bool:
     delta_h = (cur_time - prev_time).total_seconds() / 3600.0
     if delta_h <= 0:

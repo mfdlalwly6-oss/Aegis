@@ -6,6 +6,7 @@ router = APIRouter()
 @router.get("/system/version")
 async def version() -> dict:
     from app.core.config import settings
+
     return {"version": settings.VERSION, "env": settings.ENV}
 
 

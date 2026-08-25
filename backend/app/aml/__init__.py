@@ -1,1 +1,1 @@
-from .service import AMLService
+from .service import AMLService as AMLService

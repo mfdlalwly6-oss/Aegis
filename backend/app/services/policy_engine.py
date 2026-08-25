@@ -13,6 +13,7 @@ Guarantees (enforced here, not by convention):
 - FX safety flags are policy-controlled: fx_missing_action defaults to REVIEW
   and can never be weakened to a silent ALLOW.
 """
+
 from __future__ import annotations
 
 import structlog
@@ -48,10 +49,14 @@ PROFILES: dict[str, dict] = {
     "merchant_retail": {"thresholds": {"challenge": 0.40, "review": 0.65, "block": 0.85}},
     "merchant_wholesale": {"thresholds": {"challenge": 0.45, "review": 0.70, "block": 0.88}},
     "real_estate": {"thresholds": {"challenge": 0.45, "review": 0.70, "block": 0.88}},
-    "exchange": {"thresholds": {"challenge": 0.30, "review": 0.55, "block": 0.78},
-                 "expected_currencies": ["YER", "SAR", "USD"]},
-    "remittance": {"thresholds": {"challenge": 0.40, "review": 0.65, "block": 0.85},
-                   "expected_currencies": ["YER", "SAR", "USD"]},
+    "exchange": {
+        "thresholds": {"challenge": 0.30, "review": 0.55, "block": 0.78},
+        "expected_currencies": ["YER", "SAR", "USD"],
+    },
+    "remittance": {
+        "thresholds": {"challenge": 0.40, "review": 0.65, "block": 0.85},
+        "expected_currencies": ["YER", "SAR", "USD"],
+    },
 }
 
 
@@ -102,8 +107,10 @@ class PolicyEngine:
 
         # --- weights (gentle re-scale only, re-normalized) ---
         weights = {
-            "rules": settings.WEIGHT_RULES, "ml": settings.WEIGHT_ML,
-            "graph": settings.WEIGHT_GRAPH, "aml": settings.WEIGHT_AML,
+            "rules": settings.WEIGHT_RULES,
+            "ml": settings.WEIGHT_ML,
+            "graph": settings.WEIGHT_GRAPH,
+            "aml": settings.WEIGHT_AML,
             "behavior": settings.WEIGHT_BEHAVIOR,
         }
         raw_w = raw_policy.get("weights")
@@ -120,13 +127,13 @@ class PolicyEngine:
         disabled = set(raw_policy.get("disabled_rules") or [])
         removed = disabled & PROTECTED_RULES
         if removed:
-            logger.warning("policy.protected_rule_disable_blocked", rules=sorted(removed),
-                           tenant=tenant.get("tenant_id"))
+            logger.warning(
+                "policy.protected_rule_disable_blocked", rules=sorted(removed), tenant=tenant.get("tenant_id")
+            )
         disabled -= PROTECTED_RULES
 
         # --- FX missing action (can never be a silent allow) ---
-        fx_missing_action = str(raw_policy.get("fx_missing_action")
-                                or settings.FX_MISSING_DECISION).lower()
+        fx_missing_action = str(raw_policy.get("fx_missing_action") or settings.FX_MISSING_DECISION).lower()
         if fx_missing_action not in ("review", "block"):
             fx_missing_action = "review"
 
@@ -136,9 +143,9 @@ class PolicyEngine:
             "weights": weights,
             "disabled_rules": sorted(disabled),
             "expected_currencies": raw_policy.get("expected_currencies")
-                                   or profile.get("expected_currencies") or [],
-            "expected_regions": raw_policy.get("expected_regions")
-                                or profile.get("expected_regions") or [],
+            or profile.get("expected_currencies")
+            or [],
+            "expected_regions": raw_policy.get("expected_regions") or profile.get("expected_regions") or [],
             "fx_missing_action": fx_missing_action,
             "profile": profile_name,
             "version": POLICY_SCHEMA_VERSION,

@@ -18,11 +18,12 @@ The class mirrors the legacy SQLite ``Database`` interface
 repository layer is untouched. The ``?`` placeholders used by repository SQL
 are translated to psycopg ``%s`` at the boundary.
 """
+
 from __future__ import annotations
 
 import hashlib
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -54,7 +55,9 @@ class PGDatabase:
     """PostgreSQL backend — one connection per thread, guarded by a lock."""
 
     def __init__(self, url: str | None = None):
-        self.url = url or (getattr(settings, "DATABASE_URL", None) or getattr(settings, "database_url", "") or "")
+        self.url = url or (
+            getattr(settings, "DATABASE_URL", None) or getattr(settings, "database_url", "") or ""
+        )
 
     # -- connection management ----------------------------------------
     def _conn(self) -> psycopg.Connection:
@@ -128,16 +131,14 @@ class PGDatabase:
         )
         conn.commit()
         for f in sorted(_VERSIONS_DIR.glob("*.sql")):
-            if conn.execute(
-                "SELECT 1 FROM schema_migrations WHERE name=%s", (f.name,)
-            ).fetchone():
+            if conn.execute("SELECT 1 FROM schema_migrations WHERE name=%s", (f.name,)).fetchone():
                 continue
             sql = f.read_text(encoding="utf-8")
             conn.execute(sql)
             sha = hashlib.sha256(sql.encode("utf-8")).hexdigest()[:16]
             conn.execute(
                 "INSERT INTO schema_migrations (name, applied_at, sha256) VALUES (%s, %s, %s)",
-                (f.name, datetime.now(timezone.utc).isoformat(), sha),
+                (f.name, datetime.now(UTC).isoformat(), sha),
             )
             conn.commit()
             applied.append(f.name)

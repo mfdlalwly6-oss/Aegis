@@ -1,0 +1,20 @@
+name: quality
+on: [push, pull_request]
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          pip install -r backend/requirements.txt
+          pip install pytest pytest-asyncio ruff pytest-cov
+      - name: Ruff lint
+        run: cd backend && ruff check app ../tests --config ../ruff.toml
+      - name: Ruff format check
+        run: cd backend && ruff format --check app ../tests --config ../ruff.toml
+      - name: Tests + coverage
+        run: cd backend && PYTHONPATH=. python -m pytest ../tests -q --cov=app --cov-report=term --cov-fail-under=50
