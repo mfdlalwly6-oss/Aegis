@@ -83,3 +83,30 @@ def test_behavior_score_in_orchestrator():
     low = _tx(behavior=BehaviorSignals(biometric_match_score=0.1, keystroke_entropy=0.5))
     high = _tx(behavior=BehaviorSignals(biometric_match_score=0.99))
     assert o._behavior_score(low) > o._behavior_score(high)
+
+
+def test_audit_hash_chain_and_tamper_detection(tmp_path, monkeypatch):
+    """Audit log must chain entries; tampering with a row must break verification."""
+    monkeypatch.setenv("AEGIS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("AEGIS_DB_PATH", str(tmp_path / "a.db"))
+    monkeypatch.setenv("AEGIS_DB_DRIVER", "sqlite")
+    from app.core.config import clear_settings_cache
+    clear_settings_cache()
+    from app.db import Database
+    from app.repositories.audit_repo import AuditRepository
+    db = Database()
+    db.migrate()
+    repo = AuditRepository(db)
+    repo.log("t1", "owner", "test.event", "tx", "tx1", "req1", {"k": "v"})
+    repo.log("t1", "owner", "test.event2", "tx", "tx2", "req2", {"k": "v2"})
+    ok = repo.verify_chain()
+    assert ok["ok"] is True and ok["checked"] == 2
+    # tamper: change historical metadata
+    db.execute("UPDATE audit_log SET metadata_json=? WHERE id=(SELECT MIN(id) FROM audit_log)",
+               (json.dumps({"k": "tampered"}, sort_keys=True),))
+    bad = repo.verify_chain()
+    assert bad["ok"] is False and bad["reason"] == "entry_hash_mismatch"
+    db.close()
+
+
+import json

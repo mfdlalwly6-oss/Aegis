@@ -241,6 +241,13 @@ def decisions_recent(limit: int = 50, owner=Depends(require_owner), registry=Dep
     return registry.decisions.recent(limit=limit)
 
 
+@router.get("/admin/audit-verify")
+def audit_verify(owner=Depends(require_owner), registry=Depends(get_registry)):
+    """Verify the tamper-evident audit hash chain end-to-end.
+    Legacy (pre-chain) rows are skipped; any hash gap inside the chain fails."""
+    return registry.audit_repo.verify_chain()
+
+
 @router.get("/admin/audit")
 def audit_log(limit: int = 200, tenant_id: str | None = None,
               event_type: str | None = None,

@@ -293,7 +293,25 @@ _MIGRATIONS: list[tuple[str, list[str]]] = [
         "CREATE INDEX IF NOT EXISTS idx_tx_sender_ts ON transactions(tenant_id, sender_account_id, ts)",
         "CREATE INDEX IF NOT EXISTS idx_tx_ref ON transactions(tenant_id, reference_amount)",
     ]),
+    ("011_audit_hashchain", [
+        "ALTER TABLE audit_log ADD COLUMN prev_hash TEXT",
+        "ALTER TABLE audit_log ADD COLUMN entry_hash TEXT",
+        "ALTER TABLE decisions ADD COLUMN rule_set_version TEXT",
+        "ALTER TABLE decisions ADD COLUMN model_version TEXT",
+        "ALTER TABLE decisions ADD COLUMN config_version TEXT",
+        "ALTER TABLE decisions ADD COLUMN request_id TEXT",
+    ]),
 ]
+
+
+_SCHEMA_011 = """
+ALTER TABLE audit_log ADD COLUMN prev_hash TEXT;
+ALTER TABLE audit_log ADD COLUMN entry_hash TEXT;
+ALTER TABLE decisions ADD COLUMN rule_set_version TEXT;
+ALTER TABLE decisions ADD COLUMN model_version TEXT;
+ALTER TABLE decisions ADD COLUMN config_version TEXT;
+ALTER TABLE decisions ADD COLUMN request_id TEXT;
+"""
 
 
 def _apply_statements(conn: "sqlite3.Connection", statements: list[str]) -> None:
