@@ -228,6 +228,7 @@ class ServiceRegistry:
             audit=self.audit,
             events=self.events,
             notifications=self.notifications,
+            tenants=self.tenants,
         )
         logger.info("aegis.initialized", version=settings.VERSION)
 

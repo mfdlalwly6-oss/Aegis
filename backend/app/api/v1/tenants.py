@@ -46,6 +46,7 @@ class UpdatePolicy(BaseModel):
     weights: dict | None = None
     enabled_rules: list[str] | None = None
     disabled_rules: list[str] | None = None
+    fx_missing_action: str | None = None
 
 
 class MerchantLogin(BaseModel):

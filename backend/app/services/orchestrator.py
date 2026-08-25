@@ -30,6 +30,7 @@ class DecisionOrchestrator:
         audit,
         events,
         notifications,
+        tenants=None,
     ):
         self.rules = rules
         self.ml = ml
@@ -43,7 +44,50 @@ class DecisionOrchestrator:
         self.audit = audit
         self.events = events
         self.notifications = notifications
+        self.tenants = tenants
         self.policy_version = "policy@2.0.0"
+
+    def _resolve_policy(self, tenant_id: str) -> dict:
+        """Deterministically merge defaults with one tenant's validated policy.
+
+        Safety precedence is fixed: sanctions always block, and tenant thresholds
+        must remain ordered and within [0, 1].  Invalid fields are ignored.
+        """
+        policy = {
+            "thresholds": {
+                "challenge": settings.DECISION_THRESHOLD_CHALLENGE,
+                "review": settings.DECISION_THRESHOLD_REVIEW,
+                "block": settings.DECISION_THRESHOLD_BLOCK,
+            },
+            "weights": {
+                "rules": settings.WEIGHT_RULES, "ml": settings.WEIGHT_ML,
+                "graph": settings.WEIGHT_GRAPH, "aml": settings.WEIGHT_AML,
+                "behavior": settings.WEIGHT_BEHAVIOR,
+            },
+            "fx_missing_action": settings.FX_MISSING_DECISION,
+        }
+        raw = self.tenants.get_policy(tenant_id) if self.tenants else {}
+        thresholds = raw.get("thresholds") if isinstance(raw, dict) else None
+        if isinstance(thresholds, dict):
+            candidate = dict(policy["thresholds"])
+            for key in candidate:
+                value = thresholds.get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1:
+                    candidate[key] = float(value)
+            if candidate["challenge"] <= candidate["review"] <= candidate["block"]:
+                policy["thresholds"] = candidate
+        weights = raw.get("weights") if isinstance(raw, dict) else None
+        if isinstance(weights, dict):
+            candidate = {k: float(weights[k]) for k in policy["weights"]
+                         if isinstance(weights.get(k), (int, float)) and not isinstance(weights.get(k), bool)
+                         and weights[k] >= 0}
+            if len(candidate) == len(policy["weights"]) and 0 < sum(candidate.values()):
+                total = sum(candidate.values())
+                policy["weights"] = {k: v / total for k, v in candidate.items()}
+        action = raw.get("fx_missing_action") if isinstance(raw, dict) else None
+        if action in {"review", "block"}:
+            policy["fx_missing_action"] = action
+        return policy
 
     def _behavior_score(self, tx: Transaction) -> float:
         if not tx.behavior:
@@ -57,23 +101,25 @@ class DecisionOrchestrator:
             score += 0.15
         return min(score, 1.0)
 
-    def _band(self, score: float) -> RiskBand:
-        if score >= settings.DECISION_THRESHOLD_BLOCK:
+    def _band(self, score: float, policy: dict | None = None) -> RiskBand:
+        thresholds = (policy or self._resolve_policy(""))["thresholds"]
+        if score >= thresholds["block"]:
             return RiskBand.CRITICAL
-        if score >= settings.DECISION_THRESHOLD_REVIEW:
+        if score >= thresholds["review"]:
             return RiskBand.HIGH
-        if score >= settings.DECISION_THRESHOLD_CHALLENGE:
+        if score >= thresholds["challenge"]:
             return RiskBand.MEDIUM
         return RiskBand.LOW
 
-    def _decide(self, score: float, aml_hit: bool) -> Decision:
+    def _decide(self, score: float, aml_hit: bool, policy: dict | None = None) -> Decision:
+        thresholds = (policy or self._resolve_policy(""))["thresholds"]
         if aml_hit:
             return Decision.BLOCK
-        if score >= settings.DECISION_THRESHOLD_BLOCK:
+        if score >= thresholds["block"]:
             return Decision.BLOCK
-        if score >= settings.DECISION_THRESHOLD_REVIEW:
+        if score >= thresholds["review"]:
             return Decision.REVIEW
-        if score >= settings.DECISION_THRESHOLD_CHALLENGE:
+        if score >= thresholds["challenge"]:
             return Decision.CHALLENGE
         return Decision.ALLOW
 
@@ -114,34 +160,33 @@ class DecisionOrchestrator:
         # 7. Behavior score
         behavior_score = self._behavior_score(tx)
 
-        # 8. Weighted fusion
+        # 8. Weighted fusion (tenant policy is resolved once per decision)
+        policy = self._resolve_policy(tx.tenant_id)
+        weights = policy["weights"]
         final = min(
             1.0,
             max(
                 0.0,
-                rule_score * settings.WEIGHT_RULES
-                + ml_prob * settings.WEIGHT_ML
-                + graph_sig.score * settings.WEIGHT_GRAPH
-                + aml_sig.score * settings.WEIGHT_AML
-                + behavior_score * settings.WEIGHT_BEHAVIOR,
+                rule_score * weights["rules"] + ml_prob * weights["ml"]
+                + graph_sig.score * weights["graph"] + aml_sig.score * weights["aml"]
+                + behavior_score * weights["behavior"],
             ),
         )
 
         # 9. Decision — sanctions hit forces BLOCK; FX missing forces review
         fx_missing = getattr(tx, "fx_status", None) == "missing"
         if fx_missing:
-            _pol = self._resolve_policy(tx.tenant_id) if hasattr(self, "_resolve_policy") else {}
-            fx_missing_action = _pol.get("fx_missing_action", settings.FX_MISSING_DECISION)
+            fx_missing_action = policy["fx_missing_action"]
             if fx_missing_action == "block":
                 decision = Decision.BLOCK
-                final = max(final, settings.DECISION_THRESHOLD_BLOCK)
+                final = max(final, policy["thresholds"]["block"])
             else:
                 decision = Decision.REVIEW
-                final = max(final, settings.DECISION_THRESHOLD_REVIEW)
+                final = max(final, policy["thresholds"]["review"])
         else:
-            decision = self._decide(final, aml_sig.sanctions_hit)
-        if aml_sig.sanctions_hit and final < settings.DECISION_THRESHOLD_BLOCK:
-            final = settings.DECISION_THRESHOLD_BLOCK  # reported risk floor for hard blocks
+            decision = self._decide(final, aml_sig.sanctions_hit, policy)
+        if aml_sig.sanctions_hit and final < policy["thresholds"]["block"]:
+            final = policy["thresholds"]["block"]  # reported risk floor for hard blocks
         latency_ms = (time.perf_counter() - started) * 1000
 
         # 10. Top reasons
@@ -187,7 +232,7 @@ class DecisionOrchestrator:
             timestamp=tx.timestamp,
             decision=decision,
             risk_score=round(final, 4),
-            risk_band=self._band(final),
+            risk_band=self._band(final, policy),
             latency_ms=round(latency_ms, 2),
             rule_score=round(rule_score, 4),
             ml_score=round(ml_prob, 4),

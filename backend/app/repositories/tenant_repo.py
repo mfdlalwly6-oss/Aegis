@@ -142,7 +142,12 @@ class TenantRepository:
         )
         if not row:
             return None
-        policy = json.loads(row["policy_json"] or "{}")
+        try:
+            policy = json.loads(row["policy_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            policy = {}
+        if not isinstance(policy, dict):
+            policy = {}
         for k, v in patch.items():
             if v is not None:
                 policy[k] = v
@@ -151,6 +156,19 @@ class TenantRepository:
             (json.dumps(policy, ensure_ascii=False), tenant_id),
         )
         return self.get(tenant_id, reveal=True)
+
+    def get_policy(self, tenant_id: str) -> dict:
+        """Return only this tenant's policy, safely falling back for malformed JSON."""
+        row = self.db.query_one(
+            "SELECT policy_json FROM tenants WHERE tenant_id=? AND deleted_at IS NULL", (tenant_id,)
+        )
+        if not row:
+            return {}
+        try:
+            policy = json.loads(row.get("policy_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        return policy if isinstance(policy, dict) else {}
 
     def delete(self, tenant_id: str) -> bool:
         cur = self.db.execute(

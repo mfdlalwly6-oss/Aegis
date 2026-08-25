@@ -162,7 +162,7 @@ class PGDatabase:
     # ── legacy SQLite attribute compatibility (ready endpoint) ─────────
     @property
     def path(self) -> str:
-        return getattr(settings, "DB_PATH", "/data/aegis.db")
+        return "postgresql"
 
     @property
     def db_path(self) -> str:
@@ -170,5 +170,5 @@ class PGDatabase:
 
     def __getattr__(self, name: str):
         if name in ("path", "db_path"):
-            return getattr(settings, "DB_PATH", "/data/aegis.db")
+            return "postgresql"
         raise AttributeError(name)
