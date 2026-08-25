@@ -108,7 +108,10 @@ class TenantRepository:
                 params.append(patch[key])
         if fields:
             params.append(tenant_id)
-            self.db.execute(f"UPDATE tenants SET {', '.join(fields)} WHERE tenant_id=?", tuple(params))
+            # fields contain only whitelisted column names (validated above); values are
+            # parameterized — the f-string interpolates column identifiers, never user data.
+            self.db.execute(f"UPDATE tenants SET {', '.join(fields)} WHERE tenant_id=?",  # noqa: S608
+                            tuple(params))
         return self.get(tenant_id, reveal=True)
 
     def set_status(self, tenant_id: str, status: str) -> dict | None:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from app.repositories.audit_repo import AuditRepository
 
 
