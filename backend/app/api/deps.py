@@ -37,9 +37,15 @@ def require_owner(request: Request) -> str:
     """AEGIS Owner — Bearer token header OR legacy X-Owner-Token header."""
     token = _bearer(request)
     if token and token == settings.OWNER_TOKEN:
+        reg = get_registry(request)
+        if reg is not None and getattr(reg, "db", None) is not None:
+            reg.db.set_tenant("platform")
         return token
     x = request.headers.get("X-Owner-Token", "")
     if x and x == settings.OWNER_TOKEN:
+        reg = get_registry(request)
+        if reg is not None and getattr(reg, "db", None) is not None:
+            reg.db.set_tenant("platform")
         return x
     raise HTTPException(401, "owner_token_required")
 
@@ -60,6 +66,8 @@ def require_merchant(request: Request,
         raise HTTPException(404, "tenant_not_found")
     if tenant.get("status") != "active":
         raise HTTPException(403, "tenant_suspended")
+    if getattr(registry, "db", None) is not None:
+        registry.db.set_tenant(tid)
     return claims
 
 
@@ -80,4 +88,6 @@ def require_investigator(request: Request,
         raise HTTPException(401, "investigator_inactive")
     if inv.get("tenant_id") != tid:
         raise HTTPException(403, "tenant_mismatch")
+    if getattr(registry, "db", None) is not None:
+        registry.db.set_tenant(tid)
     return claims

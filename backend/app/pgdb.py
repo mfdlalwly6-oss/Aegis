@@ -62,6 +62,11 @@ class PGDatabase:
         if conn is None or conn.closed:
             self._local = threading.local()
             conn = psycopg.connect(self.url, row_factory=dict_row, connect_timeout=10, autocommit=True)
+            # Default session scope for NEW connections: trusted platform context.
+            # Internal services (bootstrap, AML, graph) operate cross-tenant by design;
+            # tenant-facing entry points (deps.require_*, wallet webhook) call
+            # set_tenant(tid) explicitly and are then RLS-isolated for the request.
+            conn.execute("SELECT set_config('app.tenant_id', 'platform', false)")
             self._local.conn = conn
         return conn
 
@@ -138,6 +143,12 @@ class PGDatabase:
             applied.append(f.name)
             print(f"MIGRATION_APPLIED {f.name}")
         return applied
+
+    def set_tenant(self, tenant_id: str) -> None:
+        """Set the RLS tenant context (app.tenant_id GUC) for this thread's connection.
+        'platform' = trusted platform scope (full access); any tenant id = isolated scope."""
+        conn = self._conn()
+        conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant_id or "platform",))
 
     def close(self) -> None:
         conn = getattr(self._local, "conn", None) if hasattr(self, "_local") else None

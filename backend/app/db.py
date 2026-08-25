@@ -395,6 +395,10 @@ class Database:
             row = self._conn().execute(sql, params).fetchone()
             return dict(row) if row else None
 
+    def set_tenant(self, tenant_id: str) -> None:
+        """RLS no-op on SQLite (tests/dev)."""
+        return None
+
     def close(self) -> None:
         conn = getattr(self._local, "conn", None)
         if conn is not None:
