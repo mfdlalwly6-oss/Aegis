@@ -144,6 +144,23 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
                            "wallet_webhook", None, request_id, {"reason": "invalid_signature"})
         raise HTTPException(401, "invalid_signature")
 
+    # Replay guard on transaction timestamp: reject far-future (>5min) or very
+    # stale (>72h) events — bounds replay and clock-drift abuse.
+    body_ts = body.get("timestamp") or (body.get("transaction") or {}).get("timestamp") or (body.get("transaction") or {}).get("ts")
+    if body_ts:
+        from datetime import datetime, timezone
+        try:
+            ts = datetime.fromisoformat(str(body_ts).replace("Z", "+00:00"))
+            skew = (ts - datetime.now(timezone.utc)).total_seconds()
+            if skew > 300:
+                raise HTTPException(422, "timestamp_in_future")
+            if skew < -72 * 3600:
+                raise HTTPException(422, "timestamp_stale")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
     # Suspended/deleted tenants are hard-blocked at ingestion time.
     if tenant.get("status") != "active":
         registry.audit.log(tenant["tenant_id"], tenant["name"], "transaction.rejected",

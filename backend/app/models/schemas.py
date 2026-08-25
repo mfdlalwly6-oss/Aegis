@@ -203,6 +203,7 @@ class RiskAssessment(BaseModel):
     ai_model: str | None = None
     model_id: str | None = None
     policy_version: str | None = None
+    request_id: str | None = None
 
     # DecisionTrace / audit snapshots (populated by orchestrator before persist)
     fx_proof: dict[str, Any] = {}

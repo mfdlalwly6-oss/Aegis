@@ -177,6 +177,7 @@ class DecisionOrchestrator:
             fx_proof=fx_proof,
             tx_snapshot=tx.model_dump(mode="json"),
             features_snapshot=features if isinstance(features, dict) else {},
+            request_id=request_id,
         )
 
         # 13. Persist transaction + decision

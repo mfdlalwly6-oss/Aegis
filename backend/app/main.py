@@ -18,7 +18,7 @@ from app.api.deps import get_registry, require_investigator, require_owner
 from app.api.v1 import router as v1_router
 from app.core.config import settings
 from app.core.logging import configure_logging
-from app.core.middleware import RequestContextMiddleware, RateLimitMiddleware
+from app.core.middleware import RequestContextMiddleware, RateLimitMiddleware, SecurityHeadersMiddleware
 from app.core.telemetry import setup_telemetry
 from app.services.registry import ServiceRegistry
 
@@ -51,6 +51,7 @@ app = FastAPI(
 
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestContextMiddleware)
 app.add_middleware(
     CORSMiddleware,

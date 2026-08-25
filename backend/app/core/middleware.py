@@ -47,3 +47,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return JSONResponse({"error": "rate_limited"}, status_code=429)
         bucket.append(now)
         return await call_next(request)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Baseline security headers on every response."""
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("X-XSS-Protection", "0")
+        if request.url.path.startswith("/api/"):
+            response.headers.setdefault("Cache-Control", "no-store")
+        return response
