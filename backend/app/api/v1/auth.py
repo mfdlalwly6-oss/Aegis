@@ -1,7 +1,5 @@
-"""Authentication — platform demo login (dev), merchant JWT, and institution-owner login."""
+"""Authentication — platform admin login (users table), merchant JWT, and institution-owner login."""
 
-import hashlib
-import hmac
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -15,15 +13,6 @@ from app.security import issue_jwt
 router = APIRouter()
 
 INSTITUTION_OWNER_ROLES = {"institution_owner", "tenant_admin"}
-
-
-def _hash(password: str) -> str:
-    salt = settings.SECRET_KEY[:16].encode()
-    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 100_000).hex()
-
-
-_DEMO_USER = "admin@aegis.local"
-_DEMO_PASSWORD = "ChangeMe!2026"
 
 
 class LoginBody(BaseModel):
@@ -48,10 +37,16 @@ def _issue(sub: str, role: str, ttl: int) -> str:
 
 
 @router.post("/login", response_model=TokenPair)
-async def login(body: LoginBody) -> TokenPair:
-    if body.email != _DEMO_USER or not hmac.compare_digest(_hash(body.password), _hash(_DEMO_PASSWORD)):
+async def login(body: LoginBody, registry=Depends(get_registry)) -> TokenPair:
+    """Platform admin login — authenticated against the users table.
+
+    No hardcoded credentials. Bootstrap an admin via
+    AEGIS_PLATFORM_ADMIN_EMAIL / AEGIS_PLATFORM_ADMIN_PASSWORD.
+    """
+    user = registry.user_repo.authenticate_global(body.email, body.password)
+    if not user or user.get("role") != "admin":
         raise HTTPException(401, "invalid_credentials")
-    return TokenPair(access_token=_issue(_DEMO_USER, "admin", settings.JWT_ACCESS_TTL_SEC))
+    return TokenPair(access_token=_issue(user["email"], "admin", settings.JWT_ACCESS_TTL_SEC))
 
 
 @router.post("/institution/login")

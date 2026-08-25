@@ -16,6 +16,7 @@ from app.models.schemas import ModelScore
 
 logger = structlog.get_logger(__name__)
 
+
 def _find_models_dir() -> Path:
     """Locate models/trained by walking up from this file — works in both the repo
     layout (backend/app/ml/ensemble.py) and the container layout (/app/app/ml/...).

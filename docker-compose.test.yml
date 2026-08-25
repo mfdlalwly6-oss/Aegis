@@ -1,0 +1,20 @@
+# Test runner — does NOT touch the production image (Option B).
+# Mounts tests/ read-only into a throwaway container built from the same image,
+# installs pinned dev deps from requirements-dev.txt (reproducible), runs pytest
+# against an isolated sqlite driver (never the live PostgreSQL).
+services:
+  aegis-test:
+    build: .
+    image: aegis-aegis
+    working_dir: /app
+    environment:
+      AEGIS_DB_DRIVER: sqlite
+      AEGIS_DATA_DIR: /tmp/aegis-test
+      AEGIS_DB_PATH: /tmp/aegis-test/aegis.db
+      AEGIS_ENV: development
+    volumes:
+      - ./tests:/app/tests:ro
+      - ./pytest.ini:/app/pytest.ini:ro
+      - ./ruff.toml:/app/ruff.toml:ro
+      - ./backend/requirements-dev.txt:/app/requirements-dev.txt:ro
+    command: ["sh", "-c", "pip install -q -r /app/requirements-dev.txt && python -m pytest /app/tests -q"]

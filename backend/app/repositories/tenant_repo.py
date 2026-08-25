@@ -10,6 +10,7 @@ import json
 import secrets
 from datetime import UTC, datetime
 
+from app.crypto import decrypt_secret, encrypt_secret
 from app.db import Database
 from app.security import generate_id
 
@@ -41,7 +42,8 @@ class TenantRepository:
         now = _utcnow()
         tenant_id = generate_id("tn")
         api_key = "ak_" + secrets.token_hex(16)
-        hmac_secret = secrets.token_urlsafe(32)
+        hmac_secret_plain = secrets.token_urlsafe(32)
+        hmac_secret = encrypt_secret(hmac_secret_plain)
         plan = data.get("plan") or "sandbox"
         tz = data.get("timezone") or "Asia/Aden"
         limit = int(data.get("investigator_limit") or 5)
@@ -110,8 +112,10 @@ class TenantRepository:
             params.append(tenant_id)
             # fields contain only whitelisted column names (validated above); values are
             # parameterized — the f-string interpolates column identifiers, never user data.
-            self.db.execute(f"UPDATE tenants SET {', '.join(fields)} WHERE tenant_id=?",  # noqa: S608
-                            tuple(params))
+            self.db.execute(
+                f"UPDATE tenants SET {', '.join(fields)} WHERE tenant_id=?",  # noqa: S608
+                tuple(params),
+            )
         return self.get(tenant_id, reveal=True)
 
     def set_status(self, tenant_id: str, status: str) -> dict | None:
@@ -123,7 +127,7 @@ class TenantRepository:
         return self.get(tenant_id, reveal=True)
 
     def rotate_secret(self, tenant_id: str) -> dict | None:
-        new_secret = secrets.token_urlsafe(32)
+        new_secret = encrypt_secret(secrets.token_urlsafe(32))
         cur = self.db.execute(
             "UPDATE tenants SET hmac_secret=?, secret_rotated_at=? WHERE tenant_id=? AND deleted_at IS NULL",
             (new_secret, _utcnow(), tenant_id),
@@ -161,7 +165,7 @@ class TenantRepository:
             return None
         if row.get("status") != "active":
             return None
-        if not hmac_mod.compare_digest(row["hmac_secret"], api_secret):
+        if not hmac_mod.compare_digest(decrypt_secret(row["hmac_secret"]) or "", api_secret):
             return None
         return self._sanitize(row, True)
 
@@ -169,7 +173,11 @@ class TenantRepository:
     def _sanitize(row: dict, reveal: bool) -> dict:
         out = dict(row)
         out["policy"] = json.loads(out.pop("policy_json", "{}") or "{}")
-        if not reveal:
+        if reveal:
+            # Return plaintext hmac_secret to internal callers only
+            if out.get("hmac_secret"):
+                out["hmac_secret"] = decrypt_secret(out["hmac_secret"])
+        else:
             out.pop("api_key", None)
             out.pop("hmac_secret", None)
         return out

@@ -76,6 +76,8 @@ class Settings(BaseSettings):
 
     # Investigator bootstrap (first-run convenience — set via env in production)
     INVESTIGATOR_EMAIL: str = ""
+    PLATFORM_ADMIN_EMAIL: str = ""
+    PLATFORM_ADMIN_PASSWORD: str = ""
     INVESTIGATOR_PASSWORD: str = ""
     INVESTIGATOR_NAME: str = "محقق الاحتيال"
 

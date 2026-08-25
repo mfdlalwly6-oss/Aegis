@@ -379,6 +379,11 @@ class Database:
                 "CREATE TABLE IF NOT EXISTS schema_migrations "
                 "(name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
             )
+            # Schema parity with PostgreSQL (006_pg_hardening adds sha256 NOT NULL there).
+            # SQLite keeps it nullable so historical 2-column rows stay valid.
+            _sm_cols = [r[1] for r in conn.execute("PRAGMA table_info(schema_migrations)").fetchall()]
+            if "sha256" not in _sm_cols:
+                conn.execute("ALTER TABLE schema_migrations ADD COLUMN sha256 TEXT")
             from datetime import datetime
 
             for name, statements in _MIGRATIONS:

@@ -78,6 +78,65 @@ class ServiceRegistry:
         self.rule_repo = RuleRepository(self.db)
         self.watchlist_repo = WatchlistRepository(self.db)
         self.user_repo = UserRepository(self.db)
+
+        # ── TASK 9: platform admin bootstrap (env-provided, never hardcoded) ──
+        admin_email = getattr(settings, "PLATFORM_ADMIN_EMAIL", "") or ""
+        admin_pass = getattr(settings, "PLATFORM_ADMIN_PASSWORD", "") or ""
+        if admin_email and admin_pass:
+            if not self.db.query_one(
+                "SELECT 1 FROM users WHERE email=? AND status='active'", (admin_email.strip().lower(),)
+            ):
+                import secrets as _sec
+                from datetime import UTC as _UTC
+                from datetime import datetime as _dt
+
+                from app.crypto import encrypt_secret as _enc
+
+                now_iso = _dt.now(_UTC).isoformat()
+                # ensure a platform-scope tenant exists for the admin user (FK)
+                self.db.execute(
+                    "INSERT OR IGNORE INTO tenants (tenant_id, name, type, country, plan,"
+                    " contact_email, contact_phone, api_key, hmac_secret, status,"
+                    " policy_json, created_at, secret_rotated_at, deleted_at,"
+                    " investigator_limit, timezone, review_message)"
+                    " VALUES ('platform','AEGIS Platform','platform','YE','internal',"
+                    " NULL, NULL, ?, ?, 'active', '{}', ?, NULL, NULL, 999, 'UTC', '')",
+                    ("ak_" + _sec.token_hex(16), _enc(_sec.token_urlsafe(32)), now_iso),
+                )
+                self.user_repo.create(
+                    "platform", admin_email, "Platform Admin", role="admin", password=admin_pass
+                )
+                logger.info("platform_admin.bootstrapped", email=admin_email[:4] + "***")
+
+        # ── TASK 9 / migration 012: encrypt legacy plaintext hmac_secrets ──
+        from app.crypto import encrypt_secret, is_encrypted
+
+        if not self.db.query_one(
+            "SELECT 1 FROM schema_migrations WHERE name=?", ("012_encrypt_hmac_secrets",)
+        ):
+            from datetime import UTC as _UTC2
+            from datetime import datetime as _dt2
+
+            n = 0
+            for r in self.db.query("SELECT tenant_id, hmac_secret FROM tenants"):
+                v = r["hmac_secret"]
+                if v and not is_encrypted(v):
+                    self.db.execute(
+                        "UPDATE tenants SET hmac_secret=? WHERE tenant_id=?",
+                        (encrypt_secret(v), r["tenant_id"]),
+                    )
+                    n += 1
+            import hashlib as _hl
+
+            self.db.execute(
+                "INSERT INTO schema_migrations (name, applied_at, sha256) VALUES (?, ?, ?)",
+                (
+                    "012_encrypt_hmac_secrets",
+                    _dt2.now(_UTC2).isoformat(),
+                    _hl.sha256(b"012_encrypt_hmac_secrets:fernet-at-rest").hexdigest(),
+                ),
+            )
+            logger.info("migration.012_encrypt_hmac_secrets", encrypted=n)
         self.investigators = InvestigatorRepository(self.db)
         self.currency_repo = CurrencyRepository(self.db)
         self.fx_rate_repo = FxRateRepository(self.db)
@@ -120,17 +179,22 @@ class ServiceRegistry:
         # 6b. Register active models in model_registry (audit + governance)
         try:
             import json as _json
+
             _meta = getattr(self.ml_scorer, "_metadata", {}) or {}
             for _m in self.ml_scorer.list_models():
                 self.db.execute(
                     "INSERT OR IGNORE INTO model_registry "
                     "(model_name,version,path,metrics_json,trained_at,is_active) "
                     "VALUES (?,?,?,?,?,?)",
-                    (_m["name"], _m["version"],
-                     str(getattr(self.ml_scorer, "_dir", "")),
-                     _json.dumps(_meta.get("metrics", {}), default=str),
-                     _meta.get("trained_at"),
-                     1 if _m.get("type") == "trained" else 0))
+                    (
+                        _m["name"],
+                        _m["version"],
+                        str(getattr(self.ml_scorer, "_dir", "")),
+                        _json.dumps(_meta.get("metrics", {}), default=str),
+                        _meta.get("trained_at"),
+                        1 if _m.get("type") == "trained" else 0,
+                    ),
+                )
         except Exception as _e:
             logger.warning("ml.registry_write_failed", error=str(_e))
 
