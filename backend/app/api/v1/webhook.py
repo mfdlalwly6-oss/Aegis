@@ -145,21 +145,24 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
         raise HTTPException(401, "invalid_signature")
 
     # Replay guard on transaction timestamp: reject far-future (>5min) or very
-    # stale (>72h) events — bounds replay and clock-drift abuse.
-    body_ts = body.get("timestamp") or (body.get("transaction") or {}).get("timestamp") or (body.get("transaction") or {}).get("ts")
-    if body_ts:
-        from datetime import datetime, timezone
-        try:
+    # stale (>72h) events — bounds replay and clock-drift abuse. Reads the
+    # timestamp from the raw (already signature-verified) body.
+    from datetime import datetime, timezone
+    try:
+        _payload = json.loads(raw.decode("utf-8"))
+        _src = _payload.get("transaction", _payload) if isinstance(_payload, dict) else {}
+        body_ts = (_payload.get("timestamp") if isinstance(_payload, dict) else None) or _src.get("timestamp") or _src.get("ts")
+        if body_ts:
             ts = datetime.fromisoformat(str(body_ts).replace("Z", "+00:00"))
             skew = (ts - datetime.now(timezone.utc)).total_seconds()
             if skew > 300:
                 raise HTTPException(422, "timestamp_in_future")
             if skew < -72 * 3600:
                 raise HTTPException(422, "timestamp_stale")
-        except HTTPException:
-            raise
-        except Exception:
-            pass
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # unparseable payloads are rejected later by schema validation
 
     # Suspended/deleted tenants are hard-blocked at ingestion time.
     if tenant.get("status") != "active":
