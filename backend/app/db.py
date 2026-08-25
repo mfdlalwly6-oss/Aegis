@@ -171,10 +171,11 @@ CREATE TABLE IF NOT EXISTS webhooks_seen (
 
 CREATE TABLE IF NOT EXISTS watchlist (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id  TEXT NOT NULL DEFAULT 'platform',
     list_type  TEXT NOT NULL,     -- sanctions | pep | high_risk_country
     value      TEXT NOT NULL,
     meta_json  TEXT NOT NULL DEFAULT '{}',
-    UNIQUE(list_type, value)
+    UNIQUE(tenant_id, list_type, value)
 );
 
 CREATE TABLE IF NOT EXISTS model_registry (

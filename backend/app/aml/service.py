@@ -21,12 +21,12 @@ class AMLService:
 
         beneficiary_country = tx.beneficiary_country or (tx.device.ip_country if tx.device else None)
         if beneficiary_country:
-            hit = self.watchlist.check("sanctions", beneficiary_country.upper())
+            hit = self.watchlist.check("sanctions", beneficiary_country.upper(), tx.tenant_id)
             if hit:
                 signal.sanctions_hit = True
                 score += 0.60
                 flags.append(f"SANCTIONS_HIT:{beneficiary_country}")
-            hr = self.watchlist.check("high_risk_country", beneficiary_country.upper())
+            hr = self.watchlist.check("high_risk_country", beneficiary_country.upper(), tx.tenant_id)
             if hr:
                 signal.fatf_high_risk_country = True
                 score += 0.20

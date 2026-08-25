@@ -9,19 +9,23 @@ class WatchlistRepository:
     def __init__(self, db: Database):
         self.db = db
 
-    def add(self, list_type: str, value: str, meta: dict | None = None) -> None:
-        self.db.execute(
-            "INSERT OR IGNORE INTO watchlist (list_type,value,meta_json) VALUES (?,?,?)",
-            (list_type, value, json.dumps(meta or {})),
+    def add(self, list_type: str, value: str, meta: dict | None = None, tenant_id: str = "platform") -> bool:
+        cur = self.db.execute(
+            "INSERT OR IGNORE INTO watchlist (tenant_id,list_type,value,meta_json) VALUES (?,?,?,?)",
+            (tenant_id, list_type, value, json.dumps(meta or {}, ensure_ascii=False)),
+        )
+        return cur.rowcount > 0
+
+    def check(self, list_type: str, value: str, tenant_id: str = "platform") -> dict | None:
+        return self.db.query_one(
+            "SELECT * FROM watchlist WHERE list_type=? AND value=? AND tenant_id IN (?, 'platform') "
+            "ORDER BY CASE WHEN tenant_id=? THEN 0 ELSE 1 END LIMIT 1", (list_type, value, tenant_id, tenant_id)
         )
 
-    def check(self, list_type: str, value: str) -> dict | None:
-        return self.db.query_one("SELECT * FROM watchlist WHERE list_type=? AND value=?", (list_type, value))
-
-    def list_all(self, list_type: str | None = None) -> list[dict]:
+    def list_all(self, list_type: str | None = None, tenant_id: str = "platform") -> list[dict]:
         if list_type:
-            return self.db.query("SELECT * FROM watchlist WHERE list_type=?", (list_type,))
-        return self.db.query("SELECT * FROM watchlist")
+            return self.db.query("SELECT * FROM watchlist WHERE list_type=? AND tenant_id=?", (list_type, tenant_id))
+        return self.db.query("SELECT * FROM watchlist WHERE tenant_id=?", (tenant_id,))
 
     def seed_defaults(self) -> int:
         defaults = {

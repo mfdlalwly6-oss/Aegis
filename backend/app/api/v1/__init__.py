@@ -13,6 +13,7 @@ from . import (
     tenants,
     transactions,
     webhook,
+    watchlist,
 )
 
 router = APIRouter()
@@ -26,5 +27,6 @@ router.include_router(graph.router, prefix="/graph", tags=["graph"])
 router.include_router(health.router, tags=["system"])
 router.include_router(tenants.router, tags=["tenants"])
 router.include_router(webhook.router, tags=["webhook"])
+router.include_router(watchlist.router, tags=["watchlist"])
 router.include_router(investigator.router, prefix="/investigator", tags=["investigator"])
 router.include_router(reports.router, prefix="/reports", tags=["reports"])
