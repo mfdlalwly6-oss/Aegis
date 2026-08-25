@@ -42,6 +42,7 @@ class FxStatus(str, Enum):
 
 
 class FxSnapshot(BaseModel):
+    rate_id: str | None = None  # links to fx_rates.rate_id for audit traceability
     base_ccy: str
     quote_ccy: str
     rate: float | None = None

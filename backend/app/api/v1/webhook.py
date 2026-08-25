@@ -156,6 +156,7 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
         raise HTTPException(400, "invalid_json")
 
     tx = normalize_transaction(body, tenant["tenant_id"])
+    tx = _apply_fx(registry, tx, body)
 
     idem_key = request.headers.get("x-idempotency-key") or f"{tenant['tenant_id']}:{tx.tx_id}"
     result = await registry.orchestrator.evaluate_and_persist(

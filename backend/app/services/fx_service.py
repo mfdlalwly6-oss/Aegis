@@ -44,7 +44,7 @@ class FxService:
         # Native reference currency — no conversion needed, no FX risk.
         if ccy == ref_ccy:
             money.reference_amount = amount
-            money.fx = FxSnapshot(base_ccy=ccy, quote_ccy=ref_ccy, rate=1.0,
+            money.fx = FxSnapshot(rate_id="native", base_ccy=ccy, quote_ccy=ref_ccy, rate=1.0,
                                   rate_type="native", source="aegis_reference",
                                   region=region, fetched_at=at, valid_from=at,
                                   status=FxStatus.NATIVE,
@@ -104,6 +104,7 @@ class FxService:
                                divergence_pct=round(divergence_pct, 2))
 
         money.fx = FxSnapshot(
+            rate_id=rate_row.get("rate_id"),
             base_ccy=ccy, quote_ccy=ref_ccy, rate=ref_rate,
             rate_type=rate_row.get("rate_type", "mid"),
             source=rate_row["source"], region=rate_row["region"],
