@@ -16,7 +16,19 @@ from app.models.schemas import ModelScore
 
 logger = structlog.get_logger(__name__)
 
-MODELS_DIR = Path(__file__).parent.parent.parent.parent / "models" / "trained"
+def _find_models_dir() -> Path:
+    """Locate models/trained by walking up from this file — works in both the repo
+    layout (backend/app/ml/ensemble.py) and the container layout (/app/app/ml/...).
+    A fixed parent-depth breaks whenever the image layout changes; search instead."""
+    here = Path(__file__).resolve()
+    for parent in [here.parent, *here.parents]:
+        cand = parent / "models" / "trained"
+        if cand.is_dir() and (cand / "metadata.json").exists():
+            return cand
+    return here.parent.parent.parent.parent / "models" / "trained"
+
+
+MODELS_DIR = _find_models_dir()
 
 
 class EnsembleScorer:

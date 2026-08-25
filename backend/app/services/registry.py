@@ -117,6 +117,22 @@ class ServiceRegistry:
 
         # 6. ML scorer (real model if trained, heuristic fallback)
         self.ml_scorer = EnsembleScorer()
+        # 6b. Register active models in model_registry (audit + governance)
+        try:
+            import json as _json
+            _meta = getattr(self.ml_scorer, "_metadata", {}) or {}
+            for _m in self.ml_scorer.list_models():
+                self.db.execute(
+                    "INSERT OR IGNORE INTO model_registry "
+                    "(model_name,version,path,metrics_json,trained_at,is_active) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (_m["name"], _m["version"],
+                     str(getattr(self.ml_scorer, "_dir", "")),
+                     _json.dumps(_meta.get("metrics", {}), default=str),
+                     _meta.get("trained_at"),
+                     1 if _m.get("type") == "trained" else 0))
+        except Exception as _e:
+            logger.warning("ml.registry_write_failed", error=str(_e))
 
         # 7. Graph engine (bootstrap from recent transactions)
         self.graph_engine = GraphEngine()
