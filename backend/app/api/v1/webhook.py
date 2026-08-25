@@ -154,6 +154,10 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
     if not api_key or not signature:
         raise HTTPException(401, "missing_auth_headers")
 
+    # Pre-auth lookup must run in platform/system context: RLS hides other
+    # tenants' rows and the pooled connection's GUC may be stale from a
+    # previous request (set_config with is_local=false is session-scoped).
+    registry.db.set_tenant("platform")
     tenant = registry.tenants.by_api_key(api_key)
     if not tenant:
         legacy = settings.LEGACY_SECRET
@@ -183,6 +187,7 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
             {"reason": "invalid_signature"},
         )
         raise HTTPException(401, "invalid_signature")
+    registry.db.set_tenant(tenant["tenant_id"])  # authenticated tenant RLS context
 
     # Replay guard on transaction timestamp: reject far-future (>5min) or very
     # stale (>72h) events — bounds replay and clock-drift abuse. Reads the
