@@ -4,6 +4,7 @@ Each test gets a fresh DB and a freshly imported app (settings reloaded from env
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -11,6 +12,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Hermetic guard: a production .env (AEGIS_DB_DRIVER=postgres + container-hostname
+# DATABASE_URL) must never leak into the test process. pydantic-settings reads env
+# BEFORE the .env file, so setting these here (setdefault: real PG runs keep their
+# explicit env and are unaffected) pins tests to isolated SQLite by default.
+os.environ.setdefault("AEGIS_DB_DRIVER", "sqlite")
+os.environ.setdefault("AEGIS_DATA_DIR", "/tmp/aegis-pytest")
+os.environ.setdefault("AEGIS_DB_PATH", "/tmp/aegis-pytest/aegis.db")
+os.environ.setdefault("AEGIS_ENV", "development")
 
 
 @pytest.fixture()

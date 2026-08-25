@@ -120,7 +120,8 @@ class TenantRepository:
 
     def set_status(self, tenant_id: str, status: str) -> dict | None:
         cur = self.db.execute(
-            "UPDATE tenants SET status=? WHERE tenant_id=? AND deleted_at IS NULL", (status, tenant_id)
+            "UPDATE tenants SET status=? WHERE tenant_id=? AND deleted_at IS NULL",
+            (status, tenant_id),
         )
         if cur.rowcount == 0:
             return None

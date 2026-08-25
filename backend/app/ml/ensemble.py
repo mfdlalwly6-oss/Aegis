@@ -87,7 +87,10 @@ class EnsembleScorer:
                 model_name="gradient_boosting",
                 model_version=self._metadata.get("version", "2.0.0"),
                 probability=round(gb_prob, 4),
-                reason_codes=[f"latency_ms={(time.perf_counter() - t0) * 1000:.1f}", "trained_model"],
+                reason_codes=[
+                    f"latency_ms={(time.perf_counter() - t0) * 1000:.1f}",
+                    "trained_model",
+                ],
             )
         )
 
@@ -102,7 +105,10 @@ class EnsembleScorer:
                 model_name="isolation_forest",
                 model_version=self._metadata.get("version", "2.0.0"),
                 probability=round(iso_prob, 4),
-                reason_codes=[f"latency_ms={(time.perf_counter() - t0) * 1000:.1f}", "trained_model"],
+                reason_codes=[
+                    f"latency_ms={(time.perf_counter() - t0) * 1000:.1f}",
+                    "trained_model",
+                ],
             )
         )
 
@@ -137,7 +143,11 @@ class EnsembleScorer:
                 model_name="heuristic_fallback",
                 model_version="0.0.0",
                 probability=round(score, 4),
-                reason_codes=["NOT_TRAINED_ML", "deterministic_heuristic", "train_models_to_enable_real_ml"],
+                reason_codes=[
+                    "NOT_TRAINED_ML",
+                    "deterministic_heuristic",
+                    "train_models_to_enable_real_ml",
+                ],
             )
         ]
         return round(score, 4), reports
@@ -153,7 +163,11 @@ class EnsembleScorer:
                 }
             )
             out.append(
-                {"name": "isolation_forest", "version": self._metadata.get("version", "?"), "type": "trained"}
+                {
+                    "name": "isolation_forest",
+                    "version": self._metadata.get("version", "?"),
+                    "type": "trained",
+                }
             )
         else:
             out.append({"name": "heuristic_fallback", "version": "0.0.0", "type": "fallback_not_trained"})

@@ -19,7 +19,13 @@ class CurrencyRepository:
         self.db = db
 
     def add(
-        self, code: str, name: str, *, minor_unit: int = 2, round_unit: float = 1000, active: bool = True
+        self,
+        code: str,
+        name: str,
+        *,
+        minor_unit: int = 2,
+        round_unit: float = 1000,
+        active: bool = True,
     ) -> dict:
         self.db.execute(
             "INSERT OR REPLACE INTO currencies (code,name,minor_unit,round_unit,active,created_at) "

@@ -91,6 +91,22 @@ Transaction → Authentication (API Key + HMAC-SHA256) → Tenant Resolution
 - Audit Log غير قابل للتلاعب من الواجهة: actor، role، tenant، action، target، before/after، timestamp، request_id.
 - SSE (الدفق الحي) محمي: owner فقط للمسؤول، ومحققون معتمدون للمؤسسات.
 
+### الإشعارات (TASK 12)
+
+- **مزوّدات قابلة للتبديل** عبر `AEGIS_NOTIFICATION_PROVIDER`: `console` (افتراضي) أو `webhook` أو `smtp`، مع fallback آمن إلى console عند قيمة غير معروفة.
+- **Best-effort**: فشل التوصيل **لا يغيّر** القرار المالي ولا يُسقط الطلب — القرار يُحفظ أولًا ثم يُرسَل الإشعار، وأي فشل يُسجَّل `notification.failed` في audit log (والنجاح `notification.sent`).
+- **الحمولة مصغّرة**: `tenant_id`، `alert_id`، `decision_id`، `tx_id`، `decision`، `severity`، `event_type` فقط — لا نصوص حرة ولا أسرار.
+- **المحفّزات**: الإشعار يُرسَل فقط عند قرارَي `REVIEW` و`BLOCK` (الحدث `decision.review` / `decision.block`) — لا إشعار على `ALLOW`.
+- **Webhook**: http(s) عام فقط — حارس SSRF يرفض `localhost`/loopback/العناوين الخاصة (10/8، 172.16/12، 192.168/16) وlink-local (مثل 169.254.169.254) وuserinfo وأي مخطط غير http(s)، ويتحقق من كل عناوين DNS. توقيع HMAC-SHA256 في الترويسة `X-Aegis-Signature` (hex digest للجسم الخام) عند ضبط `AEGIS_NOTIFICATION_WEBHOOK_SECRET`. مهلة صارمة `AEGIS_NOTIFICATION_TIMEOUT_SEC`، إعادة محاولة محدودة `AEGIS_NOTIFICATION_RETRIES` مع backoff تصاعدي، **لا يتبع إعادة التوجيه** وأي 3xx/4xx/5xx يُحسب فشلًا.
+- **SMTP**: TLS افتراضي (`AEGIS_NOTIFICATION_SMTP_USE_TLS=true`)، مصادقة اختيارية (`..._SMTP_USER` / `..._SMTP_PASSWORD`)، مهلة صارمة، ويُنفَّذ خارج حلقة الأحداث (`asyncio.to_thread` + `wait_for`).
+- مثال إعداد webhook:
+  ```
+  AEGIS_NOTIFICATION_PROVIDER=webhook
+  AEGIS_NOTIFICATION_WEBHOOK_URL=https://hooks.example.com/aegis
+  AEGIS_NOTIFICATION_WEBHOOK_SECRET=<random-32-bytes>
+  ```
+- التحقق عند المستقبِل: `hmac_sha256(secret, raw_body)` (hex) يجب أن يساوي قيمة الترويسة `X-Aegis-Signature`.
+
 ## 11) قاعدة البيانات والهجرات
 
 - SQLite (قابل للتبديل إلى PostgreSQL عبر طبقة المستودعات) مع **forward-only migrations** مفهرسة في `schema_migrations`:

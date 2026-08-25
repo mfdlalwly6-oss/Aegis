@@ -20,3 +20,5 @@ models/synthetic_fraud_dataset.csv
 !models/trained/gradient_boosting.joblib
 !models/trained/isolation_forest.joblib
 models/trained-backup-*/
+
+docker-compose.local.yml

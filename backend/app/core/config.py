@@ -80,6 +80,18 @@ class Settings(BaseSettings):
     PLATFORM_ADMIN_PASSWORD: str = ""
     INVESTIGATOR_PASSWORD: str = ""
     INVESTIGATOR_NAME: str = "محقق الاحتيال"
+    NOTIFICATION_PROVIDER: Literal["console", "webhook", "smtp"] = "console"
+    NOTIFICATION_WEBHOOK_URL: str = ""
+    NOTIFICATION_WEBHOOK_SECRET: str = ""
+    NOTIFICATION_TIMEOUT_SEC: float = 5.0
+    NOTIFICATION_RETRIES: int = 2
+    NOTIFICATION_SMTP_HOST: str = ""
+    NOTIFICATION_SMTP_PORT: int = 587
+    NOTIFICATION_SMTP_USER: str = ""
+    NOTIFICATION_SMTP_PASSWORD: str = ""
+    NOTIFICATION_SMTP_FROM: str = ""
+    NOTIFICATION_SMTP_TO: str = ""
+    NOTIFICATION_SMTP_USE_TLS: bool = True
 
     @property
     def db_path(self) -> str:

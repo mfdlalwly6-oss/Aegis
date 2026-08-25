@@ -84,7 +84,10 @@ def list_tenants(owner=Depends(require_owner), registry=Depends(get_registry)):
 
 @router.post("/admin/tenants", status_code=201)
 def create_tenant(
-    body: CreateTenant, request: Request, owner=Depends(require_owner), registry=Depends(get_registry)
+    body: CreateTenant,
+    request: Request,
+    owner=Depends(require_owner),
+    registry=Depends(get_registry),
 ):
     data = body.model_dump(exclude_none=True)
     tenant = registry.tenants.create(data)
@@ -606,7 +609,8 @@ def _top_reasons(registry, tenant_id: str, limit: int = 8) -> list[dict]:
 
     counts = Counter()
     for row in registry.db.query(
-        "SELECT top_reasons_json FROM decisions WHERE tenant_id=? ORDER BY ts DESC LIMIT 300", (tenant_id,)
+        "SELECT top_reasons_json FROM decisions WHERE tenant_id=? ORDER BY ts DESC LIMIT 300",
+        (tenant_id,),
     ):
         try:
             for item in _json.loads(row["top_reasons_json"] or "[]"):
@@ -626,7 +630,10 @@ def merchant_integration(merchant=Depends(require_merchant), registry=Depends(ge
         "endpoint": endpoint,
         "api_key": tenant["api_key"],
         "hmac_secret": tenant["hmac_secret"],
-        "headers": {"X-API-Key": tenant["api_key"], "X-Wallet-Signature": "HMAC_SHA256(body, hmac_secret)"},
+        "headers": {
+            "X-API-Key": tenant["api_key"],
+            "X-Wallet-Signature": "HMAC_SHA256(body, hmac_secret)",
+        },
         "curl": f"curl -X POST '{endpoint}' -H 'Content-Type: application/json' "
         f"-H 'X-API-Key: {tenant['api_key']}' "
         f"-H 'X-Wallet-Signature: <signature>' "
@@ -843,21 +850,30 @@ def _inv_action(investigator_id: str, action: str, merchant, request, registry, 
 
 @router.post("/admin/merchant/investigators/{inv_id}/suspend")
 def merchant_suspend_investigator(
-    inv_id: str, request: Request, merchant=Depends(require_merchant), registry=Depends(get_registry)
+    inv_id: str,
+    request: Request,
+    merchant=Depends(require_merchant),
+    registry=Depends(get_registry),
 ):
     return _inv_action(inv_id, "suspended", merchant, request, registry, "inactive")
 
 
 @router.post("/admin/merchant/investigators/{inv_id}/activate")
 def merchant_activate_investigator(
-    inv_id: str, request: Request, merchant=Depends(require_merchant), registry=Depends(get_registry)
+    inv_id: str,
+    request: Request,
+    merchant=Depends(require_merchant),
+    registry=Depends(get_registry),
 ):
     return _inv_action(inv_id, "activated", merchant, request, registry, "active")
 
 
 @router.delete("/admin/merchant/investigators/{inv_id}")
 def merchant_delete_investigator(
-    inv_id: str, request: Request, merchant=Depends(require_merchant), registry=Depends(get_registry)
+    inv_id: str,
+    request: Request,
+    merchant=Depends(require_merchant),
+    registry=Depends(get_registry),
 ):
     return _inv_action(inv_id, "deleted", merchant, request, registry, "deleted")
 
@@ -890,7 +906,10 @@ def merchant_reset_password(
 
 @router.get("/admin/merchant/feed")
 def merchant_feed(
-    filter: str = "all", limit: int = 300, merchant=Depends(require_merchant), registry=Depends(get_registry)
+    filter: str = "all",
+    limit: int = 300,
+    merchant=Depends(require_merchant),
+    registry=Depends(get_registry),
 ):
     """One endpoint for the transaction tabs. Filters are applied by the BACKEND;
     counts are real numbers from the DB — never client-side hardcoded."""

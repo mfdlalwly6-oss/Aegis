@@ -75,7 +75,18 @@ class AuditRepository:
             "INSERT INTO audit_log (ts,tenant_id,actor,event_type,resource,"
             "resource_id,request_id,metadata_json,prev_hash,entry_hash) "
             "VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (ts, tenant_id, actor, event_type, resource, resource_id, request_id, meta_json, prev, entry),
+            (
+                ts,
+                tenant_id,
+                actor,
+                event_type,
+                resource,
+                resource_id,
+                request_id,
+                meta_json,
+                prev,
+                entry,
+            ),
         )
 
     def verify_chain(self, limit: int = 10000) -> dict:
@@ -102,7 +113,12 @@ class AuditRepository:
                 continue
             chain_started = True
             if r.get("prev_hash") != prev:
-                return {"ok": False, "reason": "prev_hash_mismatch", "row_id": r["id"], "checked": checked}
+                return {
+                    "ok": False,
+                    "reason": "prev_hash_mismatch",
+                    "row_id": r["id"],
+                    "checked": checked,
+                }
             expect = _entry_hash(
                 prev,
                 r["ts"],
@@ -115,7 +131,12 @@ class AuditRepository:
                 r["metadata_json"],
             )
             if expect != r["entry_hash"]:
-                return {"ok": False, "reason": "entry_hash_mismatch", "row_id": r["id"], "checked": checked}
+                return {
+                    "ok": False,
+                    "reason": "entry_hash_mismatch",
+                    "row_id": r["id"],
+                    "checked": checked,
+                }
             prev = r["entry_hash"]
             checked += 1
         return {

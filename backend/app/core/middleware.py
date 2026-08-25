@@ -24,7 +24,12 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
         finally:
             dt = (time.perf_counter() - t0) * 1000
-            logger.info("http.request", path=request.url.path, method=request.method, latency_ms=round(dt, 2))
+            logger.info(
+                "http.request",
+                path=request.url.path,
+                method=request.method,
+                latency_ms=round(dt, 2),
+            )
         response.headers["x-request-id"] = req_id
         return response
 

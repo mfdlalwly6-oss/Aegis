@@ -9,7 +9,10 @@ router = APIRouter()
 
 @router.get("/")
 def list_cases(
-    status: str | None = None, limit: int = 100, owner=Depends(require_owner), registry=Depends(get_registry)
+    status: str | None = None,
+    limit: int = 100,
+    owner=Depends(require_owner),
+    registry=Depends(get_registry),
 ):
     return registry.cases.list(status=status, limit=limit)
 
@@ -24,7 +27,11 @@ def get_case(case_id: str, owner=Depends(require_owner), registry=Depends(get_re
 
 @router.post("/{case_id}/notes")
 def add_note(
-    case_id: str, body: dict, request: Request, owner=Depends(require_owner), registry=Depends(get_registry)
+    case_id: str,
+    body: dict,
+    request: Request,
+    owner=Depends(require_owner),
+    registry=Depends(get_registry),
 ):
     case = registry.cases.add_note(case_id, body.get("author", "owner"), body.get("text", ""))
     if not case:
@@ -43,7 +50,11 @@ def add_note(
 
 @router.post("/{case_id}/status")
 def update_case_status(
-    case_id: str, body: dict, request: Request, owner=Depends(require_owner), registry=Depends(get_registry)
+    case_id: str,
+    body: dict,
+    request: Request,
+    owner=Depends(require_owner),
+    registry=Depends(get_registry),
 ):
     case = registry.cases.update_status(case_id, body.get("status", "open"), assignee=body.get("assignee"))
     if not case:

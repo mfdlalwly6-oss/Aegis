@@ -16,7 +16,6 @@ from app.db import Database
 from app.features import FeatureExtractor
 from app.graph.engine import GraphEngine
 from app.ml.ensemble import EnsembleScorer
-from app.notifications.providers import ConsoleNotificationProvider
 from app.repositories import (
     AlertRepository,
     AuditRepository,
@@ -33,6 +32,7 @@ from app.repositories.currency_repo import CurrencyRepository
 from app.repositories.fx_rate_repo import FxRateRepository
 from app.rules.engine import RuleEngine
 from app.services.fx_service import FxService
+from app.services.notifications import NotificationService, provider_from_settings
 from app.services.orchestrator import DecisionOrchestrator
 from app.streaming import EventBus
 
@@ -84,7 +84,8 @@ class ServiceRegistry:
         admin_pass = getattr(settings, "PLATFORM_ADMIN_PASSWORD", "") or ""
         if admin_email and admin_pass:
             if not self.db.query_one(
-                "SELECT 1 FROM users WHERE email=? AND status='active'", (admin_email.strip().lower(),)
+                "SELECT 1 FROM users WHERE email=? AND status='active'",
+                (admin_email.strip().lower(),),
             ):
                 import secrets as _sec
                 from datetime import UTC as _UTC
@@ -154,7 +155,10 @@ class ServiceRegistry:
                 tenants = self.tenants.list()
                 tenant_id = next((t["tenant_id"] for t in tenants if t["status"] == "active"), "platform")
             self.investigators.create(
-                tenant_id, inv_email, getattr(settings, "INVESTIGATOR_NAME", "") or "محقق الاحتيال", inv_pass
+                tenant_id,
+                inv_email,
+                getattr(settings, "INVESTIGATOR_NAME", "") or "محقق الاحتيال",
+                inv_pass,
             )
             logger.info("investigator.bootstrapped", email=inv_email, tenant_id=tenant_id)
 
@@ -212,7 +216,7 @@ class ServiceRegistry:
         # 10. Audit + events + notifications
         self.audit = AuditService(self.audit_repo)
         self.events = EventBus()
-        self.notifications = ConsoleNotificationProvider()
+        self.notifications = NotificationService(provider_from_settings(settings), self.audit)
 
         # 11. Orchestrator (unified pipeline)
         self.orchestrator = DecisionOrchestrator(

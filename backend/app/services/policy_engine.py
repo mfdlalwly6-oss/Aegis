@@ -128,7 +128,9 @@ class PolicyEngine:
         removed = disabled & PROTECTED_RULES
         if removed:
             logger.warning(
-                "policy.protected_rule_disable_blocked", rules=sorted(removed), tenant=tenant.get("tenant_id")
+                "policy.protected_rule_disable_blocked",
+                rules=sorted(removed),
+                tenant=tenant.get("tenant_id"),
             )
         disabled -= PROTECTED_RULES
 

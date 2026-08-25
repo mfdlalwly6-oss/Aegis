@@ -44,7 +44,16 @@ class InvestigatorRepository:
             "INSERT INTO investigators (investigator_id, tenant_id, email, name,"
             " password_hash, status, created_at, last_login_at)"
             " VALUES (?,?,?,?,?,?,?,?)",
-            (inv_id, tenant_id, email.strip().lower(), name, _hash_pw(password), "active", now, None),
+            (
+                inv_id,
+                tenant_id,
+                email.strip().lower(),
+                name,
+                _hash_pw(password),
+                "active",
+                now,
+                None,
+            ),
         )
         return {
             "investigator_id": inv_id,
@@ -73,7 +82,8 @@ class InvestigatorRepository:
     def list(self, tenant_id: str | None = None) -> list[dict]:
         if tenant_id:
             rows = self.db.query(
-                "SELECT * FROM investigators WHERE tenant_id=? ORDER BY created_at DESC", (tenant_id,)
+                "SELECT * FROM investigators WHERE tenant_id=? ORDER BY created_at DESC",
+                (tenant_id,),
             )
         else:
             rows = self.db.query("SELECT * FROM investigators ORDER BY created_at DESC")
@@ -108,7 +118,8 @@ class InvestigatorRepository:
 
     def touch_login(self, investigator_id: str) -> None:
         self.db.execute(
-            "UPDATE investigators SET last_login_at=? WHERE investigator_id=?", (_utcnow(), investigator_id)
+            "UPDATE investigators SET last_login_at=? WHERE investigator_id=?",
+            (_utcnow(), investigator_id),
         )
 
     def set_status(self, tenant_id: str, investigator_id: str, status: str) -> bool:

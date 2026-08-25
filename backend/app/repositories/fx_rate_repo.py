@@ -77,7 +77,12 @@ class FxRateRepository:
         return self.db.query_one("SELECT * FROM fx_rates WHERE rate_id=?", (rate_id,))
 
     def latest_valid(
-        self, base_ccy: str, quote_ccy: str, *, region: str | None = None, at: datetime | None = None
+        self,
+        base_ccy: str,
+        quote_ccy: str,
+        *,
+        region: str | None = None,
+        at: datetime | None = None,
     ) -> dict | None:
         """Newest rate valid at `at` (default now). Region-specific beats 'global'.
         Among ties, higher-trust source wins, then most recent fetched_at."""

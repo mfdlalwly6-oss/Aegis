@@ -73,7 +73,8 @@ class DecisionRepository:
     def recent(self, limit: int = 50, tenant_id: str | None = None) -> list[dict]:
         if tenant_id:
             return self.db.query(
-                "SELECT * FROM decisions WHERE tenant_id=? ORDER BY ts DESC LIMIT ?", (tenant_id, limit)
+                "SELECT * FROM decisions WHERE tenant_id=? ORDER BY ts DESC LIMIT ?",
+                (tenant_id, limit),
             )
         return self.db.query("SELECT * FROM decisions ORDER BY ts DESC LIMIT ?", (limit,))
 

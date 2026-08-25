@@ -19,7 +19,11 @@ from app.api.deps import require_investigator, require_owner
 from app.api.v1 import router as v1_router
 from app.core.config import settings
 from app.core.logging import configure_logging
-from app.core.middleware import RateLimitMiddleware, RequestContextMiddleware, SecurityHeadersMiddleware
+from app.core.middleware import (
+    RateLimitMiddleware,
+    RequestContextMiddleware,
+    SecurityHeadersMiddleware,
+)
 from app.core.telemetry import setup_telemetry
 from app.services.registry import ServiceRegistry
 

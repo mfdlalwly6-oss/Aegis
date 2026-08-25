@@ -14,10 +14,13 @@ class TestDecideThresholds:
     """Direct unit tests of the threshold ladder (no I/O)."""
 
     def _orch(self):
-        # Minimal orchestrator instance without wiring (only _decide/_band used)
+        # Minimal orchestrator instance without wiring (only _decide/_band used).
+        # _decide/_band fall back to _resolve_policy(""), which reads self.tenants —
+        # stub it to None so the default (global) policy is used.
         from app.services.orchestrator import DecisionOrchestrator
 
         o = object.__new__(DecisionOrchestrator)
+        o.tenants = None  # required: _resolve_policy reads self.tenants (default None)
         return o
 
     def test_band_boundaries(self):

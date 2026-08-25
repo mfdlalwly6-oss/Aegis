@@ -23,7 +23,12 @@ class UserRepository:
         self.db = db
 
     def create(
-        self, tenant_id: str, email: str, name: str, role: str = "viewer", password: str | None = None
+        self,
+        tenant_id: str,
+        email: str,
+        name: str,
+        role: str = "viewer",
+        password: str | None = None,
     ) -> dict:
         uid = generate_id("usr")
         pw_hash = _hash_pw(password) if password else None
@@ -39,7 +44,8 @@ class UserRepository:
 
     def get_by_email(self, tenant_id: str, email: str) -> dict | None:
         return self.db.query_one(
-            "SELECT * FROM users WHERE tenant_id=? AND email=? AND status='active'", (tenant_id, email)
+            "SELECT * FROM users WHERE tenant_id=? AND email=? AND status='active'",
+            (tenant_id, email),
         )
 
     def list_by_tenant(self, tenant_id: str) -> list[dict]:

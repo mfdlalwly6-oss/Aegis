@@ -89,7 +89,11 @@ def investigator_login(body: InvestigatorLogin, request: Request, registry=Depen
         inv["email"],
         "investigator",
         settings.JWT_ACCESS_TTL_SEC * 8,
-        {"investigator_id": inv["investigator_id"], "name": inv["name"], "tenant_id": inv["tenant_id"]},
+        {
+            "investigator_id": inv["investigator_id"],
+            "name": inv["name"],
+            "tenant_id": inv["tenant_id"],
+        },
     )
     registry.audit.log(
         inv["tenant_id"],
@@ -128,7 +132,9 @@ def me(inv=Depends(require_investigator)):
 
 @router.get("/queue")
 def review_queue(
-    limit: int = Query(100, le=500), inv=Depends(require_investigator), registry=Depends(get_registry)
+    limit: int = Query(100, le=500),
+    inv=Depends(require_investigator),
+    registry=Depends(get_registry),
 ):
     tid = inv["tenant_id"]
     rows = registry.db.query(
@@ -199,7 +205,8 @@ def decisions_recent(
 @router.get("/decisions/{decision_id}")
 def decision_detail(decision_id: str, inv=Depends(require_investigator), registry=Depends(get_registry)):
     row = registry.db.query_one(
-        "SELECT * FROM decisions WHERE decision_id=? AND tenant_id=?", (decision_id, inv["tenant_id"])
+        "SELECT * FROM decisions WHERE decision_id=? AND tenant_id=?",
+        (decision_id, inv["tenant_id"]),
     )
     if not row:
         raise HTTPException(404, "not_found")
@@ -285,7 +292,10 @@ def alert_detail(alert_id: str, inv=Depends(require_investigator), registry=Depe
 
 @router.post("/alerts/{alert_id}/assign")
 def alert_assign(
-    alert_id: str, request: Request, inv=Depends(require_investigator), registry=Depends(get_registry)
+    alert_id: str,
+    request: Request,
+    inv=Depends(require_investigator),
+    registry=Depends(get_registry),
 ):
     tid = inv["tenant_id"]
     _get_alert(registry, alert_id, tid)
@@ -459,7 +469,10 @@ def case_detail(case_id: str, inv=Depends(require_investigator), registry=Depend
 
 @router.post("/cases/{case_id}/assign")
 def case_assign(
-    case_id: str, request: Request, inv=Depends(require_investigator), registry=Depends(get_registry)
+    case_id: str,
+    request: Request,
+    inv=Depends(require_investigator),
+    registry=Depends(get_registry),
 ):
     _get_case(registry, case_id, inv["tenant_id"])
     case = registry.cases.update_status(case_id, "in_progress", assignee=inv.get("sub"))

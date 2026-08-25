@@ -19,12 +19,15 @@ class WatchlistRepository:
     def check(self, list_type: str, value: str, tenant_id: str = "platform") -> dict | None:
         return self.db.query_one(
             "SELECT * FROM watchlist WHERE list_type=? AND value=? AND tenant_id IN (?, 'platform') "
-            "ORDER BY CASE WHEN tenant_id=? THEN 0 ELSE 1 END LIMIT 1", (list_type, value, tenant_id, tenant_id)
+            "ORDER BY CASE WHEN tenant_id=? THEN 0 ELSE 1 END LIMIT 1",
+            (list_type, value, tenant_id, tenant_id),
         )
 
     def list_all(self, list_type: str | None = None, tenant_id: str = "platform") -> list[dict]:
         if list_type:
-            return self.db.query("SELECT * FROM watchlist WHERE list_type=? AND tenant_id=?", (list_type, tenant_id))
+            return self.db.query(
+                "SELECT * FROM watchlist WHERE list_type=? AND tenant_id=?", (list_type, tenant_id)
+            )
         return self.db.query("SELECT * FROM watchlist WHERE tenant_id=?", (tenant_id,))
 
     def seed_defaults(self) -> int:

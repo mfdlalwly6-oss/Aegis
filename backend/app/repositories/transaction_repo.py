@@ -61,7 +61,8 @@ class TransactionRepository:
     def list_recent(self, tenant_id: str | None = None, limit: int = 100) -> list[dict]:
         if tenant_id:
             return self.db.query(
-                "SELECT * FROM transactions WHERE tenant_id=? ORDER BY ts DESC LIMIT ?", (tenant_id, limit)
+                "SELECT * FROM transactions WHERE tenant_id=? ORDER BY ts DESC LIMIT ?",
+                (tenant_id, limit),
             )
         return self.db.query("SELECT * FROM transactions ORDER BY ts DESC LIMIT ?", (limit,))
 
@@ -103,7 +104,8 @@ class TransactionRepository:
 
     def shared_ip_accounts(self, tenant_id: str, ip: str) -> list[str]:
         rows = self.db.query(
-            "SELECT DISTINCT sender_account_id FROM transactions WHERE tenant_id=? AND ip=?", (tenant_id, ip)
+            "SELECT DISTINCT sender_account_id FROM transactions WHERE tenant_id=? AND ip=?",
+            (tenant_id, ip),
         )
         return [r["sender_account_id"] for r in rows]
 

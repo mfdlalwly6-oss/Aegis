@@ -3,7 +3,6 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from app.db import Database
 from app.repositories.currency_repo import CurrencyRepository
 from app.repositories.fx_rate_repo import FxRateRepository
@@ -20,7 +19,10 @@ def fx_db(tmp_path, monkeypatch):
     from app.core.config import clear_settings_cache
 
     clear_settings_cache()
-    db = Database()
+    # Explicit path: module-level `settings` in app.db binds at import time, so
+    # clear_settings_cache() alone does NOT rebind it — without this the fixture
+    # can fall back to the shared default DB (/tmp/aegis-data/aegis.db).
+    db = Database(str(tmp_path / "aegis-test.db"))
     db.migrate()
     yield db
     db.close()
