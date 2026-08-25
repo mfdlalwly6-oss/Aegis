@@ -19,3 +19,4 @@ models/synthetic_fraud_dataset.csv
 # Trained models are part of the verified baseline (needed to run immediately)
 !models/trained/gradient_boosting.joblib
 !models/trained/isolation_forest.joblib
+models/trained-backup-*/
