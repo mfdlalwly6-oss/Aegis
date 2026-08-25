@@ -20,9 +20,11 @@ def _tenant_key(client):
 
 
 def _tx(tid, **kw):
+    from datetime import datetime, timezone
     b = {"tx_id": f"tx-{tid[:6]}", "amount": 100.0, "currency": "USD",
          "sender_account_id": "a", "beneficiary_account_id": "b",
-         "timestamp": "2026-08-25T10:00:00Z"}
+         # dynamic timestamp: always within the replay-guard window (now)
+         "timestamp": datetime.now(timezone.utc).isoformat()}
     b.update(kw)
     return b
 
