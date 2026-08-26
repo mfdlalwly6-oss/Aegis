@@ -4,6 +4,7 @@ from . import (
     alerts,
     auth,
     cases,
+    fx,
     graph,
     health,
     investigator,
@@ -21,6 +22,7 @@ router.include_router(auth.router, prefix="/auth", tags=["auth"])
 router.include_router(transactions.router, prefix="/transactions", tags=["transactions"])
 router.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
 router.include_router(cases.router, prefix="/cases", tags=["cases"])
+router.include_router(fx.router, tags=["fx"])
 router.include_router(rules.router, prefix="/rules", tags=["rules"])
 router.include_router(models.router, prefix="/models", tags=["models"])
 router.include_router(graph.router, prefix="/graph", tags=["graph"])

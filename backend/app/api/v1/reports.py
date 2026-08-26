@@ -19,7 +19,9 @@ class GenerateBody(BaseModel):
 
 
 @router.post("/generate")
-def generate_report(body: GenerateBody, merchant=Depends(require_merchant), registry=Depends(get_registry)):
+def generate_report(
+    body: GenerateBody, merchant=Depends(require_merchant), registry=Depends(get_registry)
+):
     builder = ReportBuilder(registry)
     try:
         report = builder.compute(merchant["tenant_id"], body.period, body.timezone)

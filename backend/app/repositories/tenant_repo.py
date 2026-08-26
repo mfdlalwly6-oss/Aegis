@@ -80,7 +80,9 @@ class TenantRepository:
         if include_deleted:
             rows = self.db.query("SELECT * FROM tenants ORDER BY created_at DESC")
         else:
-            rows = self.db.query("SELECT * FROM tenants WHERE deleted_at IS NULL ORDER BY created_at DESC")
+            rows = self.db.query(
+                "SELECT * FROM tenants WHERE deleted_at IS NULL ORDER BY created_at DESC"
+            )
         return [self._sanitize(r, False) for r in rows]
 
     def get(self, tenant_id: str, reveal: bool = False) -> dict | None:
@@ -152,6 +154,14 @@ class TenantRepository:
         for k, v in patch.items():
             if v is not None:
                 policy[k] = v
+        # BUG1 fix: never persist an inverted threshold ladder. A policy whose
+        # challenge/review/block are not non-decreasing is unusable by the engine,
+        # so reject it at write time with a clear 422 instead of storing silently.
+        th = policy.get("thresholds")
+        if isinstance(th, dict):
+            c, r, b = th.get("challenge"), th.get("review"), th.get("block")
+            if all(isinstance(x, (int, float)) for x in (c, r, b)) and not (c <= r <= b):
+                raise ValueError("thresholds must satisfy challenge <= review <= block")
         self.db.execute(
             "UPDATE tenants SET policy_json=? WHERE tenant_id=?",
             (json.dumps(policy, ensure_ascii=False), tenant_id),
@@ -179,7 +189,9 @@ class TenantRepository:
         return cur.rowcount > 0
 
     def authenticate_merchant(self, api_key: str, api_secret: str) -> dict | None:
-        row = self.db.query_one("SELECT * FROM tenants WHERE api_key=? AND deleted_at IS NULL", (api_key,))
+        row = self.db.query_one(
+            "SELECT * FROM tenants WHERE api_key=? AND deleted_at IS NULL", (api_key,)
+        )
         if not row:
             return None
         if row.get("status") != "active":

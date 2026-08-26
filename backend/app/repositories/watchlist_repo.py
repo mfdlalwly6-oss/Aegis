@@ -9,7 +9,9 @@ class WatchlistRepository:
     def __init__(self, db: Database):
         self.db = db
 
-    def add(self, list_type: str, value: str, meta: dict | None = None, tenant_id: str = "platform") -> bool:
+    def add(
+        self, list_type: str, value: str, meta: dict | None = None, tenant_id: str = "platform"
+    ) -> bool:
         cur = self.db.execute(
             "INSERT OR IGNORE INTO watchlist (tenant_id,list_type,value,meta_json) VALUES (?,?,?,?)",
             (tenant_id, list_type, value, json.dumps(meta or {}, ensure_ascii=False)),

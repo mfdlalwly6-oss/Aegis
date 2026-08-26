@@ -382,13 +382,17 @@ class Database:
             )
             # Schema parity with PostgreSQL (006_pg_hardening adds sha256 NOT NULL there).
             # SQLite keeps it nullable so historical 2-column rows stay valid.
-            _sm_cols = [r[1] for r in conn.execute("PRAGMA table_info(schema_migrations)").fetchall()]
+            _sm_cols = [
+                r[1] for r in conn.execute("PRAGMA table_info(schema_migrations)").fetchall()
+            ]
             if "sha256" not in _sm_cols:
                 conn.execute("ALTER TABLE schema_migrations ADD COLUMN sha256 TEXT")
             from datetime import datetime
 
             for name, statements in _MIGRATIONS:
-                applied = conn.execute("SELECT 1 FROM schema_migrations WHERE name=?", (name,)).fetchone()
+                applied = conn.execute(
+                    "SELECT 1 FROM schema_migrations WHERE name=?", (name,)
+                ).fetchone()
                 if applied:
                     continue
                 _apply_statements(conn, statements)
@@ -453,6 +457,22 @@ try:
 except ImportError:  # psycopg not installed — SQLite mode only
     PGDatabase = None
 
-_db_driver = getattr(settings, "DB_DRIVER", None) or getattr(settings, "db_driver", "sqlite")
-if _db_driver == "postgres" and PGDatabase is not None:
+# ── Driver resolution — PostgreSQL is the production database (TASK 1) ─────
+# Default is now "postgres". SQLite is retained ONLY for hermetic unit tests,
+# which set AEGIS_DB_DRIVER=sqlite explicitly (tests/conftest.py). Running the
+# app in production without a valid PostgreSQL now fails fast with a clear
+# error instead of silently falling back to a file-backed SQLite database.
+_db_driver = getattr(settings, "DB_DRIVER", None) or getattr(settings, "db_driver", "postgres")
+if _db_driver == "postgres":
+    if PGDatabase is None:
+        raise RuntimeError(
+            "AEGIS_DB_DRIVER=postgres but psycopg is not installed. "
+            "PostgreSQL is the production database; install psycopg or set "
+            "AEGIS_DB_DRIVER=sqlite explicitly for isolated tests only."
+        )
+    if not getattr(settings, "DATABASE_URL", ""):
+        raise RuntimeError(
+            "AEGIS_DB_DRIVER=postgres but DATABASE_URL is empty. PostgreSQL is "
+            "the production database; set DATABASE_URL (postgresql://...) to run."
+        )
     Database = PGDatabase  # noqa: F811

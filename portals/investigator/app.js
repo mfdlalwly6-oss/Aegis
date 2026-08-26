@@ -5,6 +5,38 @@ const API = "/api/v1/investigator";
 const TK = "aegis_inv_token";
 const INV = "aegis_inv_profile";
 
+
+/* =============== I18N (AR/EN) =============== */
+const EN_LABELS = {
+  "لوحة المحقق": "Dashboard", "قائمة المراجعة": "Review Queue", "التنبيهات": "Alerts",
+  "القضايا": "Cases", "القرارات الحيّة": "Live Decisions", "أثر القرار": "Decision Trace",
+  "العملاء": "Customers", "المستفيدون": "Beneficiaries", "تحليل الشبكة": "Network Graph",
+  "نظرة عامة": "Overview", "العملاء (بنوك ومحافظ)": "Tenants (Banks & Wallets)",
+  "القرارات": "Decisions", "المحققون": "Investigators", "قواعد السياسة": "Policy Rules",
+  "النماذج": "Models", "الرسم البياني": "Graph", "الإعدادات": "Settings", "التوثيق": "Docs",
+  "أسعار الصرف": "FX Rates", "قوائم المراقبة": "Watchlists", "استوديو السياسات": "Policy Studio",
+  "سجل التدقيق": "Audit Log", "العمليات": "Transactions",
+  "🚨 التنبيهات": "🚨 Alerts", "📁 القضايا": "📁 Cases", "🕸️ تحليل الشبكة": "🕸️ Network Graph",
+  "⏳ فتح قائمة المراجعة": "⏳ Open Review Queue", "⚡ إجراءات سريعة": "⚡ Quick Actions",
+  "🚪 خروج": "🚪 Logout", "محقق": "Investigator"
+};
+function L(ar, en) { return state.lang === "ar" ? ar : en; }
+function tl(txt) { return state.lang === "ar" ? txt : (EN_LABELS[txt] || txt); }
+function applyDir() {
+  document.documentElement.setAttribute("dir", state.lang === "ar" ? "rtl" : "ltr");
+  document.documentElement.setAttribute("lang", state.lang);
+}
+function toggleLang() {
+  state.lang = state.lang === "ar" ? "en" : "ar";
+  try { localStorage.setItem("aegis_lang", state.lang); } catch (e) {}
+  applyDir();
+  render();
+}
+(function () {
+  try { state.lang = localStorage.getItem("aegis_lang") || "ar"; } catch (e) { state.lang = "ar"; }
+  applyDir();
+})();
+
 const state = {
   token: localStorage.getItem(TK),
   profile: JSON.parse(localStorage.getItem(INV) || "null"),
@@ -79,7 +111,7 @@ function renderLogin() {
   const email = el("input", { class: "form-control", type: "email", placeholder: "investigator@aegis.local", dir: "ltr" });
   const pass = el("input", { class: "form-control", type: "password", placeholder: "••••••••" });
   const err = el("div", { style: "color:#FCA5A5;font-size:13px;margin-top:8px;min-height:18px" });
-  const btn = el("button", { class: "btn primary", style: "width:100%;padding:13px;margin-top:14px" }, "🔓 دخول المحقق");
+  const btn = el("button", { class: "btn primary", style: "width:100%;padding:13px;margin-top:14px" }, L("🔓 دخول المحقق", "🔓 Investigator Login"));
   const form = el("form", {
     onsubmit: async e => {
       e.preventDefault();
@@ -98,7 +130,7 @@ function renderLogin() {
         toast("مرحبًا " + d.investigator.name, "success");
         render();
       } catch (ex) { err.textContent = ex.message; }
-      btn.disabled = false; btn.textContent = "🔓 دخول المحقق";
+      btn.disabled = false; btn.textContent = L("🔓 دخول المحقق", "🔓 Investigator Login");
     }
   },
     el("label", { style: "font-size:13px;color:var(--muted);margin-bottom:8px;display:block" }, "📧 البريد الإلكتروني"),
@@ -110,7 +142,7 @@ function renderLogin() {
     el("div", { class: "login-card" },
       el("div", { style: "font-size:4rem;text-align:center" }, "🛡️"),
       el("h1", { style: "text-align:center;font-size:1.7rem;font-weight:900" }, "AEGIS Investigator"),
-      el("p", { style: "text-align:center;color:var(--muted);font-size:13px;margin:8px 0 24px" }, "منصة التحقيق في الاحتيال المالي — وصول مقيّد"),
+      el("p", { style: "text-align:center;color:var(--muted);font-size:13px;margin:8px 0 24px" }, L("منصة التحقيق في الاحتيال المالي — وصول مقيّد", "Financial fraud investigation — restricted access")),
       form,
       el("div", { style: "background:rgba(59,130,246,.08);padding:12px;border-radius:10px;margin-top:14px;font-size:11.5px;color:#93C5FD" },
         "💡 يُنشئ مالك النظام حسابات المحققين من بوابة المالك ← تبويب المحققون."),
@@ -197,9 +229,9 @@ function renderDashboard() {
       kpi("🗂️ قضاياي", num(s.my_cases), "المُسنَدة إليّ", "brand"),
     ),
     el("div", { class: "card" },
-      el("h3", { style: "margin-bottom:12px" }, "⚡ إجراءات سريعة"),
+      el("h3", { style: "margin-bottom:12px" }, L("⚡ إجراءات سريعة", "⚡ Quick Actions")),
       el("div", { style: "display:flex;gap:10px;flex-wrap:wrap" },
-        el("button", { class: "btn primary", onclick: () => { state.page = "queue"; render(); } }, "⏳ فتح قائمة المراجعة"),
+        el("button", { class: "btn primary", onclick: () => { state.page = "queue"; render(); } }, L("⏳ فتح قائمة المراجعة", "⏳ Open Review Queue")),
         el("button", { class: "btn", onclick: () => { state.page = "alerts"; render(); } }, "🚨 التنبيهات"),
         el("button", { class: "btn", onclick: () => { state.page = "cases"; render(); } }, "📁 القضايا"),
         el("button", { class: "btn", onclick: () => { state.page = "graph"; render(); } }, "🕸️ تحليل الشبكة"),
@@ -508,7 +540,7 @@ function renderCaseDetail() {
 
 /* ═══════════════ PAGE: LIVE DECISIONS ═══════════════ */
 function renderDecisions() {
-  const rows = (state.decisions || []).map(d => el("tr", {},
+  const rows = (state.decisions || []).map(d => el("tr", { class: "clickable", onclick: async () => { await loadDecisionDetail(d.decision_id); state.page = "decisionTrace"; render(); } },
     el("td", { style: "font-size:11px;white-space:nowrap" }, dt(d.ts || d.timestamp || d.created_at)),
     el("td", {}, el("code", { style: "font-size:11px" }, (d.tx_id || "").slice(0, 14))),
     el("td", { style: "font-size:12px" }, d.tenant_id || "-"),
@@ -539,6 +571,97 @@ function renderDecisions() {
               el("th", {}, "الوقت"), el("th", {}, "المعرّف"), el("th", {}, "المؤسسة"),
               el("th", {}, "القرار"), el("th", {}, "المخاطر"), el("th", {}, "النمط"), el("th", {}, "التفسير"))),
             el("tbody", {}, ...rows))),
+  );
+}
+
+/* ═══════════════ PAGE: CUSTOMERS & BENEFICIARIES ═══════════════ */
+async function loadAccounts() {
+  try { state.accounts = await api("/accounts"); } catch (e) { toast(e.message, "error"); state.accounts = null; }
+}
+function renderAcctTable(title, rows) {
+  const trs = (rows || []).map(a => el("tr", {},
+    el("td", {}, el("code", { style: "font-size:11px" }, a.account_id)),
+    el("td", { style: "font-weight:700" }, a.tx_count),
+    el("td", { style: "font-size:12px" }, num(a.total_amount)),
+    el("td", { style: "font-size:11px;color:var(--muted)" }, (a.currencies || []).join("، ")),
+  ));
+  return el("div", { class: "card" },
+    el("h3", { style: "margin-bottom:10px" }, title),
+    trs.length === 0
+      ? el("div", { style: "color:var(--muted);text-align:center;padding:24px" }, "لا توجد بيانات بعد.")
+      : el("table", {},
+          el("thead", {}, el("tr", {},
+            el("th", {}, "الحساب"), el("th", {}, "عدد المعاملات"), el("th", {}, "الإجمالي"), el("th", {}, "العملات"))),
+          el("tbody", {}, ...trs)),
+  );
+}
+function renderCustomers() {
+  return el("div", {},
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:16px" }, "👥 العملاء"),
+    renderAcctTable("حسابات المرسلين (عملاء) — من معاملات حقيقية", (state.accounts || {}).customers));
+}
+function renderBeneficiaries() {
+  return el("div", {},
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:16px" }, "🏦 المستفيدون"),
+    renderAcctTable("حسابات المستفيدين — من معاملات حقيقية", (state.accounts || {}).beneficiaries));
+}
+
+/* =============== PAGE: DECISION TRACE =============== */
+async function loadDecisionDetail(id) {
+  try {
+    const d = await api("/decisions/" + encodeURIComponent(id));
+    state.decisionDetail = d;
+    state.traceTx = null;
+    if (d && d.tx_id) {
+      try { const t = await api("/transactions/" + encodeURIComponent(d.tx_id)); state.traceTx = t.transaction || null; } catch (e) {}
+    }
+  } catch (e) { toast(e.message, "error"); state.decisionDetail = null; }
+}
+function renderDecisionTrace() {
+  const d = state.decisionDetail;
+  const back = () => el("button", { class: "btn sm", onclick: () => { state.page = "decisions"; render(); } }, "→ رجوع إلى القرارات");
+  if (!d) return el("div", {}, back(), el("div", { class: "card", style: "margin-top:12px" }, "تعذّر تحميل القرار."));
+  const t = state.traceTx || {};
+  let evidence = null;
+  try { evidence = d.evidence_json ? JSON.parse(d.evidence_json) : (Array.isArray(d.evidence) ? d.evidence : (Array.isArray(d.evidence_list) ? d.evidence_list : null)); } catch (e) { evidence = null; }
+  let feats = null;
+  try { feats = d.features_json ? JSON.parse(d.features_json) : (d.features && typeof d.features === "object" ? d.features : null); } catch (e) { feats = null; }
+  const cards = [];
+  if (evidence && evidence.length) cards.push(el("div", { class: "card", style: "margin-top:12px" },
+    el("h3", { style: "margin-bottom:10px" }, "🧩 الأدلة"),
+    el("ul", { style: "padding-right:18px" }, ...evidence.map(ev => el("li", { style: "font-size:12.5px;line-height:1.8" }, typeof ev === "object" ? JSON.stringify(ev) : String(ev))))));
+  if (feats) cards.push(el("div", { class: "card", style: "margin-top:12px" },
+    el("h3", { style: "margin-bottom:10px" }, "📊 الميزات"),
+    el("ul", { style: "padding-right:18px" }, ...Object.entries(feats).map(([k, v]) => el("li", { style: "font-size:12.5px;line-height:1.8" }, String(k) + " : " + String(v))))));
+  return el("div", {},
+    back(),
+    el("div", { class: "card", style: "margin-top:12px" },
+      el("div", { style: "display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px" },
+        el("h3", { style: "margin-bottom:10px" }, "🔍 أثر القرار — " + (d.decision_id || "").slice(0, 18)),
+        badge(d.decision, DEC_AR[d.decision] || d.decision)),
+      el("div", { class: "detail-grid" },
+        detail("الوقت", dt(d.ts || d.timestamp || d.created_at)),
+        detail("المؤسسة", d.tenant_id || "-"),
+        detail("درجة المخاطر", pct(d.risk_score)),
+        detail("النطاق", d.risk_band || "-"),
+        detail("النمط", d.typology || "-"),
+        detail("المعاملة", d.tx_id || "-")),
+      el("p", { style: "font-size:13px;color:var(--muted);line-height:1.9;margin-top:10px" }, d.reasoning_ar || d.reasoning || "لا تفسير.")),
+    t.tx_id ? el("div", { class: "card", style: "margin-top:12px" },
+      el("h3", { style: "margin-bottom:10px" }, "💳 المعاملة المرتبطة"),
+      el("div", { class: "detail-grid" },
+        detail("المبلغ", num(t.amount) + " " + (t.currency || "")),
+        detail("القيمة المرجعية", (t.reference_amount != null ? num(t.reference_amount) + " " + (t.reference_currency || "") : "-")),
+        detail("المرسل", t.sender_account_id || "-"),
+        detail("المستفيد", t.beneficiary_account_id || "-"),
+        detail("لقطة FX", t.fx_snapshot_id || "-"),
+        detail("حالة FX", t.fx_status || "-"))) : null,
+    ...cards,
+    d.history && d.history.length ? el("div", { class: "card", style: "margin-top:12px" },
+      el("h3", { style: "margin-bottom:10px" }, "🕓 سجل التدقيق"),
+      ...d.history.map(h => el("div", { class: "timeline-item" },
+        el("div", { style: "font-size:12.5px;font-weight:700" }, h.event_type),
+        el("div", { style: "font-size:11px;color:var(--muted)" }, (h.actor || "-") + " · " + dt(h.ts))))) : null,
   );
 }
 
@@ -677,6 +800,9 @@ async function renderPage() {
     else if (state.page === "graph") { await loadInsights(); c.replaceChildren(renderGraph()); }
     else if (state.page === "graphAccount") { c.replaceChildren(renderGraphAccount()); }
     else if (state.page === "txDetail") { c.replaceChildren(await renderTxDetail()); }
+    else if (state.page === "customers") { await loadAccounts(); c.replaceChildren(renderCustomers()); }
+    else if (state.page === "beneficiaries") { c.replaceChildren(renderBeneficiaries()); }
+    else if (state.page === "decisionTrace") { c.replaceChildren(renderDecisionTrace()); }
   } catch (e) {
     c.innerHTML = "";
     c.appendChild(el("div", { style: "color:#FCA5A5;text-align:center;padding:30px" }, "⚠️ خطأ: " + e.message));
@@ -688,24 +814,27 @@ function render() {
   root.innerHTML = "";
   if (!state.token) { root.appendChild(renderLogin()); return; }
   const pages = [
-    { id: "dashboard", icon: "📊", label: "لوحة المحقق" },
-    { id: "queue", icon: "⏳", label: "قائمة المراجعة" },
-    { id: "alerts", icon: "🚨", label: "التنبيهات" },
-    { id: "cases", icon: "📁", label: "القضايا" },
-    { id: "decisions", icon: "📡", label: "القرارات الحيّة" },
-    { id: "graph", icon: "🕸️", label: "تحليل الشبكة" },
+    { id: "dashboard", icon: "📊", label: tl("لوحة المحقق") },
+    { id: "queue", icon: "⏳", label: tl("قائمة المراجعة") },
+    { id: "alerts", icon: "🚨", label: tl("التنبيهات") },
+    { id: "cases", icon: "📁", label: tl("القضايا") },
+    { id: "decisions", icon: "📡", label: tl("القرارات الحيّة") },
+    { id: "decisionTrace", icon: "🔍", label: tl("أثر القرار") },
+    { id: "graph", icon: "🕸️", label: tl("تحليل الشبكة") },
+    { id: "customers", icon: "👥", label: tl("العملاء") },
+    { id: "beneficiaries", icon: "🏦", label: tl("المستفيدون") },
   ];
   root.appendChild(el("div", { class: "layout" },
     el("header", { class: "top" },
       el("div", { style: "display:flex;align-items:center;gap:10px" },
         el("span", { style: "font-size:1.7rem" }, "🛡️"),
         el("span", { class: "brand-title" }, "AEGIS Investigator"),
-        el("span", { style: "font-size:12px;color:var(--muted)" }, "· منصة التحقيق في الاحتيال"),
+        el("span", { style: "font-size:12px;color:var(--muted)" }, L("· منصة التحقيق في الاحتيال", "· Fraud Investigation Platform")),
       ),
       el("div", { style: "display:flex;gap:10px;align-items:center" },
         el("span", { style: "font-size:12.5px;color:var(--muted)" }, state.profile?.name || ""),
-        el("span", { class: "badge assigned" }, "محقق"),
-        el("button", { class: "btn danger", onclick: logout }, "🚪 خروج"),
+        el("span", { class: "badge assigned" }, L("محقق", "Investigator")),
+        el("button", { class: "btn", onclick: toggleLang }, L("EN", "عربي")), el("button", { class: "btn danger", onclick: logout }, L("🚪 خروج", "🚪 Logout")),
       )),
     el("aside", {},
       ...pages.map(p => el("div", {

@@ -142,7 +142,9 @@ class ServiceRegistry:
         self.currency_repo = CurrencyRepository(self.db)
         self.fx_rate_repo = FxRateRepository(self.db)
         self.currency_repo.seed_defaults()
-        self.fx = FxService(self.fx_rate_repo, currency_checker=lambda c: self.currency_repo.is_known(c))
+        self.fx = FxService(
+            self.fx_rate_repo, currency_checker=lambda c: self.currency_repo.is_known(c)
+        )
 
         # Bootstrap a first investigator from env when none exists (dev convenience).
         # Investigators are tenant-scoped: use INVESTIGATOR_TENANT_ID, else first
@@ -153,7 +155,9 @@ class ServiceRegistry:
             tenant_id = getattr(settings, "INVESTIGATOR_TENANT_ID", "") or ""
             if not tenant_id:
                 tenants = self.tenants.list()
-                tenant_id = next((t["tenant_id"] for t in tenants if t["status"] == "active"), "platform")
+                tenant_id = next(
+                    (t["tenant_id"] for t in tenants if t["status"] == "active"), "platform"
+                )
             self.investigators.create(
                 tenant_id,
                 inv_email,

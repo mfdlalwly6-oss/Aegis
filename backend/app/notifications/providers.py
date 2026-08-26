@@ -40,7 +40,12 @@ def _safe_webhook_url(url: str) -> bool:
         parsed = urlparse(url)
     except Exception:
         return False
-    if parsed.scheme not in {"https", "http"} or not parsed.hostname or parsed.username or parsed.password:
+    if (
+        parsed.scheme not in {"https", "http"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
         return False
     if parsed.hostname.lower() in {"localhost", "localhost.localdomain"}:
         return False
@@ -58,7 +63,9 @@ def _safe_webhook_url(url: str) -> bool:
 
 
 class WebhookNotificationProvider(NotificationProvider):
-    def __init__(self, url: str, signing_secret: str = "", timeout_sec: float = 5, retries: int = 2):
+    def __init__(
+        self, url: str, signing_secret: str = "", timeout_sec: float = 5, retries: int = 2
+    ):
         self.url, self.signing_secret = url, signing_secret
         self.timeout_sec, self.retries = max(0.1, timeout_sec), max(0, retries)
 
@@ -66,7 +73,9 @@ class WebhookNotificationProvider(NotificationProvider):
         if not _safe_webhook_url(self.url):
             logger.warning("notification.webhook_rejected")
             return False
-        body = json.dumps({"event_type": event_type, "payload": payload}, separators=(",", ":")).encode()
+        body = json.dumps(
+            {"event_type": event_type, "payload": payload}, separators=(",", ":")
+        ).encode()
         headers = {"Content-Type": "application/json"}
         if self.signing_secret:
             headers["X-Aegis-Signature"] = hmac.new(
@@ -74,7 +83,9 @@ class WebhookNotificationProvider(NotificationProvider):
             ).hexdigest()
         for attempt in range(self.retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=self.timeout_sec, follow_redirects=False) as client:
+                async with httpx.AsyncClient(
+                    timeout=self.timeout_sec, follow_redirects=False
+                ) as client:
                     resp = await client.post(self.url, content=body, headers=headers)
                     # 2xx only: 3xx is a redirect (not followed) and must NOT
                     # count as delivered; >=400 is an outright failure.
@@ -128,7 +139,9 @@ class SmtpNotificationProvider(NotificationProvider):
             )
         )
         try:
-            await asyncio.wait_for(asyncio.to_thread(self._send_sync, msg), timeout=self.timeout_sec)
+            await asyncio.wait_for(
+                asyncio.to_thread(self._send_sync, msg), timeout=self.timeout_sec
+            )
             return True
         except Exception:
             logger.warning("notification.smtp_failed", host=self.host)

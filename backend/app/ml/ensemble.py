@@ -170,5 +170,7 @@ class EnsembleScorer:
                 }
             )
         else:
-            out.append({"name": "heuristic_fallback", "version": "0.0.0", "type": "fallback_not_trained"})
+            out.append(
+                {"name": "heuristic_fallback", "version": "0.0.0", "type": "fallback_not_trained"}
+            )
         return out

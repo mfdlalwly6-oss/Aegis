@@ -28,7 +28,11 @@ def import_csv(repo, tenant_id: str, content: bytes) -> dict:
         if kind not in _TYPES or not value or len(value) > 300:
             result["skipped_rows"] += 1
             continue
-        meta = {k: v.strip() for k, v in row.items() if k not in {"list_type", "value"} and v and v.strip()}
+        meta = {
+            k: v.strip()
+            for k, v in row.items()
+            if k not in {"list_type", "value"} and v and v.strip()
+        }
         if repo.add(kind, value, meta, tenant_id):
             result["imported_rows"] += 1
         else:

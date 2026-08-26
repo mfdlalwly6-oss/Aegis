@@ -66,7 +66,9 @@ class InvestigatorRepository:
         }
 
     def get_by_email(self, email: str) -> dict | None:
-        row = self.db.query_one("SELECT * FROM investigators WHERE email=?", (email.strip().lower(),))
+        row = self.db.query_one(
+            "SELECT * FROM investigators WHERE email=?", (email.strip().lower(),)
+        )
         return self._strip(row)
 
     def get(self, investigator_id: str, tenant_id: str | None = None) -> dict | None:
@@ -76,7 +78,9 @@ class InvestigatorRepository:
                 (investigator_id, tenant_id),
             )
         else:
-            row = self.db.query_one("SELECT * FROM investigators WHERE investigator_id=?", (investigator_id,))
+            row = self.db.query_one(
+                "SELECT * FROM investigators WHERE investigator_id=?", (investigator_id,)
+            )
         return self._strip(row)
 
     def list(self, tenant_id: str | None = None) -> list[dict]:
@@ -91,7 +95,9 @@ class InvestigatorRepository:
 
     def count(self, tenant_id: str | None = None) -> int:
         if tenant_id:
-            row = self.db.query_one("SELECT COUNT(*) AS c FROM investigators WHERE tenant_id=?", (tenant_id,))
+            row = self.db.query_one(
+                "SELECT COUNT(*) AS c FROM investigators WHERE tenant_id=?", (tenant_id,)
+            )
         else:
             row = self.db.query_one("SELECT COUNT(*) AS c FROM investigators")
         return row["c"] if row else 0

@@ -43,7 +43,9 @@ class DecisionRepository:
                 assessment.get("behavior_score", 0),
                 json.dumps(assessment.get("rules", []), default=str),
                 json.dumps(assessment.get("ml_models", assessment.get("ml", [])), default=str),
-                json.dumps(assessment.get("graph_signal", assessment.get("graph", {})), default=str),
+                json.dumps(
+                    assessment.get("graph_signal", assessment.get("graph", {})), default=str
+                ),
                 json.dumps(assessment.get("aml_signal", assessment.get("aml", {})), default=str),
                 json.dumps(assessment.get("top_reasons", []), ensure_ascii=False),
                 assessment.get("typology"),

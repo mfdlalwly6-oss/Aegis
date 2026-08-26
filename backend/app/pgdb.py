@@ -64,7 +64,9 @@ class PGDatabase:
         conn = getattr(self._local, "conn", None) if hasattr(self, "_local") else None
         if conn is None or conn.closed:
             self._local = threading.local()
-            conn = psycopg.connect(self.url, row_factory=dict_row, connect_timeout=10, autocommit=True)
+            conn = psycopg.connect(
+                self.url, row_factory=dict_row, connect_timeout=10, autocommit=True
+            )
             # Default session scope for NEW connections: trusted platform context.
             # Internal services (bootstrap, AML, graph) operate cross-tenant by design;
             # tenant-facing entry points (deps.require_*, wallet webhook) call

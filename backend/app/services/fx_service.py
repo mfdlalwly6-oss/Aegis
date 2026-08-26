@@ -145,7 +145,9 @@ class FxService:
             spread_pct=rate_row.get("spread_pct"),
             fetched_at=datetime.fromisoformat(rate_row["fetched_at"]),
             valid_from=datetime.fromisoformat(rate_row["valid_from"]),
-            valid_to=(datetime.fromisoformat(rate_row["valid_to"]) if rate_row.get("valid_to") else None),
+            valid_to=(
+                datetime.fromisoformat(rate_row["valid_to"]) if rate_row.get("valid_to") else None
+            ),
             is_stale=is_stale,
             status=status,
             institution_rate=institution_rate,

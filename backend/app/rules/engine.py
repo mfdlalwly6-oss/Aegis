@@ -77,6 +77,11 @@ def evaluate(expr: Any, ctx: dict[str, Any]) -> Any:
     if not isinstance(args, list):
         args = [args]
     evaluated = [evaluate(a, ctx) for a in args]
+    # BUG4 fix: a rule referencing a field that is simply absent (None) means the
+    # rule does not apply to this transaction — not a runtime error. Returning
+    # False here keeps evaluation best-effort and stops rule.eval_error log noise.
+    if op in (">", ">=", "<", "<=", "==", "!=") and any(v is None for v in evaluated):
+        return False
     return _OPS[op](*evaluated)
 
 

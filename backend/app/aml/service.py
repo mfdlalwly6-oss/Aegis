@@ -19,14 +19,18 @@ class AMLService:
         score = 0.0
         flags: list[str] = []
 
-        beneficiary_country = tx.beneficiary_country or (tx.device.ip_country if tx.device else None)
+        beneficiary_country = tx.beneficiary_country or (
+            tx.device.ip_country if tx.device else None
+        )
         if beneficiary_country:
             hit = self.watchlist.check("sanctions", beneficiary_country.upper(), tx.tenant_id)
             if hit:
                 signal.sanctions_hit = True
                 score += 0.60
                 flags.append(f"SANCTIONS_HIT:{beneficiary_country}")
-            hr = self.watchlist.check("high_risk_country", beneficiary_country.upper(), tx.tenant_id)
+            hr = self.watchlist.check(
+                "high_risk_country", beneficiary_country.upper(), tx.tenant_id
+            )
             if hr:
                 signal.fatf_high_risk_country = True
                 score += 0.20
@@ -46,9 +50,9 @@ class AMLService:
             score += 0.25
             flags.append("RAPID_FUND_MOVEMENT")
 
-        if features.get("amount_flags", {}).get("is_round_1000") and features.get("beneficiary", {}).get(
-            "offshore"
-        ):
+        if features.get("amount_flags", {}).get("is_round_1000") and features.get(
+            "beneficiary", {}
+        ).get("offshore"):
             signal.typology_matches.append("round_amount_offshore")
             score += 0.15
             flags.append("ROUND_AMOUNT_OFFSHORE")

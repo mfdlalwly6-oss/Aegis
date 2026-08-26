@@ -71,5 +71,7 @@ def provider_from_settings(settings):
             settings.NOTIFICATION_TIMEOUT_SEC,
         )
     if settings.NOTIFICATION_PROVIDER not in {"console", "webhook", "smtp"}:
-        logger.warning("notification.unknown_provider_fallback", provider=settings.NOTIFICATION_PROVIDER)
+        logger.warning(
+            "notification.unknown_provider_fallback", provider=settings.NOTIFICATION_PROVIDER
+        )
     return ConsoleNotificationProvider()

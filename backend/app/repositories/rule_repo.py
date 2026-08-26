@@ -38,7 +38,9 @@ class RuleRepository:
 
     def list_all(self, tenant_id: str | None = None) -> list[dict]:
         """Platform rules (tenant_id IS NULL) + tenant-specific overrides."""
-        rows = self.db.query("SELECT * FROM rules WHERE tenant_id IS NULL OR tenant_id=?", (tenant_id or "",))
+        rows = self.db.query(
+            "SELECT * FROM rules WHERE tenant_id IS NULL OR tenant_id=?", (tenant_id or "",)
+        )
         out = []
         for r in rows:
             out.append(

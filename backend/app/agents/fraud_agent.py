@@ -46,7 +46,9 @@ class FraudAgent:
         self.client = OpenRouterClient()
 
     async def analyze(self, tx: dict, rules_hits: list, ml_prob: float) -> dict:
-        rules_safe = [(h.model_dump() if hasattr(h, "model_dump") else h) for h in (rules_hits or [])]
+        rules_safe = [
+            (h.model_dump() if hasattr(h, "model_dump") else h) for h in (rules_hits or [])
+        ]
         prompt = (
             "أنت محلل احتيال مالي. أجب بـ JSON فقط بدون أي نص إضافي.\n"
             f"transaction: {json.dumps(tx, default=str, ensure_ascii=False)[:600]}\n"

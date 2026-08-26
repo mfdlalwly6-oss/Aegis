@@ -44,7 +44,9 @@ class FxRateResult:
 
 
 class FxProvider(Protocol):
-    def fetch(self, base_ccy: str, quote_ccy: str, *, region: str = "global") -> FxRateResult | None: ...
+    def fetch(
+        self, base_ccy: str, quote_ccy: str, *, region: str = "global"
+    ) -> FxRateResult | None: ...
 
 
 class StaticFxProvider:
@@ -53,7 +55,9 @@ class StaticFxProvider:
     def __init__(self, fx_repo):
         self.fx_repo = fx_repo
 
-    def fetch(self, base_ccy: str, quote_ccy: str, *, region: str = "global") -> FxRateResult | None:
+    def fetch(
+        self, base_ccy: str, quote_ccy: str, *, region: str = "global"
+    ) -> FxRateResult | None:
         row = self.fx_repo.latest_valid(base_ccy, quote_ccy, region=region)
         if row is None:
             return None
@@ -79,7 +83,9 @@ class HttpFxProvider:
         self.api_key = api_key
         self.timeout = timeout
 
-    def fetch(self, base_ccy: str, quote_ccy: str, *, region: str = "global") -> FxRateResult | None:
+    def fetch(
+        self, base_ccy: str, quote_ccy: str, *, region: str = "global"
+    ) -> FxRateResult | None:
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 params = {"base": base_ccy.upper(), "symbols": quote_ccy.upper()}
@@ -111,7 +117,9 @@ class CachedFxProvider:
         self.ttl = ttl_sec
         self._cache: dict[tuple[str, str, str], tuple[float, FxRateResult]] = {}
 
-    def fetch(self, base_ccy: str, quote_ccy: str, *, region: str = "global") -> FxRateResult | None:
+    def fetch(
+        self, base_ccy: str, quote_ccy: str, *, region: str = "global"
+    ) -> FxRateResult | None:
         key = (base_ccy.upper(), quote_ccy.upper(), region)
         now = time.monotonic()
         if key in self._cache:
@@ -124,7 +132,9 @@ class CachedFxProvider:
         return result
 
 
-def build_provider(fx_repo, config_url: str = "", config_key: str = "", cache_ttl: int = 300) -> FxProvider:
+def build_provider(
+    fx_repo, config_url: str = "", config_key: str = "", cache_ttl: int = 300
+) -> FxProvider:
     """Factory: returns StaticFxProvider if no URL configured, else Cached(HttpFxProvider)."""
     if config_url:
         return CachedFxProvider(HttpFxProvider(config_url, config_key), ttl_sec=cache_ttl)

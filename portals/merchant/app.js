@@ -4,6 +4,38 @@ const API = "/api/v1/admin/merchant";
 const ROOT = "/api/v1";
 const TK = "aegis_merchant_token";
 const TT = TK + "_t";
+
+/* =============== I18N (AR/EN) =============== */
+const EN_LABELS = {
+  "لوحة المحقق": "Dashboard", "قائمة المراجعة": "Review Queue", "التنبيهات": "Alerts",
+  "القضايا": "Cases", "القرارات الحيّة": "Live Decisions", "أثر القرار": "Decision Trace",
+  "العملاء": "Customers", "المستفيدون": "Beneficiaries", "تحليل الشبكة": "Network Graph",
+  "نظرة عامة": "Overview", "العملاء (بنوك ومحافظ)": "Tenants (Banks & Wallets)",
+  "القرارات": "Decisions", "المحققون": "Investigators", "قواعد السياسة": "Policy Rules",
+  "النماذج": "Models", "الرسم البياني": "Graph", "الإعدادات": "Settings", "التوثيق": "Docs",
+  "أسعار الصرف": "FX Rates", "قوائم المراقبة": "Watchlists", "استوديو السياسات": "Policy Studio",
+  "سجل التدقيق": "Audit Log", "العمليات": "Transactions",
+  "🚨 التنبيهات": "🚨 Alerts", "📁 القضايا": "📁 Cases", "🕸️ تحليل الشبكة": "🕸️ Network Graph",
+  "⏳ فتح قائمة المراجعة": "⏳ Open Review Queue", "⚡ إجراءات سريعة": "⚡ Quick Actions",
+  "🚪 خروج": "🚪 Logout", "محقق": "Investigator"
+};
+function L(ar, en) { return state.lang === "ar" ? ar : en; }
+function tl(txt) { return state.lang === "ar" ? txt : (EN_LABELS[txt] || txt); }
+function applyDir() {
+  document.documentElement.setAttribute("dir", state.lang === "ar" ? "rtl" : "ltr");
+  document.documentElement.setAttribute("lang", state.lang);
+}
+function toggleLang() {
+  state.lang = state.lang === "ar" ? "en" : "ar";
+  try { localStorage.setItem("aegis_lang", state.lang); } catch (e) {}
+  applyDir();
+  render();
+}
+(function () {
+  try { state.lang = localStorage.getItem("aegis_lang") || "ar"; } catch (e) { state.lang = "ar"; }
+  applyDir();
+})();
+
 const state = {
   token: localStorage.getItem(TK),
   tenant: (() => { try { return JSON.parse(localStorage.getItem(TT)); } catch { return null; } })(),
@@ -34,6 +66,7 @@ async function api(path, opts = {}) {
   const r = await fetch(API + path, { ...opts, headers: h, body: opts.body ? JSON.stringify(opts.body) : undefined });
   const txt = await r.text(); let d = {};
   try { d = txt ? JSON.parse(txt) : {}; } catch { d = { raw: txt }; }
+  if (r.status === 401) { state.token = null; localStorage.removeItem(TK); localStorage.removeItem(TT); try { render(); } catch {} throw new Error("انتهت الجلسة — سجّل الدخول مجددًا (401)"); }
   if (!r.ok) throw new Error(d.detail || d.message || ("خطأ " + r.status));
   return d;
 }
@@ -43,6 +76,7 @@ async function apiRoot(path, opts = {}) {
   const r = await fetch(ROOT + path, { ...opts, headers: h, body: opts.body ? JSON.stringify(opts.body) : undefined });
   const txt = await r.text(); let d = {};
   try { d = txt ? JSON.parse(txt) : {}; } catch { d = { raw: txt }; }
+  if (r.status === 401) { state.token = null; localStorage.removeItem(TK); localStorage.removeItem(TT); try { render(); } catch {} throw new Error("انتهت الجلسة — سجّل الدخول مجددًا (401)"); }
   if (!r.ok) throw new Error(d.detail || d.message || ("خطأ " + r.status));
   return d;
 }
@@ -67,7 +101,7 @@ function renderLogin() {
     owner: el("button", { class: "btn sm" }, "👤 مالك المؤسسة"),
     api: el("button", { class: "btn sm" }, "🔑 مفاتيح API"),
   };
-  tabsRow.append(tabs.owner, tabs.api);
+  tabsRow.appendChild(tabs.owner); tabsRow.appendChild(tabs.api);
   function setMode(m) {
     mode = m;
     ownerBox.style.display = m === "owner" ? "block" : "none";
@@ -336,7 +370,7 @@ async function renderInvestigatorsM() {
     el("td", {}, el("div", { style: "display:flex;gap:4px;flex-wrap:wrap" },
       v.status === "active" ? el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("إيقاف المحقق؟")) return; try { await api("/investigators/" + v.investigator_id + "/suspend", { method: "POST", body: {} }); toast("أُوقف", "success"); await loadInvs(); renderPage(); } catch (e) { toast(e.message, "error"); } } }, "⏸ إيقاف") : el("button", { class: "btn sm success", onclick: async () => { try { await api("/investigators/" + v.investigator_id + "/activate", { method: "POST", body: {} }); toast("نُشط", "success"); await loadInvs(); renderPage(); } catch (e) { toast(e.message, "error"); } } }, "▶ تنشيط"),
       el("button", { class: "btn sm", onclick: async () => { const np = prompt("كلمة المرور الجديدة (8+ أحرف)"); if (!np || np.length < 8) return; try { await api("/investigators/" + v.investigator_id + "/reset-password", { method: "POST", body: { password: np } }); toast("تم تغيير كلمة المرور", "success"); } catch (e) { toast(e.message, "error"); } } }, "🔑"),
-      el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("حذف المحقق؟")) return; try { await api("/investigators/" + v.investigator_id, { method: "DELETE" }); toast("حُذف", "success"); await loadInvs(); renderPage(); } catch (e) { toast(e.message, "error"); } } }, "🗑"))));
+      el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("حذف المحقق؟")) return; try { await api("/investigators/" + v.investigator_id, { method: "DELETE" }); toast("حُذف", "success"); await loadInvs(); renderPage(); } catch (e) { toast(e.message, "error"); } } }, "🗑")))));
   return el("div", {},
     el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "🛡️ المحققون"),
     el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:14px" }, "محققو مؤسستك — يُنشئهم المالك فقط ويُربطون تلقائيًا بـ tenant_id الخاص بك"),
@@ -366,7 +400,7 @@ function renderManualReviews() {
     el("td", { style: "font-size:12px" }, m.decided_by || "-"),
     el("td", {}, el("span", { class: "badge " + (m.actor_type === "institution_owner" ? "warn" : "info") }, m.actor_type || "-")),
     el("td", { style: "font-size:12px;font-weight:700" }, m.decided_by || "-"),
-    el("td", { style: "font-size:11px;max-width:180px" }, (m.notes || []).map(n => n.text).join(" · ") || "-"))));
+    el("td", { style: "font-size:11px;max-width:180px" }, (m.notes || []).map(n => n.text).join(" · ") || "-")));
   return el("div", {},
     el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "🖐 المراجعات اليدوية"),
     el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:14px" }, "كل عملياتك التي عُولجت يدويًا — المعالِج، نوعه، القرار، الملاحظات"),
@@ -448,15 +482,15 @@ function render() {
   if (!state.token) { root.appendChild(renderLogin()); return; }
   if (!state.tenant) { try { state.tenant = JSON.parse(localStorage.getItem(TT) || "null"); } catch {} }
   const pages = [
-    { id: "overview", icon: "📊", label: "نظرة عامة" },
-    { id: "transactions", icon: "💳", label: "العمليات" },
-    { id: "manual", icon: "🖐", label: "المراجعات اليدوية" },
-    { id: "investigators", icon: "🛡️", label: "المحققون" },
-    { id: "reports", icon: "📊", label: "التقارير" },
-    { id: "decisions", icon: "⚖️", label: "قرارات معاملاتي" },
-    { id: "alerts", icon: "🚨", label: "التنبيهات" },
-    { id: "cases", icon: "📁", label: "القضايا" },
-    { id: "integration", icon: "🔌", label: "إعدادات الربط" },
+    { id: "overview", icon: "📊", label: tl("نظرة عامة") },
+    { id: "transactions", icon: "💳", label: tl("العمليات") },
+    { id: "manual", icon: "🖐", label: tl("المراجعات اليدوية") },
+    { id: "investigators", icon: "🛡️", label: tl("المحققون") },
+    { id: "reports", icon: "📊", label: tl("التقارير") },
+    { id: "decisions", icon: "⚖️", label: tl("قرارات معاملاتي") },
+    { id: "alerts", icon: "🚨", label: tl("التنبيهات") },
+    { id: "cases", icon: "📁", label: tl("القضايا") },
+    { id: "integration", icon: "🔌", label: tl("إعدادات الربط") },
   ];
   root.appendChild(el("div", { class: "layout" },
     el("header", { class: "top" },
@@ -464,7 +498,7 @@ function render() {
       el("div", { style: "display:flex;gap:12px;align-items:center" },
         el("span", { style: "color:var(--muted);font-size:13px" }, state.tenant?.name || "?"),
         el("span", { class: "badge assigned" }, state.tenant?.status || ""),
-        el("button", { class: "btn danger", onclick: () => { localStorage.removeItem(TK); localStorage.removeItem(TT); state.token = null; render(); } }, "🚪 خروج"))),
+        el("button", { class: "btn danger", onclick: () => { localStorage.removeItem(TK); localStorage.removeItem(TT); state.token = null; render(); } }, L("🚪 خروج", "🚪 Logout")), el("button", { class: "btn", onclick: toggleLang }, L("EN", "عربي")))),
     el("aside", {}, ...pages.map(p => el("div", { class: "nav" + (state.page === p.id ? " active" : ""), onclick: () => { state.page = p.id; state.feedDetail = null; render(); } }, el("span", {}, p.icon), el("span", {}, p.label)))),
     el("main", { id: "content" })));
   renderPage();

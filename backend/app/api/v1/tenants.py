@@ -133,7 +133,9 @@ def get_tenant(tenant_id: str, owner=Depends(require_owner), registry=Depends(ge
 
 
 @router.get("/admin/tenants/{tenant_id}/alerts")
-def owner_tenant_alerts(tenant_id: str, owner=Depends(require_owner), registry=Depends(get_registry)):
+def owner_tenant_alerts(
+    tenant_id: str, owner=Depends(require_owner), registry=Depends(get_registry)
+):
     """AEGIS Owner support view — alerts belonging to one tenant only."""
     if not registry.tenants.get(tenant_id):
         raise HTTPException(404, "tenant_not_found")
@@ -141,7 +143,9 @@ def owner_tenant_alerts(tenant_id: str, owner=Depends(require_owner), registry=D
 
 
 @router.get("/admin/tenants/{tenant_id}/cases")
-def owner_tenant_cases(tenant_id: str, owner=Depends(require_owner), registry=Depends(get_registry)):
+def owner_tenant_cases(
+    tenant_id: str, owner=Depends(require_owner), registry=Depends(get_registry)
+):
     if not registry.tenants.get(tenant_id):
         raise HTTPException(404, "tenant_not_found")
     return registry.cases.list(tenant_id=tenant_id, limit=200)
@@ -375,7 +379,9 @@ def system_settings(owner=Depends(require_owner), registry=Depends(get_registry)
 
 
 @router.get("/admin/tenants/{tenant_id}/investigators")
-def list_tenant_investigators(tenant_id: str, owner=Depends(require_owner), registry=Depends(get_registry)):
+def list_tenant_investigators(
+    tenant_id: str, owner=Depends(require_owner), registry=Depends(get_registry)
+):
     if not registry.tenants.get(tenant_id):
         raise HTTPException(404, "tenant_not_found")
     rows = registry.investigators.list(tenant_id=tenant_id)
@@ -548,9 +554,13 @@ def merchant_dashboard(merchant=Depends(require_merchant), registry=Depends(get_
     recent = registry.decisions.recent(limit=10, tenant_id=tid)
     alerts = registry.alerts.list(tenant_id=tid, limit=50)
     cases = registry.cases.list(tenant_id=tid, limit=50)
-    open_alerts = sum(1 for a in alerts if a["status"] in ("open", "assigned", "in_review", "escalated"))
+    open_alerts = sum(
+        1 for a in alerts if a["status"] in ("open", "assigned", "in_review", "escalated")
+    )
     open_cases = sum(1 for c in cases if c["status"] != "closed")
-    manual = [a for a in alerts if a["status"] in ("resolved_true_positive", "resolved_false_positive")]
+    manual = [
+        a for a in alerts if a["status"] in ("resolved_true_positive", "resolved_false_positive")
+    ]
     durations, sla = [], 0
     for a in manual:
         try:
@@ -693,7 +703,9 @@ def merchant_connection(merchant=Depends(require_merchant), registry=Depends(get
         "tenant_status": tenant.get("status", "unknown") if tenant else "unknown",
         "connected": bool(tenant and tenant.get("status") == "active"),
         "aegis_core": settings.VERSION,
-        "ai_agent": "ready" if settings.openrouter_keys and settings.AI_ENABLED else "not_configured",
+        "ai_agent": "ready"
+        if settings.openrouter_keys and settings.AI_ENABLED
+        else "not_configured",
         "checked_at": now,
     }
 
@@ -749,7 +761,7 @@ def merchant_manual_reviews(merchant=Depends(require_merchant), registry=Depends
         "t.amount, t.currency, d.decision "
         "FROM alerts a LEFT JOIN transactions t ON t.tx_id = a.tx_id "
         "LEFT JOIN decisions d ON d.tx_id = a.tx_id "
-        "WHERE a.tenant_id=? AND a.status LIKE 'resolved%' "
+        "WHERE a.tenant_id=? AND a.status IN ('resolved_true_positive','resolved_false_positive') "
         "ORDER BY a.updated_at DESC LIMIT 200",
         (merchant["tenant_id"],),
     )
@@ -782,7 +794,9 @@ def merchant_manual_reviews(merchant=Depends(require_merchant), registry=Depends
 
 
 @router.get("/admin/merchant/audit")
-def merchant_audit(limit: int = 200, merchant=Depends(require_merchant), registry=Depends(get_registry)):
+def merchant_audit(
+    limit: int = 200, merchant=Depends(require_merchant), registry=Depends(get_registry)
+):
     return registry.audit_repo.list(tenant_id=merchant["tenant_id"], limit=limit)
 
 
@@ -936,7 +950,9 @@ def merchant_feed(
         except Exception:
             r["notes"] = []
     pend = [
-        r for r in rows if r["decision"] == "review" and not (r["alert_status"] or "").startswith("resolved")
+        r
+        for r in rows
+        if r["decision"] == "review" and not (r["alert_status"] or "").startswith("resolved")
     ]
     manual = [r for r in rows if (r["alert_status"] or "").startswith("resolved")]
     auto_allow = [r for r in rows if r["decision"] == "allow"]
@@ -976,13 +992,19 @@ def merchant_owner_review(
     """Institution Owner manually processes a pending review — actor_type=institution_owner.
     allow -> resolved_false_positive (not fraud), deny -> resolved_true_positive (fraud)."""
     tid = merchant["tenant_id"]
-    alert = registry.db.query_one("SELECT * FROM alerts WHERE alert_id=? AND tenant_id=?", (alert_id, tid))
+    alert = registry.db.query_one(
+        "SELECT * FROM alerts WHERE alert_id=? AND tenant_id=?", (alert_id, tid)
+    )
     if not alert:
         raise HTTPException(404, "alert_not_found")
     actor = merchant.get("name") or merchant.get("sub", "institution_owner")
     if not (alert["status"] or "open").startswith("resolved"):
-        new_status = "resolved_true_positive" if body.decision == "deny" else "resolved_false_positive"
-        registry.alerts.resolve(alert_id, new_status, body.note, author=actor, actor_type="institution_owner")
+        new_status = (
+            "resolved_true_positive" if body.decision == "deny" else "resolved_false_positive"
+        )
+        registry.alerts.resolve(
+            alert_id, new_status, body.note, author=actor, actor_type="institution_owner"
+        )
     registry.audit.log(
         tid,
         actor,

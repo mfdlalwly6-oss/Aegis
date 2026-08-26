@@ -25,7 +25,12 @@ _FONT_CANDIDATES = [
         "backend/app/assets/fonts/Amiri-Regular.ttf",
         "app/assets/fonts/Amiri-Regular.ttf",
         str(
-            Path(__file__).resolve().parents[2] / "backend" / "app" / "assets" / "fonts" / "Amiri-Regular.ttf"
+            Path(__file__).resolve().parents[2]
+            / "backend"
+            / "app"
+            / "assets"
+            / "fonts"
+            / "Amiri-Regular.ttf"
         ),
     ],
     "Amiri-Bold",
@@ -34,7 +39,14 @@ _FONT_CANDIDATES = [
         "/app/backend/app/assets/fonts/Amiri-Bold.ttf",
         "backend/app/assets/fonts/Amiri-Bold.ttf",
         "app/assets/fonts/Amiri-Bold.ttf",
-        str(Path(__file__).resolve().parents[2] / "backend" / "app" / "assets" / "fonts" / "Amiri-Bold.ttf"),
+        str(
+            Path(__file__).resolve().parents[2]
+            / "backend"
+            / "app"
+            / "assets"
+            / "fonts"
+            / "Amiri-Bold.ttf"
+        ),
     ],
     "DejaVuSans",
     [
@@ -292,7 +304,9 @@ def build_report_pdf(report: dict) -> bytes:
         canvas.saveState()
         canvas.setFont(base, 8)
         canvas.setFillColor(colors.HexColor("#94A3B8"))
-        canvas.drawCentredString(A4[0] / 2, 8 * mm, _ar(f"AEGIS · صفحة {_doc.page} · وُلد {gen_local}"))
+        canvas.drawCentredString(
+            A4[0] / 2, 8 * mm, _ar(f"AEGIS · صفحة {_doc.page} · وُلد {gen_local}")
+        )
         canvas.restoreState()
 
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)

@@ -48,7 +48,9 @@ class GraphEngine:
             self._g.add_node(i, type="ip")
             self._g.add_edge(sender, i, rel="from")
             self._ip_accounts.setdefault(ip, set()).add(tx["sender_account_id"])
-        self._account_links.setdefault(tx["sender_account_id"], set()).add(tx["beneficiary_account_id"])
+        self._account_links.setdefault(tx["sender_account_id"], set()).add(
+            tx["beneficiary_account_id"]
+        )
 
     def add_transaction(self, tx: Transaction) -> None:
         self._add_dict(
@@ -67,7 +69,9 @@ class GraphEngine:
     def score(self, tx: Transaction) -> GraphSignal:
         dev = tx.device.device_id if tx.device else None
         ip = str(tx.device.ip) if tx.device and tx.device.ip else None
-        shared_dev = len(self._device_accounts.get(dev, set()) - {tx.sender_account_id}) if dev else 0
+        shared_dev = (
+            len(self._device_accounts.get(dev, set()) - {tx.sender_account_id}) if dev else 0
+        )
         shared_ip = len(self._ip_accounts.get(ip, set()) - {tx.sender_account_id}) if ip else 0
         linked = len(self._account_links.get(tx.sender_account_id, set()))
 
@@ -171,7 +175,9 @@ class GraphEngine:
         shared_via_device = sorted(
             {a for d in devices for a in self._device_accounts.get(d, set()) if a != account_id}
         )
-        shared_via_ip = sorted({a for ip in ips for a in self._ip_accounts.get(ip, set()) if a != account_id})
+        shared_via_ip = sorted(
+            {a for ip in ips for a in self._ip_accounts.get(ip, set()) if a != account_id}
+        )
         hops = None
         for f in self._known_fraud:
             if f not in self._g:

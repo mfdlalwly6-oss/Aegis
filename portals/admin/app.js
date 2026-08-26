@@ -3,9 +3,48 @@ const API = "/api/v1/admin";
 const AEGIS_ROOT = "/api/v1";
 const TK = "aegis_owner_token";
 
+
+/* =============== I18N (AR/EN) =============== */
+const EN_LABELS = {
+  "لوحة المحقق": "Dashboard", "قائمة المراجعة": "Review Queue", "التنبيهات": "Alerts",
+  "القضايا": "Cases", "القرارات الحيّة": "Live Decisions", "أثر القرار": "Decision Trace",
+  "العملاء": "Customers", "المستفيدون": "Beneficiaries", "تحليل الشبكة": "Network Graph",
+  "نظرة عامة": "Overview", "العملاء (بنوك ومحافظ)": "Tenants (Banks & Wallets)",
+  "القرارات": "Decisions", "المحققون": "Investigators", "قواعد السياسة": "Policy Rules",
+  "النماذج": "Models", "الرسم البياني": "Graph", "الإعدادات": "Settings", "التوثيق": "Docs",
+  "أسعار الصرف": "FX Rates", "قوائم المراقبة": "Watchlists", "استوديو السياسات": "Policy Studio",
+  "سجل التدقيق": "Audit Log", "العمليات": "Transactions",
+  "🚨 التنبيهات": "🚨 Alerts", "📁 القضايا": "📁 Cases", "🕸️ تحليل الشبكة": "🕸️ Network Graph",
+  "⏳ فتح قائمة المراجعة": "⏳ Open Review Queue", "⚡ إجراءات سريعة": "⚡ Quick Actions",
+  "🚪 خروج": "🚪 Logout", "محقق": "Investigator"
+};
+function L(ar, en) { return state.lang === "ar" ? ar : en; }
+function tl(txt) { return state.lang === "ar" ? txt : (EN_LABELS[txt] || txt); }
+function applyDir() {
+  document.documentElement.setAttribute("dir", state.lang === "ar" ? "rtl" : "ltr");
+  document.documentElement.setAttribute("lang", state.lang);
+}
+function toggleLang() {
+  state.lang = state.lang === "ar" ? "en" : "ar";
+  try { localStorage.setItem("aegis_lang", state.lang); } catch (e) {}
+  applyDir();
+  render();
+}
+(function () {
+  try { state.lang = localStorage.getItem("aegis_lang") || "ar"; } catch (e) { state.lang = "ar"; }
+  applyDir();
+})();
+
 const state = {
   token: localStorage.getItem(TK),
   page: "overview",
+  fxCurrencies: [],
+  fxRates: [],
+  watchlistEntries: [],
+  auditLog: [],
+  auditVerifyResult: null,
+  policyTenants: [],
+  policySelected: null,
   overview: null,
   tenants: [],
   decisions: [],
@@ -57,6 +96,7 @@ async function api(path, opts = {}) {
   const txt = await r.text();
   let d = {};
   try { d = txt ? JSON.parse(txt) : {}; } catch { d = { raw: txt }; }
+  if (r.status === 401) { state.token = null; localStorage.removeItem(TK); try { render(); } catch {} throw new Error("انتهت الجلسة — سجّل الدخول مجددًا (401)"); }
   if (!r.ok) throw new Error(d.detail || d.message || ("خطأ " + r.status));
   return d;
 }
@@ -67,6 +107,7 @@ async function apiRoot(path, opts = {}) {
   const txt = await r.text();
   let d = {};
   try { d = txt ? JSON.parse(txt) : {}; } catch { d = { raw: txt }; }
+  if (r.status === 401) { state.token = null; localStorage.removeItem(TK); try { render(); } catch {} throw new Error("انتهت الجلسة — سجّل الدخول مجددًا (401)"); }
   if (!r.ok) throw new Error(d.detail || d.message || ("خطأ " + r.status));
   return d;
 }
@@ -496,7 +537,7 @@ function renderTenantInvestigators() {
       v.status === "active" ? el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("إيقاف المحقق؟")) return; try { await api("/tenants/" + tid + "/investigators/" + v.investigator_id + "/suspend", { method: "POST", body: {} }); toast("أُوقف", "success"); await loadTenantInvestigators(tid); render(); } catch (e) { toast(e.message, "error"); } } }, "⏸ إيقاف")
         : el("button", { class: "btn sm success", onclick: async () => { try { await api("/tenants/" + tid + "/investigators/" + v.investigator_id + "/activate", { method: "POST", body: {} }); toast("نُشط", "success"); await loadTenantInvestigators(tid); render(); } catch (e) { toast(e.message, "error"); } } }, "▶ تنشيط"),
       el("button", { class: "btn sm", onclick: async () => { const np = prompt("كلمة المرور الجديدة (8+ أحرف)"); if (!np || np.length < 8) return; try { await api("/tenants/" + tid + "/investigators/" + v.investigator_id + "/reset-password", { method: "POST", body: { password: np } }); toast("تم تغيير كلمة المرور", "success"); } catch (e) { toast(e.message, "error"); } } }, "🔑"),
-      el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("حذف المحقق؟")) return; try { await api("/tenants/" + tid + "/investigators/" + v.investigator_id, { method: "DELETE" }); toast("حُذف", "success"); await loadTenantInvestigators(tid); render(); } catch (e) { toast(e.message, "error"); } } }, "🗑"))));
+      el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("حذف المحقق؟")) return; try { await api("/tenants/" + tid + "/investigators/" + v.investigator_id, { method: "DELETE" }); toast("حُذف", "success"); await loadTenantInvestigators(tid); render(); } catch (e) { toast(e.message, "error"); } } }, "🗑")))));
   return el("div", { class: "card", style: "border-color:var(--accent);border-width:2px" },
     el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:12px" },
       el("h3", {}, "👥 محققو المؤسسة (" + (used) + "/" + limit + ")"),
@@ -862,6 +903,18 @@ async function renderPage() {
     } else if (state.page === "investigators") {
       await loadInvestigators();
       c.replaceChildren(renderInvestigators());
+    } else if (state.page === "fx") {
+      await Promise.all([loadFxCurrencies(), loadFxRates()]);
+      c.replaceChildren(renderFx());
+    } else if (state.page === "watchlists") {
+      await loadWatchlist();
+      c.replaceChildren(renderWatchlists());
+    } else if (state.page === "policy") {
+      await loadPolicyTenants();
+      c.replaceChildren(renderPolicyStudio());
+    } else if (state.page === "audit") {
+      await loadAudit();
+      c.replaceChildren(renderAudit());
     } else if (state.page === "rules") {
       await loadRules();
       c.replaceChildren(renderRules());
@@ -890,15 +943,19 @@ function render() {
   if (!state.token) { root.appendChild(renderLogin()); return; }
 
   const pages = [
-    { id: "overview",  icon: "📊", label: "نظرة عامة" },
-    { id: "tenants",   icon: "🏢", label: "العملاء (بنوك ومحافظ)" },
-    { id: "decisions", icon: "⚖️", label: "قرارات الاحتيال" },
-    { id: "investigators", icon: "🛡️", label: "المحققون" },
-    { id: "rules",     icon: "📜", label: "قواعد الاحتيال" },
-    { id: "models",    icon: "🧠", label: "نماذج ML" },
-    { id: "graph",     icon: "🕸️", label: "ذكاء الشبكة" },
-    { id: "settings",  icon: "⚙️", label: "إعدادات النظام" },
-    { id: "docs",      icon: "📖", label: "دليل التكامل" },
+    { id: "overview",  icon: "📊", label: tl("نظرة عامة") },
+    { id: "tenants",   icon: "🏢", label: tl("العملاء (بنوك ومحافظ)") },
+    { id: "decisions", icon: "⚖️", label: tl("قرارات الاحتيال") },
+    { id: "investigators", icon: "🛡️", label: tl("المحققون") },
+    { id: "rules",     icon: "📜", label: tl("قواعد الاحتيال") },
+    { id: "models",    icon: "🧠", label: tl("نماذج ML") },
+    { id: "graph",     icon: "🕸️", label: tl("ذكاء الشبكة") },
+    { id: "fx",         icon: "💱", label: tl("العملات و FX") },
+    { id: "watchlists", icon: "🚫", label: tl("قوائم المراقبة") },
+    { id: "policy",     icon: "🎛️", label: tl("استوديو السياسات") },
+    { id: "audit",      icon: "🧾", label: tl("سجل التدقيق") },
+    { id: "settings",  icon: "⚙️", label: tl("إعدادات النظام") },
+    { id: "docs",      icon: "📖", label: tl("دليل التكامل") },
   ];
 
   root.appendChild(el("div", { class: "layout" },
@@ -912,7 +969,7 @@ function render() {
         el("span", { class: "badge allow" }, "Super Admin"),
         el("button", { class: "btn danger",
           onclick: () => { localStorage.removeItem(TK); state.token = null; render(); }
-        }, "🚪 خروج"),
+        }, L("🚪 خروج", "🚪 Logout")), el("button", { class: "btn", onclick: toggleLang }, L("EN", "عربي")),
       )
     ),
     el("aside", {},
@@ -934,3 +991,226 @@ function render() {
 }
 
 render();
+
+/* ═══════════ TASK 11 — advanced admin pages (FX / Watchlists / Policy / Audit) ═══════════ */
+function fmtTs(iso) { if (!iso) return "-"; const s = String(iso); return s.slice(0, 16).replace("T", " "); }
+
+async function loadFxCurrencies() {
+  try { const r = await api("/fx/currencies"); state.fxCurrencies = r.currencies || []; } catch { state.fxCurrencies = []; }
+}
+async function loadFxRates() {
+  try { const r = await api("/fx/rates"); state.fxRates = r.rates || []; } catch { state.fxRates = []; }
+}
+async function loadWatchlist() {
+  try { const r = await api("/watchlist"); state.watchlistEntries = r.entries || []; } catch { state.watchlistEntries = []; }
+}
+async function loadPolicyTenants() {
+  try { const r = await api("/tenants"); state.policyTenants = r.tenants || []; } catch { state.policyTenants = []; }
+}
+async function loadAudit() {
+  try { const r = await api("/audit?limit=200"); state.auditLog = Array.isArray(r) ? r : (r.events || []); } catch { state.auditLog = []; }
+}
+
+function renderFx() {
+  const cur = state.fxCurrencies || [];
+  const rates = state.fxRates || [];
+  const cc = el("input", { class: "form-control", placeholder: "USD", maxlength: 3, dir: "ltr", style: "width:90px" });
+  const cn = el("input", { class: "form-control", placeholder: "اسم العملة", style: "width:170px" });
+  const cmu = el("input", { class: "form-control", type: "number", value: 2, style: "width:80px" });
+  const rb = el("input", { class: "form-control", placeholder: "YER", maxlength: 3, dir: "ltr", style: "width:80px" });
+  const rq = el("input", { class: "form-control", placeholder: "USD", maxlength: 3, dir: "ltr", style: "width:80px" });
+  const rr = el("input", { class: "form-control", type: "number", step: "any", placeholder: "0.000636", dir: "ltr", style: "width:130px" });
+  const rsrc = el("input", { class: "form-control", value: "aegis_reference", dir: "ltr", style: "width:150px" });
+  const fmsg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
+  return el("div", {},
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "💱 إدارة العملات وأسعار الصرف"),
+    el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" }, "الأسعار تاريخية (append-only) — سعر جديد لا يُعدّل اللقطة التي اتُّخذ بها قرار سابق"),
+    el("div", { class: "grid" },
+      kpi("العملات", cur.length, "المسجَّلة", "brand"),
+      kpi("أسعار الصرف", rates.length, "لقطات محفوظة", "info"),
+      kpi("أزواج فريدة", new Set(rates.map(r => (r.base_ccy || "") + "/" + (r.quote_ccy || ""))).size, "Base/Quote", "purple"),
+    ),
+    el("div", { class: "card" },
+      el("h3", { style: "margin-bottom:12px" }, "🪙 العملات المدعومة"),
+      el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px" }, cc, cn, cmu,
+        el("button", { class: "btn success", onclick: async () => {
+          fmsg.textContent = ""; fmsg.style.color = "var(--muted)";
+          if (!cc.value.trim() || !cn.value.trim()) { fmsg.textContent = "أدخل الرمز والاسم"; fmsg.style.color = "#FCA5A5"; return; }
+          try {
+            await api("/fx/currencies", { method: "POST", body: { code: cc.value.trim().toUpperCase(), name: cn.value.trim(), minor_unit: Number(cmu.value || 2) } });
+            toast("أُضيفت العملة", "success"); await loadFxCurrencies(); render();
+          } catch (e) { fmsg.textContent = e.message; fmsg.style.color = "#FCA5A5"; }
+        } }, "➕ إضافة عملة")),
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "الرمز"), el("th", {}, "الاسم"), el("th", {}, "الوحدة الصغرى"), el("th", {}, "التقريب"), el("th", {}, "الحالة"))),
+        el("tbody", {}, ...cur.map(x => el("tr", {},
+          el("td", { style: "font-weight:700" }, el("code", {}, x.code)),
+          el("td", {}, x.name),
+          el("td", {}, String(x.minor_unit)),
+          el("td", {}, String(x.round_unit)),
+          el("td", {}, el("span", { class: "badge " + (x.active ? "allow" : "block") }, x.active ? "نشطة" : "موقوفة")),
+        ))))),
+    el("div", { class: "card" },
+      el("h3", { style: "margin-bottom:12px" }, "📈 أسعار الصرف (لقطات تاريخية)"),
+      el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px" }, rb, rq, rr, rsrc,
+        el("button", { class: "btn success", onclick: async () => {
+          fmsg.textContent = ""; fmsg.style.color = "var(--muted)";
+          if (!rb.value.trim() || !rq.value.trim() || !rr.value) { fmsg.textContent = "أدخل الزوج والسعر"; fmsg.style.color = "#FCA5A5"; return; }
+          try {
+            await api("/fx/rates", { method: "POST", body: { base_ccy: rb.value.trim().toUpperCase(), quote_ccy: rq.value.trim().toUpperCase(), rate: Number(rr.value), source: rsrc.value.trim() || "aegis_reference" } });
+            toast("أُضيف السعر (لقطة جديدة)", "success"); await loadFxRates(); render();
+          } catch (e) { fmsg.textContent = e.message; fmsg.style.color = "#FCA5A5"; }
+        } }, "➕ إضافة سعر")),
+      fmsg,
+      rates.length === 0 ? el("div", { style: "color:var(--muted)" }, "لا أسعار مسجَّلة بعد.") :
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "الزوج"), el("th", {}, "السعر"), el("th", {}, "النوع"), el("th", {}, "المصدر"), el("th", {}, "صالح من"), el("th", {}, "صالح إلى"), el("th", {}, "سُجّل"))),
+        el("tbody", {}, ...rates.map(x => el("tr", {},
+          el("td", { style: "font-weight:700" }, el("code", { style: "font-size:11px" }, (x.base_ccy || "") + "/" + (x.quote_ccy || ""))),
+          el("td", {}, String(x.rate)),
+          el("td", {}, x.rate_type || "mid"),
+          el("td", {}, el("span", { class: "badge info" }, x.source || "")),
+          el("td", { style: "font-size:11px" }, fmtTs(x.valid_from)),
+          el("td", { style: "font-size:11px" }, x.valid_to ? fmtTs(x.valid_to) : "مفتوح"),
+          el("td", { style: "font-size:11px" }, fmtTs(x.fetched_at)),
+        ))))),
+  );
+}
+
+function renderWatchlists() {
+  const rows = state.watchlistEntries || [];
+  const lt = el("select", { class: "form-control", style: "width:170px" },
+    ...["sanctions", "high_risk_country", "pep", "custom"].map(o => el("option", { value: o }, o)));
+  const val = el("input", { class: "form-control", placeholder: "IR / اسم / قيمة", dir: "ltr", style: "width:220px" });
+  const wmsg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
+  const byType = {};
+  rows.forEach(r => { const k = r.list_type || "custom"; byType[k] = (byType[k] || 0) + 1; });
+  return el("div", {},
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "🚫 قوائم المراقبة (AML / Watchlists)"),
+    el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" }, "عقوبات، PEP، دول عالية المخاطر — تُستخدم في فحص AML قبل القرار"),
+    el("div", { class: "grid" },
+      kpi("إجمالي الإدخالات", rows.length, "كل القوائم", "brand"),
+      kpi("عقوبات", byType.sanctions || 0, "sanctions", "danger"),
+      kpi("دول عالية المخاطر", byType.high_risk_country || 0, "high_risk_country", "warn"),
+      kpi("PEP", byType.pep || 0, "pep", "info"),
+    ),
+    el("div", { class: "card" },
+      el("h3", { style: "margin-bottom:12px" }, "➕ إضافة إدخال"),
+      el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center" }, lt, val,
+        el("button", { class: "btn success", onclick: async () => {
+          wmsg.textContent = ""; wmsg.style.color = "var(--muted)";
+          if (!val.value.trim()) { wmsg.textContent = "أدخل القيمة"; wmsg.style.color = "#FCA5A5"; return; }
+          try {
+            await api("/watchlist", { method: "POST", body: { list_type: lt.value, value: val.value.trim() } });
+            toast("أُضيف للقائمة", "success"); await loadWatchlist(); render();
+          } catch (e) { wmsg.textContent = e.message; wmsg.style.color = "#FCA5A5"; }
+        } }, "إضافة")),
+      wmsg),
+    el("div", { class: "card" },
+      el("h3", { style: "margin-bottom:12px" }, "📋 الإدخالات الحالية"),
+      rows.length === 0 ? el("div", { style: "color:var(--muted)" }, "لا إدخالات.") :
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "النوع"), el("th", {}, "القيمة"), el("th", {}, "المؤسسة"))),
+        el("tbody", {}, ...rows.map(x => el("tr", {},
+          el("td", {}, el("span", { class: "badge " + (x.list_type === "sanctions" ? "block" : x.list_type === "high_risk_country" ? "review" : "info") }, x.list_type)),
+          el("td", { style: "font-weight:700" }, el("code", {}, x.value)),
+          el("td", { style: "font-size:11px;color:var(--muted)" }, x.tenant_id || "platform"),
+        ))))),
+  );
+}
+
+function renderPolicyStudio() {
+  const tenants = state.policyTenants || [];
+  const sel = state.policySelected;
+  const pmsg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
+  const picker = el("select", { class: "form-control", style: "min-width:240px" },
+    el("option", { value: "" }, "— اختر مؤسسة لتحرير سياستها —"),
+    ...tenants.map(t => el("option", { value: t.tenant_id }, (t.name || t.tenant_id))));
+  picker.value = sel ? sel.tenant_id : "";
+  picker.addEventListener("change", async () => {
+    const tid = picker.value;
+    if (!tid) { state.policySelected = null; render(); return; }
+    try { state.policySelected = await api("/tenants/" + tid); } catch (e) { state.policySelected = null; toast(e.message, "error"); }
+    render();
+  });
+
+  let editor = el("div", { style: "color:var(--muted);padding:20px;text-align:center" }, "اختر مؤسسة لعرض سياستها وتحريرها.");
+  if (sel) {
+    let pol = {};
+    try { pol = sel.policy_json ? (typeof sel.policy_json === "string" ? JSON.parse(sel.policy_json) : sel.policy_json) : {}; } catch { pol = {}; }
+    const th = pol.thresholds || {};
+    const tc = el("input", { class: "form-control", type: "number", step: "any", value: th.challenge != null ? th.challenge : "", style: "width:110px" });
+    const tr = el("input", { class: "form-control", type: "number", step: "any", value: th.review != null ? th.review : "", style: "width:110px" });
+    const tb = el("input", { class: "form-control", type: "number", step: "any", value: th.block != null ? th.block : "", style: "width:110px" });
+    const fx = el("select", { class: "form-control", style: "width:160px" },
+      ...["", "review", "block", "allow"].map(o => el("option", { value: o }, o === "" ? "افتراضي" : o)));
+    fx.value = pol.fx_missing_action || "";
+    editor = el("div", {},
+      el("div", { class: "card" },
+        el("h3", { style: "margin-bottom:10px" }, "🎛️ سياسة: " + (sel.name || sel.tenant_id)),
+        el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:12px" }, "عتبات القرار ومعالجة غياب سعر الصرف — تُحفظ فورًا وتُستخدم في القرارات القادمة"),
+        el("div", { style: "display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end" },
+          el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "عتبة Challenge"), tc),
+          el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "عتبة Review"), tr),
+          el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "عتبة Block"), tb),
+          el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "عند غياب FX"), fx),
+          el("button", { class: "btn success", onclick: async () => {
+            pmsg.textContent = ""; pmsg.style.color = "var(--muted)";
+            const body = {};
+            const ths = {};
+            if (tc.value !== "") ths.challenge = Number(tc.value);
+            if (tr.value !== "") ths.review = Number(tr.value);
+            if (tb.value !== "") ths.block = Number(tb.value);
+            if (Object.keys(ths).length) body.thresholds = ths;
+            if (fx.value) body.fx_missing_action = fx.value;
+            try {
+              await api("/tenants/" + sel.tenant_id + "/policy", { method: "PUT", body });
+              toast("حُفظت السياسة", "success");
+              state.policySelected = await api("/tenants/" + sel.tenant_id);
+              render();
+            } catch (e) { pmsg.textContent = e.message; pmsg.style.color = "#FCA5A5"; }
+          } }, "💾 حفظ السياسة")),
+        pmsg),
+      el("div", { class: "card" },
+        el("h3", { style: "margin-bottom:10px" }, "🔍 السياسة الحالية (JSON)"),
+        el("pre", { class: "code-block" }, JSON.stringify(pol, null, 2))),
+    );
+  }
+  return el("div", {},
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "🎛️ استوديو السياسات (Policy Studio)"),
+    el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" }, "تحرير سياسة القرار لكل مؤسسة — التغييرات تُسجَّل في سجل التدقيق"),
+    el("div", { class: "card" }, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:6px" }, "المؤسسة"), picker),
+    editor,
+  );
+}
+
+function renderAudit() {
+  const rows = state.auditLog || [];
+  const vr = state.auditVerifyResult;
+  return el("div", {},
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "🧾 سجل التدقيق (Audit Log)"),
+    el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" }, "سجل مقاوم للعبث بسلسلة SHA-256 — تعديل أي قيد يكسر السلسلة ويُكشَف بالتحقق"),
+    el("div", { class: "card" },
+      el("div", { style: "display:flex;gap:10px;align-items:center;flex-wrap:wrap" },
+        el("button", { class: "btn success", onclick: async () => {
+          try { state.auditVerifyResult = await api("/audit-verify"); } catch (e) { state.auditVerifyResult = { error: e.message }; }
+          render();
+        } }, "🔗 التحقق من سلامة السلسلة"),
+        el("button", { class: "btn", onclick: async () => { await loadAudit(); render(); } }, "↻ تحديث"),
+      ),
+      vr ? el("pre", { class: "code-block", style: "margin-top:12px" }, JSON.stringify(vr, null, 2)) : null),
+    el("div", { class: "card" },
+      el("h3", { style: "margin-bottom:12px" }, "📜 الأحداث الأخيرة (" + rows.length + ")"),
+      rows.length === 0 ? el("div", { style: "color:var(--muted)" }, "لا أحداث.") :
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "الوقت"), el("th", {}, "المؤسسة"), el("th", {}, "الفاعل"), el("th", {}, "الحدث"), el("th", {}, "المورد"), el("th", {}, "المعرف"))),
+        el("tbody", {}, ...rows.map(x => el("tr", {},
+          el("td", { style: "font-size:11px" }, fmtTs(x.created_at || x.timestamp)),
+          el("td", { style: "font-size:11px" }, x.tenant_id || "platform"),
+          el("td", {}, x.actor || x.actor_id || ""),
+          el("td", {}, el("span", { class: "badge info" }, x.event_type || x.action || "")),
+          el("td", { style: "font-size:11px" }, x.resource || ""),
+          el("td", { style: "font-size:11px" }, el("code", {}, String(x.resource_id || "").slice(0, 18))),
+        ))))),
+  );
+}

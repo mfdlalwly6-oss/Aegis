@@ -74,7 +74,11 @@ class DecisionOrchestrator:
             candidate = dict(policy["thresholds"])
             for key in candidate:
                 value = thresholds.get(key)
-                if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1:
+                if (
+                    isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    and 0 <= value <= 1
+                ):
                     candidate[key] = float(value)
             if candidate["challenge"] <= candidate["review"] <= candidate["block"]:
                 policy["thresholds"] = candidate
@@ -99,7 +103,10 @@ class DecisionOrchestrator:
         if not tx.behavior:
             return 0.0
         score = 0.0
-        if tx.behavior.biometric_match_score is not None and tx.behavior.biometric_match_score < 0.4:
+        if (
+            tx.behavior.biometric_match_score is not None
+            and tx.behavior.biometric_match_score < 0.4
+        ):
             score += 0.45
         if tx.behavior.keystroke_entropy is not None and tx.behavior.keystroke_entropy < 1.2:
             score += 0.20
@@ -198,7 +205,9 @@ class DecisionOrchestrator:
         latency_ms = (time.perf_counter() - started) * 1000
 
         # 10. Top reasons
-        top_reasons = [h.reason for h in sorted(rules_hits, key=lambda r: -r.score_contribution)[:5]]
+        top_reasons = [
+            h.reason for h in sorted(rules_hits, key=lambda r: -r.score_contribution)[:5]
+        ]
         if graph_sig.reason and graph_sig.reason != "no_graph_risk":
             top_reasons.append(graph_sig.reason)
         for flag in aml_sig.risk_flags[:3]:

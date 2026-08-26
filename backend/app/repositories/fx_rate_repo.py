@@ -89,7 +89,9 @@ class FxRateRepository:
         base, quote = base_ccy.upper(), quote_ccy.upper()
         at_iso = (at or datetime.now(UTC)).isoformat()
         regions = (
-            [region, "global"] if region and region != "global" else ([region] if region else ["global"])
+            [region, "global"]
+            if region and region != "global"
+            else ([region] if region else ["global"])
         )
         best = None
         for reg in regions:

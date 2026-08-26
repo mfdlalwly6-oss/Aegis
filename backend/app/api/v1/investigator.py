@@ -165,7 +165,7 @@ def my_stats(inv=Depends(require_investigator), registry=Depends(get_registry)):
         )["c"],
         "my_alerts": registry.db.query_one(
             "SELECT COUNT(*) AS c FROM alerts WHERE tenant_id=? AND assignee=? "
-            "AND status NOT LIKE 'resolved%'",
+            "AND status NOT IN ('resolved_true_positive','resolved_false_positive')",
             (tid, email),
         )["c"],
         "open_cases": registry.db.query_one(
@@ -203,7 +203,9 @@ def decisions_recent(
 
 
 @router.get("/decisions/{decision_id}")
-def decision_detail(decision_id: str, inv=Depends(require_investigator), registry=Depends(get_registry)):
+def decision_detail(
+    decision_id: str, inv=Depends(require_investigator), registry=Depends(get_registry)
+):
     row = registry.db.query_one(
         "SELECT * FROM decisions WHERE decision_id=? AND tenant_id=?",
         (decision_id, inv["tenant_id"]),
@@ -214,7 +216,9 @@ def decision_detail(decision_id: str, inv=Depends(require_investigator), registr
 
 
 @router.get("/transactions/{tx_id}")
-def transaction_detail(tx_id: str, inv=Depends(require_investigator), registry=Depends(get_registry)):
+def transaction_detail(
+    tx_id: str, inv=Depends(require_investigator), registry=Depends(get_registry)
+):
     tx = registry.transactions.get(tx_id, tenant_id=inv["tenant_id"])
     if not tx:
         raise HTTPException(404, "not_found")
@@ -280,7 +284,9 @@ def alert_detail(alert_id: str, inv=Depends(require_investigator), registry=Depe
         "WHERE tenant_id=? AND alert_ids_json LIKE ? ORDER BY created_at DESC LIMIT 1",
         (tid, f"%{alert_id}%"),
     )
-    history = registry.audit_repo.list(tenant_id=tid, resource="alert", resource_id=alert_id, limit=50)
+    history = registry.audit_repo.list(
+        tenant_id=tid, resource="alert", resource_id=alert_id, limit=50
+    )
     return {
         "alert": alert,
         "transaction": tx,
@@ -419,7 +425,9 @@ def alert_escalate(
 
 
 def _get_case(registry, case_id: str, tenant_id: str) -> dict:
-    case = registry.db.query_one("SELECT * FROM cases WHERE case_id=? AND tenant_id=?", (case_id, tenant_id))
+    case = registry.db.query_one(
+        "SELECT * FROM cases WHERE case_id=? AND tenant_id=?", (case_id, tenant_id)
+    )
     if not case:
         raise HTTPException(404, "not_found")
     case["tx_ids"] = json.loads(case.pop("tx_ids_json", "[]") or "[]")
@@ -463,7 +471,9 @@ def case_detail(case_id: str, inv=Depends(require_investigator), registry=Depend
     txs = [registry.transactions.get(t, tenant_id=tid) for t in case.get("tx_ids", [])]
     txs = [t for t in txs if t]
     alerts = [_get_alert(registry, a, tid) for a in case.get("alert_ids", [])]
-    history = registry.audit_repo.list(tenant_id=tid, resource="case", resource_id=case_id, limit=50)
+    history = registry.audit_repo.list(
+        tenant_id=tid, resource="case", resource_id=case_id, limit=50
+    )
     return {"case": case, "transactions": txs, "alerts": alerts, "history": history}
 
 
@@ -546,7 +556,9 @@ def case_resolve(
         raise HTTPException(400, f"invalid_resolution: allowed {sorted(CASE_RESOLUTIONS)}")
     tid = inv["tenant_id"]
     case = _get_case(registry, case_id, tid)
-    case = registry.cases.resolve(case_id, body.resolution, body.note, author=inv.get("sub", "investigator"))
+    case = registry.cases.resolve(
+        case_id, body.resolution, body.note, author=inv.get("sub", "investigator")
+    )
     if body.resolution == "confirmed_fraud":
         for tx_id in case.get("tx_ids", []):
             tx = registry.transactions.get(tx_id, tenant_id=tid)
@@ -567,8 +579,51 @@ def case_resolve(
 # ─────────────────────────── Graph (tenant-scoped) ───────────────────────────
 
 
+@router.get("/accounts")
+def accounts(
+    limit: int = Query(500, le=1000),
+    inv=Depends(require_investigator),
+    registry=Depends(get_registry),
+):
+    """Customers & beneficiaries aggregated from REAL transactions (tenant-scoped)."""
+    tid = inv["tenant_id"]
+    rows = registry.db.query(
+        "SELECT amount, currency, sender_account_id, beneficiary_account_id"
+        " FROM transactions WHERE tenant_id=?",
+        (tid,),
+    )
+    customers: dict = {}
+    beneficiaries: dict = {}
+
+    def _agg(acc, account_id, amount, currency):
+        e = acc.setdefault(account_id, {"tx_count": 0, "total_amount": 0.0, "currencies": []})
+        e["tx_count"] += 1
+        e["total_amount"] += float(amount or 0)
+        if currency and currency not in e["currencies"]:
+            e["currencies"].append(currency)
+
+    for r in rows[:limit]:
+        if r.get("sender_account_id"):
+            _agg(customers, r["sender_account_id"], r.get("amount"), r.get("currency"))
+        if r.get("beneficiary_account_id"):
+            _agg(beneficiaries, r["beneficiary_account_id"], r.get("amount"), r.get("currency"))
+
+    def _finalize(d):
+        out = []
+        for account_id, e in d.items():
+            e["account_id"] = account_id
+            e["total_amount"] = round(e["total_amount"], 2)
+            out.append(e)
+        out.sort(key=lambda x: x["tx_count"], reverse=True)
+        return out
+
+    return {"customers": _finalize(customers), "beneficiaries": _finalize(beneficiaries)}
+
+
 @router.get("/graph/account/{account_id}")
-def graph_account(account_id: str, inv=Depends(require_investigator), registry=Depends(get_registry)):
+def graph_account(
+    account_id: str, inv=Depends(require_investigator), registry=Depends(get_registry)
+):
     return registry.graph_engine.account_context(account_id)
 
 

@@ -87,7 +87,9 @@ def rule_toggle(
 
 
 @router.post("/reload")
-def reload_rules(body: dict, request: Request, owner=Depends(require_owner), registry=Depends(get_registry)):
+def reload_rules(
+    body: dict, request: Request, owner=Depends(require_owner), registry=Depends(get_registry)
+):
     rules = body.get("rules", [])
     for rule in rules:
         registry.rule_repo.upsert(rule, tenant_id=rule.get("tenant_id"))

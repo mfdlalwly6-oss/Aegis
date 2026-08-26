@@ -17,9 +17,7 @@ from app.security import verify_signature
 
 router = APIRouter()
 
-DEFAULT_REVIEW_MESSAGE = (
-    "تم تعليق العملية مؤقتًا للمراجعة الأمنية. يرجى التواصل مع البنك أو المؤسسة المالية لإتمام المراجعة."
-)
+DEFAULT_REVIEW_MESSAGE = "تم تعليق العملية مؤقتًا للمراجعة الأمنية. يرجى التواصل مع البنك أو المؤسسة المالية لإتمام المراجعة."
 
 
 def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
@@ -39,7 +37,9 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
     ts_raw = src.get("timestamp") or src.get("ts") or body.get("timestamp")
     try:
         timestamp = (
-            datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00")) if ts_raw else datetime.now(UTC)
+            datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+            if ts_raw
+            else datetime.now(UTC)
         )
     except Exception:
         timestamp = datetime.now(UTC)
@@ -47,6 +47,12 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
     amount = src.get("amount")
     if amount is None:
         raise HTTPException(400, "amount_required")
+    # BUG3 fix: validate numeric amount up-front so a malformed value yields a
+    # clean 400 (not an uncaught ValueError -> 500) at the float() call below.
+    try:
+        float(amount)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "amount_invalid") from None
 
     metadata = dict(src.get("metadata") or {})
     for k in ("velocity", "account", "beneficiary", "geo", "customer"):
@@ -115,7 +121,9 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
         beneficiary_country=src.get("beneficiary_country") or metadata.get("country"),
         merchant_id=src.get("merchant_id"),
         merchant_name=src.get("merchant_name"),
-        device=DeviceContext(**{k: v for k, v in device_raw.items() if k in DeviceContext.model_fields})
+        device=DeviceContext(
+            **{k: v for k, v in device_raw.items() if k in DeviceContext.model_fields}
+        )
         if device_raw
         else None,
         behavior=BehaviorSignals(
@@ -273,7 +281,9 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
 
 
 @router.get("/decisions/recent")
-async def recent_decisions(limit: int = 20, request: Request = None, registry=Depends(get_registry)):
+async def recent_decisions(
+    limit: int = 20, request: Request = None, registry=Depends(get_registry)
+):
     """Public read of recent decisions — intentionally limited fields.
     Owner sees full data via /admin/decisions/recent. Merchants via /admin/merchant/decisions.
     """

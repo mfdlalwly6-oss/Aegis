@@ -81,10 +81,19 @@ def _find_portals_dir():
 
 PORTALS_DIR = _find_portals_dir()
 if PORTALS_DIR.exists():
+    # Portals must always be revalidated: without Cache-Control, browsers use
+    # heuristic caching and serve stale broken app.js (blank pages after fixes).
+    # no-cache forces revalidation; etag still returns 304 when unchanged.
+    class NoCacheStaticFiles(StaticFiles):
+        async def get_response(self, path, scope):
+            resp = await super().get_response(path, scope)
+            resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+            return resp
+
     for portal in ("admin", "merchant", "investigator"):
         p = PORTALS_DIR / portal
         if p.exists():
-            app.mount(f"/{portal}", StaticFiles(directory=str(p), html=True), name=portal)
+            app.mount(f"/{portal}", NoCacheStaticFiles(directory=str(p), html=True), name=portal)
 
 
 _FONTS_DIR = Path(__file__).resolve().parent / "assets" / "fonts"

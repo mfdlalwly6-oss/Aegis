@@ -102,7 +102,8 @@ class ReportBuilder:
         for a in manual:
             try:
                 dur = (
-                    datetime.fromisoformat(a["updated_at"]) - datetime.fromisoformat(a["created_at"])
+                    datetime.fromisoformat(a["updated_at"])
+                    - datetime.fromisoformat(a["created_at"])
                 ).total_seconds() / 60
                 durations.append(dur)
                 if dur > 1440:
@@ -141,7 +142,9 @@ class ReportBuilder:
             )
         if manual:
             avg = round(sum(durations) / len(durations), 1)
-            summary_parts.append(f"تمت معالجة {len(manual)} حالة يدويًا بمتوسط {avg} دقيقة للمراجعة.")
+            summary_parts.append(
+                f"تمت معالجة {len(manual)} حالة يدويًا بمتوسط {avg} دقيقة للمراجعة."
+            )
         else:
             summary_parts.append("لم توجد حالات معالجة يدويًا خلال الفترة.")
         if alerts:
@@ -211,7 +214,9 @@ class ReportBuilder:
                 "avg_duration_min": round(sum(durations) / len(durations), 1) if durations else 0,
                 "sla_breach_over_24h": sla_breach,
             },
-            "investigator_activity": [{"actor": k, "actions": v} for k, v in inv_activity.most_common(10)],
+            "investigator_activity": [
+                {"actor": k, "actions": v} for k, v in inv_activity.most_common(10)
+            ],
             "system": {
                 "rules_loaded": rules_count,
                 "ml_ready": ml_ready,

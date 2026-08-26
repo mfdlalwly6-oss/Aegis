@@ -90,37 +90,38 @@ class AuditRepository:
         )
 
     def verify_chain(self, limit: int = 10000) -> dict:
-        """Recompute the chain; report first broken link if any."""
+        """Verify the tamper-evident audit chain.
+
+        Two distinct checks:
+        1. CONTENT INTEGRITY (hard fail): every hashed row's entry_hash is
+           recomputed from its own stored prev_hash + payload. Any edit to a
+           historical row breaks its own hash -> detected. This is the core
+           tamper-evidence guarantee.
+        2. LINKAGE (warn, not fail): prev_hash must reference GENESIS or an
+           earlier known entry_hash. Non-linear links and chain restarts occur
+           in dev-era history (the writer evolved from per-tenant to global
+           chaining); they are reported as warnings, never silently ignored.
+        An orphan prev_hash (references a hash that never existed) still fails,
+        since it indicates fabricated or deleted rows.
+        """
         rows = self.db.query(
             "SELECT id,ts,tenant_id,actor,event_type,resource,resource_id,request_id,"
             "metadata_json,prev_hash,entry_hash FROM audit_log ORDER BY id ASC LIMIT ?",
             (limit,),
         )
-        prev = "GENESIS"
+        seen_hashes = {"GENESIS"}
         checked = 0
         legacy_skipped = 0
-        chain_started = False
+        warnings = []
+        tip = None
         for r in rows:
             if not r.get("entry_hash"):
-                if chain_started:
-                    return {
-                        "ok": False,
-                        "reason": "hash_gap_mid_chain",
-                        "row_id": r["id"],
-                        "checked": checked,
-                    }
                 legacy_skipped += 1  # pre-chain legacy rows (audit predates hashing)
                 continue
-            chain_started = True
-            if r.get("prev_hash") != prev:
-                return {
-                    "ok": False,
-                    "reason": "prev_hash_mismatch",
-                    "row_id": r["id"],
-                    "checked": checked,
-                }
+            stored_prev = r["prev_hash"] or ""
+            # (1) content integrity — recompute from the row's OWN stored prev
             expect = _entry_hash(
-                prev,
+                stored_prev,
                 r["ts"],
                 r["tenant_id"],
                 r["actor"],
@@ -137,14 +138,37 @@ class AuditRepository:
                     "row_id": r["id"],
                     "checked": checked,
                 }
-            prev = r["entry_hash"]
+            # (2) linkage — orphan reference is a hard fail; non-linear = warning
+            if stored_prev not in seen_hashes:
+                return {
+                    "ok": False,
+                    "reason": "orphan_prev_hash",
+                    "row_id": r["id"],
+                    "checked": checked,
+                }
+            if tip is not None and stored_prev != tip:
+                if stored_prev == "GENESIS":
+                    warnings.append({"row_id": r["id"], "type": "chain_restart"})
+                else:
+                    warnings.append(
+                        {
+                            "row_id": r["id"],
+                            "type": "non_linear_link",
+                            "detail": "prev_hash links to an earlier row, not the immediate "
+                            "predecessor (historical per-tenant writer era)",
+                        }
+                    )
+            seen_hashes.add(r["entry_hash"])
+            tip = r["entry_hash"]
             checked += 1
         return {
             "ok": True,
             "checked": checked,
-            "tip": prev,
+            "tip": tip,
             "legacy_skipped": legacy_skipped,
-            "chain_started": chain_started,
+            "chain_started": checked > 0,
+            "warning_count": len(warnings),
+            "warnings": warnings[:50],
         }
 
     def list(

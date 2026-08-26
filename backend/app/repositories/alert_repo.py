@@ -41,7 +41,9 @@ class AlertRepository:
         row = self.db.query_one("SELECT * FROM alerts WHERE alert_id=?", (alert_id,))
         return self._parse(row) if row else None
 
-    def list(self, tenant_id: str | None = None, status: str | None = None, limit: int = 100) -> list[dict]:
+    def list(
+        self, tenant_id: str | None = None, status: str | None = None, limit: int = 100
+    ) -> list[dict]:
         sql, params = "SELECT * FROM alerts WHERE 1=1", []
         if tenant_id:
             sql += " AND tenant_id=?"

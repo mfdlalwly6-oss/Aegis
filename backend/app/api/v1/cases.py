@@ -56,7 +56,9 @@ def update_case_status(
     owner=Depends(require_owner),
     registry=Depends(get_registry),
 ):
-    case = registry.cases.update_status(case_id, body.get("status", "open"), assignee=body.get("assignee"))
+    case = registry.cases.update_status(
+        case_id, body.get("status", "open"), assignee=body.get("assignee")
+    )
     if not case:
         raise HTTPException(404, "not_found")
     registry.audit.log(

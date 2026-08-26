@@ -56,7 +56,9 @@ class CaseRepository:
         row = self.db.query_one("SELECT * FROM cases WHERE case_id=?", (case_id,))
         return self._parse(row) if row else None
 
-    def list(self, tenant_id: str | None = None, status: str | None = None, limit: int = 100) -> list[dict]:
+    def list(
+        self, tenant_id: str | None = None, status: str | None = None, limit: int = 100
+    ) -> list[dict]:
         sql, params = "SELECT * FROM cases WHERE 1=1", []
         if tenant_id:
             sql += " AND tenant_id=?"

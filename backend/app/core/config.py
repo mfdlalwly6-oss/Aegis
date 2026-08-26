@@ -108,7 +108,9 @@ class Settings(BaseSettings):
         raw = os.environ.get("OPENROUTER_KEYS", "").strip()
         if not raw or raw.startswith("your-"):
             return []
-        return [k.strip() for k in raw.split(",") if k.strip() and not k.strip().startswith("your-")]
+        return [
+            k.strip() for k in raw.split(",") if k.strip() and not k.strip().startswith("your-")
+        ]
 
 
 @lru_cache(maxsize=1)
