@@ -31,11 +31,15 @@ function toggleLang() {
   render();
 }
 (function () {
-  try { state.lang = localStorage.getItem("aegis_lang") || "ar"; } catch (e) { state.lang = "ar"; }
-  applyDir();
+  try {
+    var _l = localStorage.getItem("aegis_lang") || "ar";
+    document.documentElement.setAttribute("dir", _l === "ar" ? "rtl" : "ltr");
+    document.documentElement.setAttribute("lang", _l);
+  } catch (e) {}
 })();
 
 const state = {
+  lang: (function(){ try { return localStorage.getItem("aegis_lang") || "ar"; } catch (e) { return "ar"; } })(),
   token: localStorage.getItem(TK),
   page: "overview",
   fxCurrencies: [],
