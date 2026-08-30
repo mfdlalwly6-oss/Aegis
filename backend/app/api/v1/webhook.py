@@ -113,6 +113,19 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
         ),
         beneficiary_user_id=src.get("beneficiary_user_id"),
         beneficiary_country=src.get("beneficiary_country") or metadata.get("country"),
+        # entity names for watchlist screening (from sender/beneficiary/customer blocks)
+        sender_name=src.get("sender_name") or (ctx.get("sender") or {}).get("name")
+        or (metadata.get("sender") or {}).get("name"),
+        beneficiary_name=src.get("beneficiary_name") or (ctx.get("beneficiary") or {}).get("name")
+        or (metadata.get("beneficiary") or {}).get("name"),
+        customer_name=src.get("customer_name") or (ctx.get("customer") or {}).get("name")
+        or (metadata.get("customer") or {}).get("name"),
+        customer_dob=src.get("customer_dob") or (ctx.get("customer") or {}).get("dob")
+        or (metadata.get("customer") or {}).get("dob"),
+        customer_country=src.get("customer_country") or (ctx.get("customer") or {}).get("country")
+        or (metadata.get("customer") or {}).get("country"),
+        customer_identifiers=src.get("customer_identifiers") or (ctx.get("customer") or {}).get("identifiers")
+        or (metadata.get("customer") or {}).get("identifiers") or {},
         merchant_id=src.get("merchant_id"),
         merchant_name=src.get("merchant_name"),
         device=DeviceContext(**{k: v for k, v in device_raw.items() if k in DeviceContext.model_fields})

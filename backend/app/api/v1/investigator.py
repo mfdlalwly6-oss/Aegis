@@ -48,6 +48,25 @@ class ResolveAlertBody(BaseModel):
     note: str = ""
 
 
+def _mark_known_fraud_senders(registry, tenant_id: str, tx_ids) -> int:
+    """Mark senders of the given transactions as known-fraud in the graph.
+
+    Called ONLY from investigation-resolution paths (an alert resolved as
+    `resolved_true_positive`, or a case resolved as `confirmed_fraud`).
+    Searching an account, opening it, or merely having an alert NEVER calls
+    this — the evidence bar is a confirmed investigation outcome.
+    Tenant-scoped: transactions are read with tenant_id so no cross-tenant
+    account can ever be marked. Returns how many accounts were marked.
+    """
+    marked = 0
+    for tx_id in tx_ids or []:
+        tx = registry.transactions.get(tx_id, tenant_id=tenant_id)
+        if tx and tx.get("sender_account_id"):
+            registry.graph_engine.mark_fraud(tx["sender_account_id"])
+            marked += 1
+    return marked
+
+
 class ResolveCaseBody(BaseModel):
     resolution: str
     note: str = ""
@@ -159,7 +178,7 @@ def my_stats(inv=Depends(require_investigator), registry=Depends(get_registry)):
         )["c"],
         "my_alerts": registry.db.query_one(
             "SELECT COUNT(*) AS c FROM alerts WHERE tenant_id=? AND assignee=? "
-            "AND status NOT LIKE 'resolved%'",
+            "AND status NOT LIKE 'resolved%%'",
             (tid, email),
         )["c"],
         "open_cases": registry.db.query_one(
@@ -358,12 +377,17 @@ def alert_resolve(
 ):
     if body.resolution not in ALERT_RESOLUTIONS:
         raise HTTPException(400, f"invalid_resolution: allowed {sorted(ALERT_RESOLUTIONS)}")
-    _get_alert(registry, alert_id, inv["tenant_id"])
+    tid = inv["tenant_id"]
+    _get_alert(registry, alert_id, tid)
     alert = registry.alerts.resolve(
         alert_id, body.resolution, body.note, author=inv.get("sub", "investigator")
     )
+    if body.resolution == "resolved_true_positive" and alert and alert.get("tx_id"):
+        # Confirmed investigation outcome => known-fraud evidence feeds the graph.
+        # resolved_false_positive (or any non-confirmed outcome) never reaches here.
+        _mark_known_fraud_senders(registry, tid, [alert["tx_id"]])
     registry.audit.log(
-        inv["tenant_id"],
+        tid,
         inv.get("sub", "investigator"),
         "alert.resolved",
         "alert",
@@ -535,10 +559,7 @@ def case_resolve(
     case = _get_case(registry, case_id, tid)
     case = registry.cases.resolve(case_id, body.resolution, body.note, author=inv.get("sub", "investigator"))
     if body.resolution == "confirmed_fraud":
-        for tx_id in case.get("tx_ids", []):
-            tx = registry.transactions.get(tx_id, tenant_id=tid)
-            if tx:
-                registry.graph_engine.mark_fraud(tx["sender_account_id"])
+        _mark_known_fraud_senders(registry, tid, case.get("tx_ids", []))
     registry.audit.log(
         tid,
         inv.get("sub", "investigator"),

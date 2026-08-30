@@ -742,7 +742,7 @@ def merchant_manual_reviews(merchant=Depends(require_merchant), registry=Depends
         "t.amount, t.currency, d.decision "
         "FROM alerts a LEFT JOIN transactions t ON t.tx_id = a.tx_id "
         "LEFT JOIN decisions d ON d.tx_id = a.tx_id "
-        "WHERE a.tenant_id=? AND a.status LIKE 'resolved%' "
+        "WHERE a.tenant_id=? AND a.status LIKE 'resolved%%' "
         "ORDER BY a.updated_at DESC LIMIT 200",
         (merchant["tenant_id"],),
     )

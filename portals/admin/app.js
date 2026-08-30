@@ -148,6 +148,11 @@ async function loadTenantInvestigators(tid) {
   state.tenantInvsFor = tid;
 }
 
+async function loadWatchlists() {
+  try { state.watchlists = await api("/watchlist" + (state.wlType ? "?list_type=" + encodeURIComponent(state.wlType) : "")); }
+  catch { state.watchlists = { total: 0, entries: [] }; }
+}
+
 async function loadRules() {
   try { state.rules = await apiRoot("/rules/"); } catch { state.rules = []; }
 }
@@ -496,7 +501,7 @@ function renderTenantInvestigators() {
       v.status === "active" ? el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("إيقاف المحقق؟")) return; try { await api("/tenants/" + tid + "/investigators/" + v.investigator_id + "/suspend", { method: "POST", body: {} }); toast("أُوقف", "success"); await loadTenantInvestigators(tid); render(); } catch (e) { toast(e.message, "error"); } } }, "⏸ إيقاف")
         : el("button", { class: "btn sm success", onclick: async () => { try { await api("/tenants/" + tid + "/investigators/" + v.investigator_id + "/activate", { method: "POST", body: {} }); toast("نُشط", "success"); await loadTenantInvestigators(tid); render(); } catch (e) { toast(e.message, "error"); } } }, "▶ تنشيط"),
       el("button", { class: "btn sm", onclick: async () => { const np = prompt("كلمة المرور الجديدة (8+ أحرف)"); if (!np || np.length < 8) return; try { await api("/tenants/" + tid + "/investigators/" + v.investigator_id + "/reset-password", { method: "POST", body: { password: np } }); toast("تم تغيير كلمة المرور", "success"); } catch (e) { toast(e.message, "error"); } } }, "🔑"),
-      el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("حذف المحقق؟")) return; try { await api("/tenants/" + tid + "/investigators/" + v.investigator_id, { method: "DELETE" }); toast("حُذف", "success"); await loadTenantInvestigators(tid); render(); } catch (e) { toast(e.message, "error"); } } }, "🗑"))));
+      el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("حذف المحقق؟")) return; try { await api("/tenants/" + tid + "/investigators/" + v.investigator_id, { method: "DELETE" }); toast("حُذف", "success"); await loadTenantInvestigators(tid); render(); } catch (e) { toast(e.message, "error"); } } }, "🗑")))));
   return el("div", { class: "card", style: "border-color:var(--accent);border-width:2px" },
     el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:12px" },
       el("h3", {}, "👥 محققو المؤسسة (" + (used) + "/" + limit + ")"),
@@ -718,6 +723,88 @@ function renderInvestigators() {
 }
 
 /* ─────────────────────────────────────────── PAGE: RULES ─── */
+/* ─────────────────────────── PAGE: WATCHLISTS (real backend) ─── */
+function renderWatchlists() {
+  const entries = (state.watchlists && state.watchlists.entries) || [];
+  const LT = { sanctions: "⛔ عقوبات", pep: "👑 PEP", high_risk_country: "🌍 دول عالية المخاطر", custom: "⭐ مخصّصة" };
+  const tF = el("select", { class: "form-control", style: "max-width:200px",
+    onchange: async e => { state.wlType = e.target.value; await loadWatchlists(); renderPage(); } },
+    el("option", { value: "" }, "كل الأنواع"),
+    ...Object.entries(LT).map(([k, v]) => el("option", { value: k }, v)));
+  if (state.wlType) tF.value = state.wlType;
+
+  // add-entry form
+  const ltI = el("select", { class: "form-control" }, ...Object.entries(LT).map(([k, v]) => el("option", { value: k }, v)));
+  const valI = el("input", { class: "form-control", placeholder: "القيمة (اسم كيان أو رمز دولة مثل SY)" });
+  const kindI = el("select", { class: "form-control" },
+    ...["entity", "person", "organization", "account", "country", "other"].map(k => el("option", { value: k }, k)));
+  const aliasI = el("input", { class: "form-control", placeholder: "أسماء بديلة (افصل بـ | ) — اختياري" });
+  const ctryI = el("input", { class: "form-control", placeholder: "الدولة (مثل YE) — اختياري", maxlength: "3" });
+  const dobI = el("input", { class: "form-control", placeholder: "تاريخ الميلاد YYYY-MM-DD — اختياري", dir: "ltr" });
+  const werr = el("div", { style: "color:#FCA5A5;font-size:13px;margin-top:8px" });
+
+  const addBtn = el("button", { class: "btn primary", onclick: async () => {
+    if (!valI.value.trim()) { werr.textContent = "القيمة مطلوبة"; return; }
+    addBtn.disabled = true;
+    try {
+      await api("/tenants/platform/watchlist", { method: "POST", body: {
+        list_type: ltI.value, value: valI.value.trim(), entity_kind: kindI.value,
+        aliases: aliasI.value.split("|").map(x => x.trim()).filter(Boolean),
+        country: ctryI.value.trim().toUpperCase() || null, dob: dobI.value.trim() || null,
+      }});
+      toast("✅ أُضيف الإدخال", "success");
+      valI.value = aliasI.value = ctryI.value = dobI.value = ""; werr.textContent = "";
+      await loadWatchlists(); renderPage();
+    } catch (e) { werr.textContent = e.message; }
+    addBtn.disabled = false;
+  } }, "➕ إضافة إدخال");
+
+  const rows = entries.map(r => el("tr", {},
+    el("td", {}, el("code", { style: "font-size:11px" }, String(r.id))),
+    el("td", {}, el("span", { class: "badge" }, LT[r.list_type] || r.list_type)),
+    el("td", { style: "font-weight:700;font-size:12.5px" }, r.value),
+    el("td", { style: "font-size:11.5px" }, r.entity_kind || "entity"),
+    el("td", { style: "font-size:11px;color:var(--muted)" }, r.tenant_id === "platform" ? "🌐 منصة" : "🏢 " + (r.tenant_id || "").slice(0, 12)),
+    el("td", { style: "font-size:11px;color:var(--muted)" }, r.source || "manual"),
+    el("td", {}, el("span", { class: "badge " + (r.status === "active" ? "allow" : "block") }, r.status === "active" ? "فعّال" : "معطّل")),
+    el("td", {}, el("button", { class: "btn sm " + (r.status === "active" ? "danger" : "success"), onclick: async () => {
+      const ns = r.status === "active" ? "disabled" : "active";
+      try { await api("/watchlist/" + r.id + "/status?tenant_id=" + r.tenant_id, { method: "POST", body: { status: ns } });
+        toast(ns === "disabled" ? "عُطّل" : "فُعّل", "success"); await loadWatchlists(); renderPage(); }
+      catch (e) { toast(e.message, "error"); }
+    } }, r.status === "active" ? "⏸ تعطيل" : "▶ تفعيل")),
+  ));
+
+  return el("div", {},
+    el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:14px" },
+      el("div", {},
+        el("h1", { style: "font-size:1.7rem;font-weight:900" }, "🚫 قوائم المراقبة (AML)"),
+        el("p", { style: "color:var(--muted);font-size:13px;margin-top:4px" },
+          (state.watchlists && state.watchlists.total || 0) + " إدخال — عقوبات / PEP / دول عالية المخاطر / مخصّصة. تعطيل إدخال يوقف مطابقته فورًا."),
+      ),
+      el("div", { style: "display:flex;gap:8px;align-items:center" }, tF,
+        el("button", { class: "btn", onclick: async () => { await loadWatchlists(); renderPage(); } }, "🔄 تحديث")),
+    ),
+    el("div", { class: "card", style: "border-color:var(--brand);margin-bottom:14px" },
+      el("h3", { style: "margin-bottom:12px" }, "➕ إضافة إدخال (يدوي)"),
+      el("div", { style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:10px" },
+        el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:5px" }, "النوع *"), ltI),
+        el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:5px" }, "القيمة *"), valI),
+        el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:5px" }, "نوع الكيان"), kindI),
+        el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:5px" }, "الأسماء البديلة"), aliasI),
+        el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:5px" }, "الدولة"), ctryI),
+        el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:5px" }, "الميلاد"), dobI),
+      ),
+      addBtn, werr),
+    el("div", { class: "card" },
+      rows.length === 0
+        ? el("div", { style: "color:var(--muted);text-align:center;padding:30px" }, "لا توجد إدخالات. أضف أول إدخال أعلاه أو استورد CSV.")
+        : el("table", {},
+            el("thead", {}, el("tr", {}, ["#", "النوع", "القيمة", "الكيان", "النطاق", "المصدر", "الحالة", "إجراء"].map(h => el("th", {}, h)))),
+            el("tbody", {}, ...rows))),
+  );
+}
+
 function renderRules() {
   if (state.ruleDetail) return renderRuleDetail();
   const rows = (state.rules || []).map(r => el("tr", { class: "clickable", onclick: async () => { await loadRuleDetail(r.id); renderPage(); } },
@@ -862,6 +949,9 @@ async function renderPage() {
     } else if (state.page === "investigators") {
       await loadInvestigators();
       c.replaceChildren(renderInvestigators());
+    } else if (state.page === "watchlists") {
+      await loadWatchlists();
+      c.replaceChildren(renderWatchlists());
     } else if (state.page === "rules") {
       await loadRules();
       c.replaceChildren(renderRules());
@@ -898,6 +988,7 @@ function render() {
     { id: "models",    icon: "🧠", label: "نماذج ML" },
     { id: "graph",     icon: "🕸️", label: "ذكاء الشبكة" },
     { id: "settings",  icon: "⚙️", label: "إعدادات النظام" },
+    { id: "watchlists", icon: "🚫", label: "قوائم المراقبة" },
     { id: "docs",      icon: "📖", label: "دليل التكامل" },
   ];
 

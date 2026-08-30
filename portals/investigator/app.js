@@ -18,6 +18,7 @@ const state = {
   alertDetail: null,
   caseDetail: null,
   selectedTx: null,
+  traceDecision: null,
   filters: { alertStatus: "", alertSeverity: "", caseStatus: "" },
   live: false,
   es: null,
@@ -508,7 +509,7 @@ function renderCaseDetail() {
 
 /* ═══════════════ PAGE: LIVE DECISIONS ═══════════════ */
 function renderDecisions() {
-  const rows = (state.decisions || []).map(d => el("tr", {},
+  const rows = (state.decisions || []).map(d => el("tr", { class: "clickable", title: "عرض أثر القرار", onclick: () => { state.traceDecision = d; state.page = "decisionTrace"; renderPage(); } },
     el("td", { style: "font-size:11px;white-space:nowrap" }, dt(d.ts || d.timestamp || d.created_at)),
     el("td", {}, el("code", { style: "font-size:11px" }, (d.tx_id || "").slice(0, 14))),
     el("td", { style: "font-size:12px" }, d.tenant_id || "-"),
@@ -539,6 +540,153 @@ function renderDecisions() {
               el("th", {}, "الوقت"), el("th", {}, "المعرّف"), el("th", {}, "المؤسسة"),
               el("th", {}, "القرار"), el("th", {}, "المخاطر"), el("th", {}, "النمط"), el("th", {}, "التفسير"))),
             el("tbody", {}, ...rows))),
+  );
+}
+
+/* ═══════════════ PAGE: DECISION TRACE ═══════════════
+   Renders the decision AS RECORDED by the backend (GET /decisions/{id}).
+   Nothing here re-computes the decision — JSON columns are parsed and shown
+   verbatim so historical decisions keep their original evidence. */
+function _parseJsonField(v, fallback) {
+  if (v == null) return fallback;
+  if (typeof v === "object") return v;
+  try { return JSON.parse(v); } catch { return fallback; }
+}
+
+function _kv(label, value) {
+  return el("div", { style: "display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--border);font-size:12.5px" },
+    el("span", { style: "color:var(--muted)" }, label),
+    el("span", { style: "font-weight:600;text-align:left;direction:ltr" }, value == null || value === "" ? "-" : String(value)));
+}
+
+function _jsonBlock(title, obj) {
+  const empty = obj == null || (Array.isArray(obj) && obj.length === 0) ||
+    (typeof obj === "object" && !Array.isArray(obj) && Object.keys(obj).length === 0);
+  return el("div", { class: "card" },
+    el("h3", { style: "margin-bottom:10px" }, title),
+    empty
+      ? el("div", { style: "color:var(--muted);font-size:12.5px" }, "لا توجد بيانات مسجلة لهذا المكوّن في هذا القرار.")
+      : el("pre", { class: "code-block", style: "font-size:11px;max-height:280px;overflow:auto;direction:ltr;text-align:left" }, JSON.stringify(obj, null, 2)));
+}
+
+const MATCH_RESULT_AR = { confirmed: "مؤكّدة", potential: "محتملة", no_match: "لا مطابقة" };
+const LIST_TYPE_AR = { sanctions: "عقوبات", pep: "PEP", high_risk_country: "دولة عالية المخاطر", custom: "مخصّصة" };
+
+function _watchlistEvidenceBlock(aml) {
+  const ev = (aml && aml.watchlist_evidence) || [];
+  if (!ev.length) return null;
+  const rows = ev.map(e => {
+    const res = e.match_result || (e.match_type === "exact" || e.match_type === "country_exact" ? "confirmed" : "potential");
+    const resCls = res === "confirmed" ? "block" : "challenge";
+    const sec = e.secondary || {};
+    const secTxt = Object.keys(sec).length
+      ? Object.entries(sec).map(([k, v]) => k + ":" + (Array.isArray(v) ? v.join(",") : v)).join(" · ")
+      : "-";
+    return el("tr", {},
+      el("td", {}, badge(resCls, MATCH_RESULT_AR[res] || res)),
+      el("td", { style: "direction:ltr;text-align:left;font-weight:700" }, e.value || "-"),
+      el("td", {}, LIST_TYPE_AR[e.list_type] || e.list_type || "-"),
+      el("td", {}, e.match_type || "-"),
+      el("td", { style: "direction:ltr;text-align:left" }, e.score != null ? Number(e.score).toFixed(2) : "-"),
+      el("td", { style: "font-size:11px;color:var(--muted);direction:ltr;text-align:left" },
+        (e.source || "manual") + (e.role ? " · " + e.role : "") + (e.entry_id ? " · #" + e.entry_id : "")),
+      el("td", { style: "font-size:11px;color:var(--muted);direction:ltr;text-align:left" }, secTxt),
+      el("td", { style: "font-size:11px;color:var(--muted)" }, e.list_snapshot_at ? dt(e.list_snapshot_at) : "-"));
+  });
+  return el("div", { class: "card", style: "border-color:var(--danger,#ef4444)" },
+    el("h3", { style: "margin-bottom:4px" }, "🚫 دليل قوائم المراقبة (Watchlist evidence)"),
+    el("p", { style: "color:var(--muted);font-size:12px;margin-bottom:10px" },
+      "مطابقات القوائم كما سُجّلت لحظة القرار — مع المصدر ونوع المطابقة وتصنيف النتيجة (مؤكّدة/محتملة) والسمات الثانوية. لا يتغيّر هذا الدليل بتغيّر القوائم لاحقًا."),
+    el("div", { style: "overflow:auto" },
+      el("table", { class: "table" },
+        el("thead", {}, el("tr", {},
+          el("th", {}, "النتيجة"), el("th", {}, "القيمة المُطابَقة"), el("th", {}, "القائمة"),
+          el("th", {}, "نوع المطابقة"), el("th", {}, "الدرجة"), el("th", {}, "المصدر/الدور"),
+          el("th", {}, "سمات ثانوية"), el("th", {}, "لقطة القائمة"))),
+        el("tbody", {}, rows))));
+}
+
+async function renderDecisionTrace() {
+  const stub = state.traceDecision;
+  if (!stub || !stub.decision_id) {
+    return el("div", {},
+      el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:10px" }, "🧾 أثر القرار"),
+      el("div", { class: "card" }, el("div", { style: "color:var(--muted)" }, "لم يُختر قرار. "),
+        el("button", { class: "btn primary", style: "margin-top:10px", onclick: () => { state.page = "decisions"; renderPage(); } }, "→ العودة إلى القرارات")));
+  }
+  let d;
+  try { d = await api("/decisions/" + encodeURIComponent(stub.decision_id)); }
+  catch (e) {
+    return el("div", {},
+      el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:10px" }, "🧾 أثر القرار"),
+      el("div", { class: "card" }, el("div", { style: "color:#FCA5A5" }, "تعذر تحميل القرار: " + e.message),
+        el("button", { class: "btn primary", style: "margin-top:10px", onclick: () => { state.page = "decisions"; renderPage(); } }, "→ العودة")));
+  }
+
+  const rules = _parseJsonField(d.rules_json, []);
+  const ml = _parseJsonField(d.ml_json, []);
+  const graph = _parseJsonField(d.graph_json, {});
+  const aml = _parseJsonField(d.aml_json, {});
+  const reasons = _parseJsonField(d.top_reasons_json, []);
+  const fx = _parseJsonField(d.fx_proof_json, null);
+
+  return el("div", {},
+    el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:16px" },
+      el("div", {},
+        el("h1", { style: "font-size:1.7rem;font-weight:900" }, "🧾 أثر القرار"),
+        el("p", { style: "color:var(--muted);font-size:13px;margin-top:4px" }, "عرض القرار كما سُجّل لحظة صدوره — لا يُعاد حسابه"),
+      ),
+      el("button", { class: "btn", onclick: () => { state.page = "decisions"; renderPage(); } }, "→ عودة للقرارات"),
+    ),
+
+    // 1) Final decision summary
+    el("div", { class: "card", style: "border-color:var(--brand)" },
+      el("div", { style: "display:flex;gap:14px;align-items:center;flex-wrap:wrap" },
+        badge(d.decision, DEC_AR[d.decision] || d.decision),
+        el("span", { style: "font-size:1.3rem;font-weight:800" }, pct(d.risk_score)),
+        el("span", { style: "font-size:12px;color:var(--muted)" }, "نطاق الخطورة: " + (d.risk_band || "-")),
+      ),
+      el("div", { style: "margin-top:8px" },
+        _kv("معرّف القرار", d.decision_id),
+        _kv("معرّف المعاملة", d.tx_id),
+        _kv("المؤسسة", d.tenant_id),
+        _kv("الوقت", dt(d.ts)),
+        _kv("النمط (typology)", d.typology),
+        _kv("زمن المعالجة (ms)", d.latency_ms),
+      )),
+
+    // 2) Top reasons (as recorded)
+    el("div", { class: "card" },
+      el("h3", { style: "margin-bottom:10px" }, "🔝 أهم الأسباب (كما سُجّلت)"),
+      reasons.length === 0
+        ? el("div", { style: "color:var(--muted);font-size:12.5px" }, "لا أسباب مسجلة.")
+        : el("ol", { style: "line-height:2;padding-inline-start:20px;font-size:13px" },
+            reasons.map(r => el("li", {}, r)))),
+
+    // 3) Score breakdown per engine (stored columns)
+    el("div", { class: "card" },
+      el("h3", { style: "margin-bottom:10px" }, "⚖️ تفصيل الدرجات حسب المحرك"),
+      _kv("القواعد (rules)", pct(d.rule_score)),
+      _kv("تعلم الآلة (ML)", pct(d.ml_score)),
+      _kv("الشبكة (graph)", pct(d.graph_score)),
+      _kv("AML", pct(d.aml_score)),
+      _kv("السلوك (behavior)", pct(d.behavior_score))),
+
+    // 4) Evidence blocks (raw recorded JSON, verbatim)
+    _jsonBlock("🕸️ دليل الشبكة (Graph evidence)", graph),
+    _jsonBlock("📏 القواعد المُفعَّلة (Rules evidence)", rules),
+    _jsonBlock("🤖 دليل تعلم الآلة (ML evidence)", ml),
+    _watchlistEvidenceBlock(aml),
+    _jsonBlock("🚫 إشارات AML (خام)", aml),
+    _jsonBlock("💱 إثبات سعر الصرف (FX proof)", fx),
+
+    // 5) Transaction snapshot (separate existing endpoint)
+    d.tx_id
+      ? el("div", { class: "card" },
+          el("h3", { style: "margin-bottom:10px" }, "💳 لقطة المعاملة"),
+          el("button", { class: "btn primary", onclick: () => { state.selectedTx = d.tx_id; state.page = "txDetail"; renderPage(); } },
+            "فتح تفاصيل المعاملة " + String(d.tx_id).slice(0, 18)))
+      : null,
   );
 }
 
@@ -674,6 +822,7 @@ async function renderPage() {
     else if (state.page === "cases") { await loadCases(); c.replaceChildren(renderCases()); }
     else if (state.page === "caseDetail") { c.replaceChildren(renderCaseDetail()); }
     else if (state.page === "decisions") { await loadDecisions(); c.replaceChildren(renderDecisions()); }
+    else if (state.page === "decisionTrace") { c.replaceChildren(await renderDecisionTrace()); }
     else if (state.page === "graph") { await loadInsights(); c.replaceChildren(renderGraph()); }
     else if (state.page === "graphAccount") { c.replaceChildren(renderGraphAccount()); }
     else if (state.page === "txDetail") { c.replaceChildren(await renderTxDetail()); }

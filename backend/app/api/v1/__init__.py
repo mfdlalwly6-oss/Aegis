@@ -12,8 +12,8 @@ from . import (
     rules,
     tenants,
     transactions,
-    webhook,
     watchlist,
+    webhook,
 )
 
 router = APIRouter()

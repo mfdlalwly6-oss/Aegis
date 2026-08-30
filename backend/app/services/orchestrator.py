@@ -60,8 +60,10 @@ class DecisionOrchestrator:
                 "block": settings.DECISION_THRESHOLD_BLOCK,
             },
             "weights": {
-                "rules": settings.WEIGHT_RULES, "ml": settings.WEIGHT_ML,
-                "graph": settings.WEIGHT_GRAPH, "aml": settings.WEIGHT_AML,
+                "rules": settings.WEIGHT_RULES,
+                "ml": settings.WEIGHT_ML,
+                "graph": settings.WEIGHT_GRAPH,
+                "aml": settings.WEIGHT_AML,
                 "behavior": settings.WEIGHT_BEHAVIOR,
             },
             "fx_missing_action": settings.FX_MISSING_DECISION,
@@ -78,10 +80,14 @@ class DecisionOrchestrator:
                 policy["thresholds"] = candidate
         weights = raw.get("weights") if isinstance(raw, dict) else None
         if isinstance(weights, dict):
-            candidate = {k: float(weights[k]) for k in policy["weights"]
-                         if isinstance(weights.get(k), (int, float)) and not isinstance(weights.get(k), bool)
-                         and weights[k] >= 0}
-            if len(candidate) == len(policy["weights"]) and 0 < sum(candidate.values()):
+            candidate = {
+                k: float(weights[k])
+                for k in policy["weights"]
+                if isinstance(weights.get(k), (int, float))
+                and not isinstance(weights.get(k), bool)
+                and weights[k] >= 0
+            }
+            if len(candidate) == len(policy["weights"]) and sum(candidate.values()) > 0:
                 total = sum(candidate.values())
                 policy["weights"] = {k: v / total for k, v in candidate.items()}
         action = raw.get("fx_missing_action") if isinstance(raw, dict) else None
@@ -140,7 +146,7 @@ class DecisionOrchestrator:
                 if cached:
                     return {**cached, "duplicate": True}
 
-        # 2. Feature extraction (real queries against SQLite history)
+        # 2. Feature extraction (real queries against PostgreSQL history)
         features = self.features.extract(tx)
 
         # 3. Rule engine (real rules from DB/YAML)
@@ -167,8 +173,10 @@ class DecisionOrchestrator:
             1.0,
             max(
                 0.0,
-                rule_score * weights["rules"] + ml_prob * weights["ml"]
-                + graph_sig.score * weights["graph"] + aml_sig.score * weights["aml"]
+                rule_score * weights["rules"]
+                + ml_prob * weights["ml"]
+                + graph_sig.score * weights["graph"]
+                + aml_sig.score * weights["aml"]
                 + behavior_score * weights["behavior"],
             ),
         )
@@ -331,9 +339,22 @@ class DecisionOrchestrator:
                 {"tx_id": tx.tx_id, "severity": severity},
             )
 
-        # 17. Notify + publish event
-        if created_alert:
-            await self.notifications.send("alert.created", created_alert)
+        # 17. Notify + publish event (best-effort: notification failure must
+        # never fail or alter an already-persisted financial decision — TASK 12)
+        if created_alert and decision in (Decision.REVIEW, Decision.BLOCK):
+            try:
+                await self.notifications.notify(
+                    "alert.created",
+                    created_alert,
+                    decision=decision.value,
+                    risk_score=final,
+                    risk_band=self._band(final, policy).value,
+                )
+            except Exception as _notify_exc:
+                logger.error(
+                    "notification.dispatch_raised",
+                    error=type(_notify_exc).__name__,
+                )
         await self.events.publish("decision.created", assessment.model_dump(mode="json"))
 
         result = assessment.model_dump(mode="json")

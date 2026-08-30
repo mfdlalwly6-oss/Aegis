@@ -336,7 +336,7 @@ async function renderInvestigatorsM() {
     el("td", {}, el("div", { style: "display:flex;gap:4px;flex-wrap:wrap" },
       v.status === "active" ? el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("إيقاف المحقق؟")) return; try { await api("/investigators/" + v.investigator_id + "/suspend", { method: "POST", body: {} }); toast("أُوقف", "success"); await loadInvs(); renderPage(); } catch (e) { toast(e.message, "error"); } } }, "⏸ إيقاف") : el("button", { class: "btn sm success", onclick: async () => { try { await api("/investigators/" + v.investigator_id + "/activate", { method: "POST", body: {} }); toast("نُشط", "success"); await loadInvs(); renderPage(); } catch (e) { toast(e.message, "error"); } } }, "▶ تنشيط"),
       el("button", { class: "btn sm", onclick: async () => { const np = prompt("كلمة المرور الجديدة (8+ أحرف)"); if (!np || np.length < 8) return; try { await api("/investigators/" + v.investigator_id + "/reset-password", { method: "POST", body: { password: np } }); toast("تم تغيير كلمة المرور", "success"); } catch (e) { toast(e.message, "error"); } } }, "🔑"),
-      el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("حذف المحقق؟")) return; try { await api("/investigators/" + v.investigator_id, { method: "DELETE" }); toast("حُذف", "success"); await loadInvs(); renderPage(); } catch (e) { toast(e.message, "error"); } } }, "🗑"))));
+      el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("حذف المحقق؟")) return; try { await api("/investigators/" + v.investigator_id, { method: "DELETE" }); toast("حُذف", "success"); await loadInvs(); renderPage(); } catch (e) { toast(e.message, "error"); } } }, "🗑")))));
   return el("div", {},
     el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "🛡️ المحققون"),
     el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:14px" }, "محققو مؤسستك — يُنشئهم المالك فقط ويُربطون تلقائيًا بـ tenant_id الخاص بك"),
@@ -366,7 +366,7 @@ function renderManualReviews() {
     el("td", { style: "font-size:12px" }, m.decided_by || "-"),
     el("td", {}, el("span", { class: "badge " + (m.actor_type === "institution_owner" ? "warn" : "info") }, m.actor_type || "-")),
     el("td", { style: "font-size:12px;font-weight:700" }, m.decided_by || "-"),
-    el("td", { style: "font-size:11px;max-width:180px" }, (m.notes || []).map(n => n.text).join(" · ") || "-"))));
+    el("td", { style: "font-size:11px;max-width:180px" }, (m.notes || []).map(n => n.text).join(" · ") || "-")));
   return el("div", {},
     el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "🖐 المراجعات اليدوية"),
     el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:14px" }, "كل عملياتك التي عُولجت يدويًا — المعالِج، نوعه، القرار، الملاحظات"),
