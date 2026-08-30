@@ -65,6 +65,8 @@ const state = {
   graphInsights: null,
   tenantInvs: null,
   tenantInvsFor: null,
+  tenantRules: null,
+  tenantRulesFor: null,
 };
 
 const $ = s => document.querySelector(s);
@@ -191,6 +193,12 @@ async function loadTenantInvestigators(tid) {
   const r = await api("/tenants/" + tid + "/investigators");
   state.tenantInvs = r;
   state.tenantInvsFor = tid;
+}
+
+async function loadTenantRules(tid) {
+  const r = await apiRoot("/rules/overrides/" + encodeURIComponent(tid));
+  state.tenantRules = r;
+  state.tenantRulesFor = tid;
 }
 
 async function loadWatchlists() {
@@ -349,6 +357,9 @@ function renderTenants() {
           el("button", { class: "btn", style: "padding:5px 8px;font-size:11px",
             onclick: async () => { try { await loadTenantInvestigators(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } }
           }, "👥 محققون"),
+          el("button", { class: "btn", style: "padding:5px 8px;font-size:11px",
+            onclick: async () => { try { await loadTenantRules(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } }
+          }, "⚙️ قواعد"),
           el("button", { class: "btn danger", style: "padding:5px 8px;font-size:11px",
             onclick: () => deleteTenant(t.tenant_id)
           }, "🗑️"))),
@@ -366,6 +377,9 @@ function renderTenants() {
           el("tbody", {}, ...rows)
         )
   ));
+
+  // Tenant rule-customization panel
+  if (state.tenantRules && state.tenantRulesFor) box.appendChild(renderTenantRules());
 
   // Selected tenant details
   if (state.selectedTenant) box.appendChild(renderTenantDetail());
@@ -525,6 +539,71 @@ const { decision, risk_score, reasoning_ar } = await r.json();`
       ),
     ),
   );
+}
+
+function renderTenantRules() {
+  const tid = state.tenantRulesFor;
+  const data = state.tenantRules || {};
+  const effective = data.effective || [];
+  const overrides = data.overrides || [];
+  const overriddenIds = new Set(overrides.map(o => o.rule_id));
+
+  const rows = effective.map(r => {
+    const isCustom = overriddenIds.has(r.id);
+    const scoreI = el("input", { class: "form-control", type: "number", step: "0.01", min: "0", max: "1",
+      value: r.score, style: "width:76px;padding:3px 6px;font-size:11px", dir: "ltr" });
+    return el("tr", { style: isCustom ? "background:rgba(59,130,246,.08)" : "" },
+      el("td", {}, el("code", { style: "font-size:10.5px" }, r.id),
+        isCustom ? el("span", { class: "badge review", style: "margin-inline-start:6px;font-size:10px" }, "مخصّصة") : null),
+      el("td", { style: "font-size:12px" }, r.name),
+      el("td", {}, el("span", { class: "badge " + (r.severity === "high" ? "block" : r.severity === "medium" ? "review" : "allow") }, r.severity)),
+      el("td", {}, scoreI),
+      el("td", {}, el("span", { class: "badge " + (r.enabled ? "allow" : "block") }, r.enabled ? "مفعّلة" : "معطّلة")),
+      el("td", {}, el("div", { style: "display:flex;gap:4px;flex-wrap:wrap" },
+        el("button", { class: "btn sm", style: "padding:3px 7px;font-size:10.5px",
+          onclick: async () => {
+            const v = parseFloat(scoreI.value);
+            if (isNaN(v) || v < 0 || v > 1) { toast("الوزن يجب أن يكون بين 0 و 1", "error"); return; }
+            try {
+              await apiRoot("/rules/overrides/" + encodeURIComponent(tid) + "/" + encodeURIComponent(r.id),
+                { method: "PUT", body: { score: v } });
+              toast("✅ حُفظ التخصيص", "success"); await loadTenantRules(tid); render();
+            } catch (e) { toast(e.message, "error"); }
+          } }, "💾 وزن"),
+        el("button", { class: "btn sm " + (r.enabled ? "danger" : "success"), style: "padding:3px 7px;font-size:10.5px",
+          onclick: async () => {
+            try {
+              await apiRoot("/rules/overrides/" + encodeURIComponent(tid) + "/" + encodeURIComponent(r.id),
+                { method: "PUT", body: { enabled: !r.enabled } });
+              toast(r.enabled ? "⏸ عُطّلت لهذا البنك" : "▶ فُعّلت لهذا البنك", "success");
+              await loadTenantRules(tid); render();
+            } catch (e) { toast(e.message, "error"); }
+          } }, r.enabled ? "⏸ تعطيل" : "▶ تفعيل"),
+        isCustom ? el("button", { class: "btn sm", style: "padding:3px 7px;font-size:10.5px",
+          onclick: async () => {
+            if (!confirm("إزالة التخصيص؟ سيعود البنك إلى قاعدة المنصة الأصلية.")) return;
+            try {
+              await apiRoot("/rules/overrides/" + encodeURIComponent(tid) + "/" + encodeURIComponent(r.id),
+                { method: "DELETE" });
+              toast("أُزيل التخصيص — عاد للقاعدة الأصلية", "success"); await loadTenantRules(tid); render();
+            } catch (e) { toast(e.message, "error"); }
+          } }, "↩️ إزالة التخصيص") : null)));
+  });
+
+  return el("div", { class: "card", style: "border-color:var(--accent);border-width:2px;margin-top:14px" },
+    el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:10px" },
+      el("h3", {}, "⚙️ تخصيص قواعد المخاطر — " + (state.tenants.find(t => t.tenant_id === tid) || {}).name || tid),
+      el("button", { class: "btn", onclick: () => { state.tenantRules = null; state.tenantRulesFor = null; render(); } }, "✕")),
+    el("p", { style: "color:var(--muted);font-size:12.5px;margin-bottom:12px" },
+      "تخصيص قاعدة هنا يؤثّر على هذا البنك فقط ولا يغيّر قاعدة المنصة الأصلية ولا بنوكًا أخرى. إزالة التخصيص تعيد القاعدة الأصلية."),
+    rows.length === 0
+      ? el("div", { style: "color:var(--muted);text-align:center;padding:24px" }, "لا قواعد متاحة.")
+      : el("div", { style: "overflow:auto" },
+          el("table", {},
+            el("thead", {}, el("tr", {},
+              el("th", {}, "القاعدة"), el("th", {}, "الاسم"), el("th", {}, "الخطورة"),
+              el("th", {}, "الوزن"), el("th", {}, "الحالة"), el("th", {}, "الإجراءات"))),
+            el("tbody", {}, ...rows))));
 }
 
 function renderTenantInvestigators() {
