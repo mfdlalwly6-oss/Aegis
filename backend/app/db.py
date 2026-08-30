@@ -349,6 +349,15 @@ _MIGRATIONS: list[tuple[str, list[str]]] = [
             );""",
         ],
     ),
+    (
+        # Component health evidence on decisions (mirrors 015_component_health.sql).
+        "015_component_health",
+        [
+            "ALTER TABLE decisions ADD COLUMN component_health_json TEXT NOT NULL DEFAULT '{}'",
+            "ALTER TABLE decisions ADD COLUMN degraded_mode INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE decisions ADD COLUMN degraded_reason TEXT",
+        ],
+    ),
 ]
 
 

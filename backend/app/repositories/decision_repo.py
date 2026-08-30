@@ -25,8 +25,9 @@ class DecisionRepository:
             "rules_json,ml_json,graph_json,aml_json,top_reasons_json,typology,"
             "reasoning_ar,ai_model,idempotency_key,created_at,"
             "fx_proof_json,tx_snapshot_json,features_snapshot_json,"
-            "rule_set_version,model_version,config_version,request_id) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "rule_set_version,model_version,config_version,request_id,"
+            "component_health_json,degraded_mode,degraded_reason) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 did,
                 assessment["tx_id"],
@@ -60,6 +61,9 @@ class DecisionRepository:
                 assessment.get("model_id"),
                 assessment.get("config_version") or "aegis-config@2.2.0",
                 assessment.get("request_id"),
+                json.dumps(assessment.get("component_health", {}), default=str),
+                1 if assessment.get("degraded_mode") else 0,
+                assessment.get("degraded_reason"),
             ),
         )
         return {"decision_id": did, **assessment}

@@ -9,7 +9,7 @@ import time
 import structlog
 
 from app.core.config import settings
-from app.models.schemas import Decision, RiskAssessment, RiskBand, Transaction
+from app.models.schemas import AMLSignal, Decision, GraphSignal, RiskAssessment, RiskBand, Transaction
 
 logger = structlog.get_logger(__name__)
 
@@ -156,39 +156,105 @@ class DecisionOrchestrator:
         # 2. Feature extraction (real queries against PostgreSQL history)
         features = self.features.extract(tx)
 
-        # 3. Rule engine (real rules from DB/YAML)
-        rules_hits = self.rules.evaluate(tx, features)
-        rule_score = min(1.0, sum(h.score_contribution for h in rules_hits))
+        # Component health tracker: every engine reports its state and the
+        # decision records it verbatim. An unavailable component NEVER silently
+        # contributes 0 — its weight is redistributed over the healthy ones and
+        # the decision is marked degraded so it can be rebuilt/audited later.
+        health: dict[str, dict] = {}
 
-        # 4. ML scoring (real model if trained, graceful fallback)
-        vector = self.features.vector(tx, features)
-        ml_prob, ml_reports = self.ml.score(vector)
+        # 3. Rule engine (real rules from DB/YAML)
+        try:
+            rules_hits = self.rules.evaluate(tx, features)
+            rule_score = min(1.0, sum(h.score_contribution for h in rules_hits))
+            health["rules"] = {"status": "healthy", "hits": len(rules_hits)}
+        except Exception as e:
+            logger.error("component.rules_unavailable", error=str(e), tenant_id=tx.tenant_id)
+            rules_hits = []
+            rule_score = 0.0
+            health["rules"] = {"status": "unavailable", "error": type(e).__name__}
+
+        # 4. ML scoring — distinguish trained model from labeled heuristic fallback
+        try:
+            vector = self.features.vector(tx, features)
+            ml_prob, ml_reports = self.ml.score(vector)
+            if getattr(self.ml, "ready", False):
+                health["ml"] = {"status": "healthy", "models": len(ml_reports)}
+            else:
+                health["ml"] = {"status": "unavailable", "detail": "no trained model; heuristic fallback not scored"}
+                ml_prob = None  # heuristic is explainable but NOT evidence — do not score it
+        except Exception as e:
+            logger.error("component.ml_unavailable", error=str(e), tenant_id=tx.tenant_id)
+            ml_prob, ml_reports = None, []
+            health["ml"] = {"status": "unavailable", "error": type(e).__name__}
 
         # 5. Graph analysis (real NetworkX graph fed from DB)
-        graph_sig = self.graph.score(tx)
+        try:
+            graph_sig = self.graph.score(tx)
+            health["graph"] = {"status": "healthy"}
+        except Exception as e:
+            logger.error("component.graph_unavailable", error=str(e), tenant_id=tx.tenant_id)
+            graph_sig = GraphSignal()
+            health["graph"] = {"status": "unavailable", "error": type(e).__name__}
 
-        # 6. AML screening (real DB watchlists)
-        aml_sig = await self.aml_service.screen(tx, features)
+        # 6. AML screening (real DB watchlists) — CRITICAL: unavailable AML must
+        # never fail open (sanctions obligation). Fail-closed handled below.
+        aml_unavailable = False
+        try:
+            aml_sig = await self.aml_service.screen(tx, features)
+            health["aml"] = {"status": "healthy", "evidence": len(aml_sig.watchlist_evidence)}
+        except Exception as e:
+            logger.error("component.aml_unavailable", error=str(e), tenant_id=tx.tenant_id)
+            aml_sig = AMLSignal()
+            aml_unavailable = True
+            health["aml"] = {"status": "unavailable", "error": type(e).__name__}
 
-        # 7. Behavior score
-        behavior_score = self._behavior_score(tx)
+        # 7. Behavior score — absent behavior payload is degraded, not failed
+        try:
+            behavior_score = self._behavior_score(tx)
+            health["behavior"] = {"status": "healthy" if tx.behavior else "degraded"}
+        except Exception as e:
+            logger.error("component.behavior_unavailable", error=str(e), tenant_id=tx.tenant_id)
+            behavior_score = 0.0
+            health["behavior"] = {"status": "unavailable", "error": type(e).__name__}
 
-        # 8. Weighted fusion (tenant policy is resolved once per decision)
+        # 8. Availability-aware weighted fusion: weights renormalize over the
+        # components that actually scored, so a dead engine never drags the
+        # score to 0 or silently inflates the others.
         policy = self._resolve_policy(tx.tenant_id)
         weights = policy["weights"]
-        final = min(
-            1.0,
-            max(
-                0.0,
-                rule_score * weights["rules"]
-                + ml_prob * weights["ml"]
-                + graph_sig.score * weights["graph"]
-                + aml_sig.score * weights["aml"]
-                + behavior_score * weights["behavior"],
-            ),
+        comp_scores: dict[str, float | None] = {
+            "rules": rule_score if health["rules"]["status"] == "healthy" else None,
+            "ml": ml_prob if health["ml"]["status"] == "healthy" else None,
+            "graph": graph_sig.score if health["graph"]["status"] == "healthy" else None,
+            "aml": aml_sig.score if health["aml"]["status"] == "healthy" else None,
+            "behavior": behavior_score if health["behavior"]["status"] == "healthy" else None,
+        }
+        active = {k: v for k, v in comp_scores.items() if v is not None}
+        active_weight = sum(weights[k] for k in active)
+        applied_weights = (
+            {k: weights[k] / active_weight for k in active} if active_weight > 0 else {}
+        )
+        for k in health:
+            health[k]["weight_applied"] = round(applied_weights.get(k, 0.0), 6)
+        final = min(1.0, max(0.0, sum(comp_scores[k] * applied_weights[k] for k in applied_weights)))
+
+        degraded_mode = any(h["status"] != "healthy" for h in health.values())
+        degraded_reason = (
+            "; ".join(f"{k}={h['status']}" for k, h in health.items() if h["status"] != "healthy")
+            if degraded_mode
+            else None
         )
 
-        # 9. Decision — sanctions hit forces BLOCK; FX missing forces review
+        # 9. Decision — sanctions hit forces BLOCK; FX missing forces review;
+        # AML unavailable fails CLOSED (sanctions obligation: never silently
+        # allow when we could not screen); heavy component loss forces REVIEW.
+        if aml_unavailable:
+            decision = Decision.REVIEW
+            final = max(final, policy["thresholds"]["review"])
+            if degraded_reason:
+                degraded_reason = "AML_UNAVAILABLE_FAIL_CLOSED; " + degraded_reason
+            else:
+                degraded_reason = "AML_UNAVAILABLE_FAIL_CLOSED"
         fx_missing = getattr(tx, "fx_status", None) == "missing"
         if fx_missing:
             fx_missing_action = policy["fx_missing_action"]
@@ -252,7 +318,7 @@ class DecisionOrchestrator:
             risk_band=self._band(final, policy),
             latency_ms=round(latency_ms, 2),
             rule_score=round(rule_score, 4),
-            ml_score=round(ml_prob, 4),
+            ml_score=round(ml_prob, 4) if ml_prob is not None else 0.0,
             graph_score=round(graph_sig.score, 4),
             aml_score=round(aml_sig.score, 4),
             behavior_score=round(behavior_score, 4),
@@ -272,6 +338,9 @@ class DecisionOrchestrator:
             tx_snapshot=tx.model_dump(mode="json"),
             features_snapshot=features if isinstance(features, dict) else {},
             request_id=request_id,
+            component_health=health,
+            degraded_mode=degraded_mode,
+            degraded_reason=degraded_reason,
         )
 
         # 13. Persist transaction + decision

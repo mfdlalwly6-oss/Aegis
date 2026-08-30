@@ -290,6 +290,13 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
         "case_id": (result.get("case") or {}).get("case_id"),
         "latency_ms": result["latency_ms"],
         "review_message": review_message,
+        # Degraded-mode transparency: the integrating bank must know when a
+        # decision was produced without one or more risk engines (e.g. ML
+        # unavailable) so it can apply its own caution. This is the bank's own
+        # transaction — no cross-tenant exposure.
+        "component_health": result.get("component_health", {}),
+        "degraded_mode": result.get("degraded_mode", False),
+        "degraded_reason": result.get("degraded_reason"),
     }
 
 

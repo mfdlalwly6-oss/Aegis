@@ -230,3 +230,11 @@ class RiskAssessment(BaseModel):
     fx_proof: dict[str, Any] = {}
     tx_snapshot: dict[str, Any] = {}
     features_snapshot: dict[str, Any] = {}
+
+    # Component health at decision time (populated by orchestrator). For each
+    # risk component: healthy | degraded | unavailable, plus the weight that was
+    # actually applied (after availability-aware renormalization). Lets a later
+    # reviewer rebuild exactly which engines contributed and under what state.
+    component_health: dict[str, Any] = {}
+    degraded_mode: bool = False
+    degraded_reason: str | None = None
