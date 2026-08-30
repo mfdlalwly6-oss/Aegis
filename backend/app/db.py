@@ -350,6 +350,28 @@ _MIGRATIONS: list[tuple[str, list[str]]] = [
         ],
     ),
     (
+        # Per-tenant rule overrides (mirrors 016_rule_overrides.sql).
+        "016_rule_overrides",
+        [
+            """CREATE TABLE IF NOT EXISTS rule_overrides (
+                tenant_id   TEXT NOT NULL,
+                rule_id     TEXT NOT NULL,
+                enabled     INTEGER,
+                score       REAL,
+                severity    TEXT,
+                name        TEXT,
+                description TEXT,
+                when_json   TEXT,
+                tags_json   TEXT,
+                created_by  TEXT NOT NULL DEFAULT 'owner',
+                created_at  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL,
+                PRIMARY KEY (tenant_id, rule_id)
+            );""",
+            "CREATE INDEX IF NOT EXISTS idx_rule_overrides_tenant ON rule_overrides(tenant_id)",
+        ],
+    ),
+    (
         # Component health evidence on decisions (mirrors 015_component_health.sql).
         "015_component_health",
         [

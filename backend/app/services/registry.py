@@ -177,8 +177,9 @@ class ServiceRegistry:
         # 4. Seed default watchlists
         self.watchlist_repo.seed_defaults()
 
-        # 5. Rule engine (loads from DB — platform + tenant rules)
-        all_rules = self.rule_repo.list_all()
+        # 5. Rule engine (loads platform rules + ALL tenant overrides;
+        #    tenant scoping is applied per-transaction at evaluation time)
+        all_rules = self.rule_repo.list_for_engine()
         self.rule_engine = RuleEngine(rules=all_rules)
         logger.info("rule_engine.loaded", count=len(all_rules))
 

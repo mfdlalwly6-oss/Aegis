@@ -164,7 +164,7 @@ class DecisionOrchestrator:
 
         # 3. Rule engine (real rules from DB/YAML)
         try:
-            rules_hits = self.rules.evaluate(tx, features)
+            rules_hits = self.rules.evaluate(tx, features, tenant_id=tx.tenant_id)
             rule_score = min(1.0, sum(h.score_contribution for h in rules_hits))
             health["rules"] = {"status": "healthy", "hits": len(rules_hits)}
         except Exception as e:

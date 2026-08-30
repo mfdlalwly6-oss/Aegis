@@ -122,6 +122,9 @@ class Rule:
         self.description: str = spec.get("description", "")
         self.when: dict[str, Any] = spec["when"]
         self.tags: list[str] = spec.get("tags", [])
+        # None => platform rule (applies to every tenant). Otherwise this rule
+        # is a tenant-specific override that only fires for that tenant.
+        self.tenant_id: str | None = spec.get("tenant_id")
 
     def evaluate(self, ctx: dict[str, Any]) -> RuleHit | None:
         try:
@@ -151,10 +154,31 @@ class RuleEngine:
         self.rules = [Rule(r) for r in rules]
         logger.info("rule_engine.reload", count=len(self.rules))
 
-    def evaluate(self, tx: Transaction, features: dict[str, Any] | None = None) -> list[RuleHit]:
+    def evaluate(
+        self,
+        tx: Transaction,
+        features: dict[str, Any] | None = None,
+        tenant_id: str | None = None,
+    ) -> list[RuleHit]:
+        """Evaluate platform rules + this tenant's overrides.
+
+        A platform rule (tenant_id=None) applies to every tenant. A tenant rule
+        only fires for its own tenant. Scoping is enforced here so a rule
+        customized for Bank A can NEVER fire on Bank B's transaction.
+        """
+        tid = tenant_id or getattr(tx, "tenant_id", None)
         ctx = {"tx": tx.model_dump(mode="json"), "features": features or {}}
-        hits: list[RuleHit] = []
+        # Effective set: a tenant's override REPLACES the platform rule with the
+        # same id (no double evaluation); tenant-only rules apply only to their
+        # tenant; rules belonging to other tenants never fire here.
+        by_id: dict[str, Rule] = {}
         for r in self.rules:
+            if r.tenant_id is None:
+                by_id.setdefault(r.id, r)  # platform default — may be replaced below
+            elif r.tenant_id == tid:
+                by_id[r.id] = r  # tenant override wins
+        hits: list[RuleHit] = []
+        for r in by_id.values():
             if not r.enabled:
                 continue
             hit = r.evaluate(ctx)
