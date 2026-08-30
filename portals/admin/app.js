@@ -49,6 +49,7 @@ const state = {
   auditVerifyResult: null,
   policyTenants: [],
   policySelected: null,
+  policyVersions: [],
   overview: null,
   tenants: [],
   decisions: [],
@@ -1255,15 +1256,20 @@ function renderPolicyStudio() {
   picker.value = sel ? sel.tenant_id : "";
   picker.addEventListener("change", async () => {
     const tid = picker.value;
-    if (!tid) { state.policySelected = null; render(); return; }
-    try { state.policySelected = await api("/tenants/" + tid); } catch (e) { state.policySelected = null; toast(e.message, "error"); }
+    if (!tid) { state.policySelected = null; state.policyVersions = []; render(); return; }
+    try {
+      state.policySelected = await api("/tenants/" + tid);
+      state.policyVersions = await api("/tenants/" + tid + "/policy/versions");
+    } catch (e) { state.policySelected = null; state.policyVersions = []; toast(e.message, "error"); }
     render();
   });
 
   let editor = el("div", { style: "color:var(--muted);padding:20px;text-align:center" }, "اختر مؤسسة لعرض سياستها وتحريرها.");
   if (sel) {
     let pol = {};
-    try { pol = sel.policy_json ? (typeof sel.policy_json === "string" ? JSON.parse(sel.policy_json) : sel.policy_json) : {}; } catch { pol = {}; }
+    // Backend _sanitize returns the policy under "policy" (policy_json is popped);
+    // accept both shapes so the editor never renders an empty policy by mistake.
+    try { const raw = sel.policy !== undefined ? sel.policy : sel.policy_json; pol = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : {}; } catch { pol = {}; }
     const th = pol.thresholds || {};
     const tc = el("input", { class: "form-control", type: "number", step: "any", value: th.challenge != null ? th.challenge : "", style: "width:110px" });
     const tr = el("input", { class: "form-control", type: "number", step: "any", value: th.review != null ? th.review : "", style: "width:110px" });
@@ -1271,6 +1277,7 @@ function renderPolicyStudio() {
     const fx = el("select", { class: "form-control", style: "width:160px" },
       ...["", "review", "block", "allow"].map(o => el("option", { value: o }, o === "" ? "افتراضي" : o)));
     fx.value = pol.fx_missing_action || "";
+    const note = el("input", { class: "form-control", placeholder: "سبب التغيير (يُحفظ مع الإصدار)", style: "width:220px" });
     editor = el("div", {},
       el("div", { class: "card" },
         el("h3", { style: "margin-bottom:10px" }, "🎛️ سياسة: " + (sel.name || sel.tenant_id)),
@@ -1280,6 +1287,7 @@ function renderPolicyStudio() {
           el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "عتبة Review"), tr),
           el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "عتبة Block"), tb),
           el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "عند غياب FX"), fx),
+          el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "ملاحظة الإصدار"), note),
           el("button", { class: "btn success", onclick: async () => {
             pmsg.textContent = ""; pmsg.style.color = "var(--muted)";
             const body = {};
@@ -1289,10 +1297,12 @@ function renderPolicyStudio() {
             if (tb.value !== "") ths.block = Number(tb.value);
             if (Object.keys(ths).length) body.thresholds = ths;
             if (fx.value) body.fx_missing_action = fx.value;
+            if (note.value.trim()) body.note = note.value.trim();
             try {
-              await api("/tenants/" + sel.tenant_id + "/policy", { method: "PUT", body });
-              toast("حُفظت السياسة", "success");
+              const saved = await api("/tenants/" + sel.tenant_id + "/policy", { method: "PUT", body });
+              toast("حُفظت السياسة — إصدار v" + (saved.policy_version || "?"), "success");
               state.policySelected = await api("/tenants/" + sel.tenant_id);
+              state.policyVersions = await api("/tenants/" + sel.tenant_id + "/policy/versions");
               render();
             } catch (e) { pmsg.textContent = e.message; pmsg.style.color = "#FCA5A5"; }
           } }, "💾 حفظ السياسة")),
@@ -1300,6 +1310,7 @@ function renderPolicyStudio() {
       el("div", { class: "card" },
         el("h3", { style: "margin-bottom:10px" }, "🔍 السياسة الحالية (JSON)"),
         el("pre", { class: "code-block" }, JSON.stringify(pol, null, 2))),
+      renderPolicyVersionsCard(sel),
     );
   }
   return el("div", {},
@@ -1308,6 +1319,36 @@ function renderPolicyStudio() {
     el("div", { class: "card" }, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:6px" }, "المؤسسة"), picker),
     editor,
   );
+}
+
+function renderPolicyVersionsCard(sel) {
+  const versions = state.policyVersions || [];
+  const reload = async () => {
+    state.policySelected = await api("/tenants/" + sel.tenant_id);
+    state.policyVersions = await api("/tenants/" + sel.tenant_id + "/policy/versions");
+    render();
+  };
+  return el("div", { class: "card" },
+    el("h3", { style: "margin-bottom:10px" }, "🕘 إصدارات السياسة (" + versions.length + ")"),
+    el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:12px" }, "كل حفظ يُنشئ إصدارًا غير قابل للتعديل — القرارات السابقة تبقى مربوطة بالإصدار الذي حكمها، والتفعيل يعيد إصدارًا قديمًا إلى المسار الفعلي"),
+    versions.length === 0 ? el("div", { style: "color:var(--muted)" }, "لا إصدارات بعد — أول حفظ للسياسة يُنشئ الإصدار v1.") :
+    el("table", {},
+      el("thead", {}, el("tr", {}, el("th", {}, "الإصدار"), el("th", {}, "الحالة"), el("th", {}, "البصمة"), el("th", {}, "المُنشئ"), el("th", {}, "الوقت"), el("th", {}, "ملاحظة"), el("th", {}, "إجراءات"))),
+      el("tbody", {}, ...versions.map(v => el("tr", {},
+        el("td", { style: "font-weight:700" }, "v" + v.version),
+        el("td", {}, el("span", { class: "badge " + (v.status === "active" ? "allow" : "block") }, v.status === "active" ? "نشط" : "معطّل")),
+        el("td", {}, el("code", { style: "font-size:11px" }, String(v.policy_hash || ""))),
+        el("td", { style: "font-size:11px" }, v.created_by || ""),
+        el("td", { style: "font-size:11px" }, fmtTs(v.created_at)),
+        el("td", { style: "font-size:11px" }, v.note || "-"),
+        el("td", { style: "display:flex;gap:6px" },
+          el("button", { class: "btn success", onclick: async () => {
+            try { await api("/tenants/" + sel.tenant_id + "/policy/versions/" + v.version + "/activate", { method: "POST" }); toast("فُعّل الإصدار v" + v.version, "success"); await reload(); } catch (e) { toast(e.message, "error"); }
+          } }, "▶ تفعيل"),
+          el("button", { class: "btn", onclick: async () => {
+            try { await api("/tenants/" + sel.tenant_id + "/policy/versions/" + v.version + "/disable", { method: "POST" }); toast("عُطّل الإصدار v" + v.version, "success"); await reload(); } catch (e) { toast(e.message, "error"); }
+          } }, "⏸ تعطيل")),
+      )))));
 }
 
 function renderAudit() {
