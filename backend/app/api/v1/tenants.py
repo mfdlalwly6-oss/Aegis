@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_registry, require_merchant, require_owner
 from app.core.config import settings
 from app.security import issue_jwt
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
@@ -47,6 +50,7 @@ class UpdatePolicy(BaseModel):
     enabled_rules: list[str] | None = None
     disabled_rules: list[str] | None = None
     fx_missing_action: str | None = None
+    note: str | None = None  # free-text rationale, stored on the policy version
 
 
 class MerchantLogin(BaseModel):
@@ -262,9 +266,20 @@ def update_policy(
     owner=Depends(require_owner),
     registry=Depends(get_registry),
 ):
-    tenant = registry.tenants.update_policy(tenant_id, body.model_dump(exclude_none=True))
+    patch = body.model_dump(exclude_none=True)
+    note = patch.pop("note", None)  # note is version metadata, not policy content
+    tenant = registry.tenants.update_policy(tenant_id, patch)
     if not tenant:
         raise HTTPException(404, "tenant_not_found")
+    # Record the resulting policy as an immutable, numbered version so any past
+    # decision can be traced to the exact policy row that governed it.
+    version_row = None
+    try:
+        version_row = registry.policy_versions.add(
+            tenant_id, tenant.get("policy") or {}, actor="owner", note=note, status="active"
+        )
+    except Exception as e:  # noqa: BLE001 — versioning failure must never break a policy update
+        logger.warning("policy.version_record_failed", tenant=tenant_id, error=str(e))
     registry.audit.log(
         tenant_id,
         "owner",
@@ -274,7 +289,79 @@ def update_policy(
         getattr(request.state, "request_id", None),
         body.model_dump(exclude_none=True),
     )
+    if version_row:
+        tenant = {**tenant, "policy_version": version_row["version"], "policy_hash": version_row["policy_hash"]}
     return tenant
+
+
+@router.get("/admin/tenants/{tenant_id}/policy/versions")
+def list_policy_versions(
+    tenant_id: str, owner=Depends(require_owner), registry=Depends(get_registry)
+):
+    if not registry.tenants.get(tenant_id):
+        raise HTTPException(404, "tenant_not_found")
+    return registry.policy_versions.list_for(tenant_id)
+
+
+@router.get("/admin/tenants/{tenant_id}/policy/versions/{version}")
+def get_policy_version(
+    tenant_id: str, version: int, owner=Depends(require_owner), registry=Depends(get_registry)
+):
+    row = registry.policy_versions.get(tenant_id, version)
+    if not row:
+        raise HTTPException(404, "policy_version_not_found")
+    return row
+
+
+@router.post("/admin/tenants/{tenant_id}/policy/versions/{version}/activate")
+def activate_policy_version(
+    tenant_id: str,
+    version: int,
+    request: Request,
+    owner=Depends(require_owner),
+    registry=Depends(get_registry),
+):
+    """Materialize a stored immutable version back into tenants.policy_json —
+    the decision hot path is unchanged, only the governing policy content
+    (and its version stamp on future decisions) changes."""
+    row = registry.policy_versions.get(tenant_id, version)
+    if not row:
+        raise HTTPException(404, "policy_version_not_found")
+    registry.tenants.update_policy(tenant_id, dict(row["policy"]))
+    registry.policy_versions.set_status(tenant_id, version, "active")
+    registry.audit.log(
+        tenant_id,
+        "owner",
+        "tenant.policy_version_activated",
+        "tenant",
+        tenant_id,
+        getattr(request.state, "request_id", None),
+        {"version": version, "policy_hash": row["policy_hash"]},
+    )
+    return {"ok": True, "tenant_id": tenant_id, "active_version": version}
+
+
+@router.post("/admin/tenants/{tenant_id}/policy/versions/{version}/disable")
+def disable_policy_version(
+    tenant_id: str,
+    version: int,
+    request: Request,
+    owner=Depends(require_owner),
+    registry=Depends(get_registry),
+):
+    row = registry.policy_versions.set_status(tenant_id, version, "disabled")
+    if not row:
+        raise HTTPException(404, "policy_version_not_found")
+    registry.audit.log(
+        tenant_id,
+        "owner",
+        "tenant.policy_version_disabled",
+        "tenant",
+        tenant_id,
+        getattr(request.state, "request_id", None),
+        {"version": version},
+    )
+    return {"ok": True, "tenant_id": tenant_id, "version": version, "status": "disabled"}
 
 
 @router.delete("/admin/tenants/{tenant_id}")

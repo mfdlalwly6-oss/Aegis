@@ -21,6 +21,10 @@ class TestDecideThresholds:
 
         o = object.__new__(DecisionOrchestrator)
         o.tenants = None  # required: _resolve_policy reads self.tenants (default None)
+        o.policy_repo = None  # no versioning store in these bare unit tests
+        from app.services.policy_engine import PolicyEngine
+
+        o.policy_engine = PolicyEngine()  # _resolve_policy delegates here now
         return o
 
     def test_band_boundaries(self):

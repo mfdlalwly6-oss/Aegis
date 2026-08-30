@@ -10,6 +10,7 @@ import structlog
 
 from app.core.config import settings
 from app.models.schemas import AMLSignal, Decision, GraphSignal, RiskAssessment, RiskBand, Transaction
+from app.services.policy_engine import PolicyEngine
 
 logger = structlog.get_logger(__name__)
 
@@ -31,6 +32,7 @@ class DecisionOrchestrator:
         events,
         notifications,
         tenants=None,
+        policy_repo=None,
     ):
         self.rules = rules
         self.ml = ml
@@ -45,59 +47,45 @@ class DecisionOrchestrator:
         self.events = events
         self.notifications = notifications
         self.tenants = tenants
-        self.policy_version = "policy@2.0.0"
+        self.policy_repo = policy_repo
+        # Single source of truth for policy resolution (bounds, profiles,
+        # protected rules). The old inline _resolve_policy duplicate is gone.
+        self.policy_engine = PolicyEngine()
 
     def _resolve_policy(self, tenant_id: str) -> dict:
-        """Deterministically merge defaults with one tenant's validated policy.
+        """Resolve the effective policy via PolicyEngine (the single resolver).
 
-        Safety precedence is fixed: sanctions always block, and tenant thresholds
-        must remain ordered and within [0, 1].  Invalid fields are ignored.
+        Pulls the full tenant row (type + policy) when the repository supports
+        it, falling back to policy-only for lightweight/test doubles. All safety
+        guarantees (clamped thresholds, bounded weights, protected rules,
+        FX-never-silent-allow) are enforced inside PolicyEngine.resolve.
         """
-        policy = {
-            "thresholds": {
-                "challenge": settings.DECISION_THRESHOLD_CHALLENGE,
-                "review": settings.DECISION_THRESHOLD_REVIEW,
-                "block": settings.DECISION_THRESHOLD_BLOCK,
-            },
-            "weights": {
-                "rules": settings.WEIGHT_RULES,
-                "ml": settings.WEIGHT_ML,
-                "graph": settings.WEIGHT_GRAPH,
-                "aml": settings.WEIGHT_AML,
-                "behavior": settings.WEIGHT_BEHAVIOR,
-            },
-            "fx_missing_action": settings.FX_MISSING_DECISION,
-        }
-        raw = self.tenants.get_policy(tenant_id) if self.tenants else {}
-        thresholds = raw.get("thresholds") if isinstance(raw, dict) else None
-        if isinstance(thresholds, dict):
-            candidate = dict(policy["thresholds"])
-            for key in candidate:
-                value = thresholds.get(key)
-                if (
-                    isinstance(value, (int, float))
-                    and not isinstance(value, bool)
-                    and 0 <= value <= 1
-                ):
-                    candidate[key] = float(value)
-            if candidate["challenge"] <= candidate["review"] <= candidate["block"]:
-                policy["thresholds"] = candidate
-        weights = raw.get("weights") if isinstance(raw, dict) else None
-        if isinstance(weights, dict):
-            candidate = {
-                k: float(weights[k])
-                for k in policy["weights"]
-                if isinstance(weights.get(k), (int, float))
-                and not isinstance(weights.get(k), bool)
-                and weights[k] >= 0
-            }
-            if len(candidate) == len(policy["weights"]) and sum(candidate.values()) > 0:
-                total = sum(candidate.values())
-                policy["weights"] = {k: v / total for k, v in candidate.items()}
-        action = raw.get("fx_missing_action") if isinstance(raw, dict) else None
-        if action in {"review", "block"}:
-            policy["fx_missing_action"] = action
-        return policy
+        tenant: dict | None = None
+        if self.tenants is not None:
+            getter = getattr(self.tenants, "get", None)
+            if callable(getter):
+                try:
+                    tenant = getter(tenant_id)
+                except Exception:  # noqa: BLE001 — never let policy lookup kill a decision
+                    tenant = None
+            if tenant is None and hasattr(self.tenants, "get_policy"):
+                tenant = {"policy": self.tenants.get_policy(tenant_id)}
+        return self.policy_engine.resolve(tenant)
+
+    def _policy_version(self, tenant_id: str) -> str:
+        """Version stamp stored on every decision: schema version plus the
+        tenant's active immutable policy version + content hash, so any past
+        decision traces to the exact policy row that governed it."""
+        base = self.policy_engine.version()
+        if not self.policy_repo or not tenant_id:
+            return base
+        try:
+            active = self.policy_repo.active(tenant_id)
+            if active:
+                return f"{base}#v{active['version']}:{active['policy_hash']}"
+        except Exception:  # noqa: BLE001 — versioning must never block a decision
+            pass
+        return base
 
     def _behavior_score(self, tx: Transaction) -> float:
         if not tx.behavior:
@@ -333,7 +321,7 @@ class DecisionOrchestrator:
             if aml_sig.typology_matches
             else ("high_risk" if final >= settings.DECISION_THRESHOLD_REVIEW else "normal"),
             model_id="aegis-ensemble@2.0.0",
-            policy_version=self.policy_version,
+            policy_version=self._policy_version(tx.tenant_id),
             fx_proof=fx_proof,
             tx_snapshot=tx.model_dump(mode="json"),
             features_snapshot=features if isinstance(features, dict) else {},

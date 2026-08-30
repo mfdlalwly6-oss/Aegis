@@ -22,6 +22,7 @@ from app.repositories import (
     CaseRepository,
     DecisionRepository,
     InvestigatorRepository,
+    PolicyVersionRepository,
     RuleRepository,
     TenantRepository,
     TransactionRepository,
@@ -76,6 +77,7 @@ class ServiceRegistry:
         self.cases = CaseRepository(self.db)
         self.audit_repo = AuditRepository(self.db)
         self.rule_repo = RuleRepository(self.db)
+        self.policy_versions = PolicyVersionRepository(self.db)
         self.watchlist_repo = WatchlistRepository(self.db)
         self.user_repo = UserRepository(self.db)
 
@@ -238,6 +240,7 @@ class ServiceRegistry:
             events=self.events,
             notifications=self.notifications,
             tenants=self.tenants,
+            policy_repo=self.policy_versions,
         )
         logger.info("aegis.initialized", version=settings.VERSION)
 

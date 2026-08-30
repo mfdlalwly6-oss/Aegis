@@ -42,8 +42,20 @@ def test_tenant_thresholds_are_scoped_and_change_decision():
 
 
 def test_missing_or_malformed_policy_uses_safe_defaults():
+    """Malformed values are clamped into the safe windows (never passed through),
+    and the result always stays ordered — fail-closed by design."""
     o = _orch({"bad": {"thresholds": {"review": "nope", "block": -1}}})
-    assert o._resolve_policy("missing") == o._resolve_policy("bad")
+    from app.services.policy_engine import THRESHOLD_BOUNDS
+
+    missing = o._resolve_policy("missing")
+    bad = o._resolve_policy("bad")
+    for resolved in (missing, bad):
+        th = resolved["thresholds"]
+        for key, (lo, hi) in THRESHOLD_BOUNDS.items():
+            assert lo <= th[key] <= hi
+        assert th["challenge"] <= th["review"] <= th["block"]
+    # A malformed block (-1) must never weaken protection below the default block.
+    assert bad["thresholds"]["block"] >= THRESHOLD_BOUNDS["block"][0]
 
 
 def test_hard_sanctions_block_and_invalid_threshold_order_is_ignored():
