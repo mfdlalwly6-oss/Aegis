@@ -21,21 +21,10 @@ from app.repositories.audit_repo import AuditRepository, _entry_hash, utcnow
 
 
 def _mk_db(tmp_path, monkeypatch):
-    """Isolated in-test SQLite Database (mirrors conftest hermetic approach)."""
-    db_file = tmp_path / "audit-test.db"
-    monkeypatch.setenv("AEGIS_DB_DRIVER", "sqlite")
-    monkeypatch.setenv("AEGIS_DB_PATH", str(db_file))
-    monkeypatch.setenv("AEGIS_DATA_DIR", str(tmp_path))
-    # fresh settings + module state per test
-    for name in [k for k in sys.modules if k.startswith("app.") or k == "app"]:
-        if name != "app.repositories.audit_repo":
-            del sys.modules[name]
-    import importlib
+    """Isolated PostgreSQL test Database (PostgreSQL-only — AEGIS decision)."""
+    from tests.conftest import make_test_db
 
-    import app.db as dbmod
-
-    importlib.reload(dbmod)
-    db = dbmod.Database(str(db_file))
+    db = make_test_db(monkeypatch)
     db.migrate()  # constructor does NOT auto-run migrations — audit_log must exist
     return db
 

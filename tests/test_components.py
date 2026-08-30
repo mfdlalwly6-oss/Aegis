@@ -122,15 +122,10 @@ def test_behavior_score_in_orchestrator():
 def test_audit_hash_chain_and_tamper_detection(tmp_path, monkeypatch):
     """Audit log must chain entries; tampering with a row must break verification."""
     monkeypatch.setenv("AEGIS_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("AEGIS_DB_PATH", str(tmp_path / "a.db"))
-    monkeypatch.setenv("AEGIS_DB_DRIVER", "sqlite")
-    from app.core.config import clear_settings_cache
-
-    clear_settings_cache()
-    from app.db import Database
     from app.repositories.audit_repo import AuditRepository
+    from tests.conftest import make_test_db
 
-    db = Database()
+    db = make_test_db(monkeypatch)
     db.migrate()
     repo = AuditRepository(db)
     repo.log("t1", "owner", "test.event", "tx", "tx1", "req1", {"k": "v"})

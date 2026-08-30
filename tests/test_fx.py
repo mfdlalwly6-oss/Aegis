@@ -11,18 +11,16 @@ from app.services.fx_service import FxService
 
 @pytest.fixture()
 def fx_db(tmp_path, monkeypatch):
-    """Fresh SQLite DB per test (same pattern as conftest)."""
-    monkeypatch.setenv("AEGIS_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("AEGIS_DB_PATH", str(tmp_path / "aegis-test.db"))
+    """Fresh isolated PostgreSQL test DB per test (PostgreSQL-only — AEGIS decision).
+    Uses the shared conftest helper which hard-fails unless the URL targets the
+    isolated `aegis_test` database, so live data can never be touched."""
     monkeypatch.setenv("AEGIS_ENV", "development")
-    monkeypatch.setenv("AEGIS_DB_DRIVER", "sqlite")  # isolate: never touch live PG
     from app.core.config import clear_settings_cache
 
+    from tests.conftest import make_test_db
+
     clear_settings_cache()
-    # Explicit path: module-level `settings` in app.db binds at import time, so
-    # clear_settings_cache() alone does NOT rebind it — without this the fixture
-    # can fall back to the shared default DB (/tmp/aegis-data/aegis.db).
-    db = Database(str(tmp_path / "aegis-test.db"))
+    db = make_test_db(monkeypatch)
     db.migrate()
     yield db
     db.close()

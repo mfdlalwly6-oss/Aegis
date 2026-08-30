@@ -418,8 +418,12 @@ def _apply_statements(conn: sqlite3.Connection, statements: list[str]) -> None:
             raise
 
 
-class Database:
-    """Minimal SQLite wrapper with forward-only migration runner."""
+class _SqliteDatabase:
+    """Deprecated SQLite wrapper (legacy dev only).
+
+    AEGIS is PostgreSQL-only (production AND tests). This class is retained
+    solely so that importing this module does not break any external legacy
+    script; it is NEVER aliased to `Database` anymore. Do not use it."""
 
     def __init__(self, path: str | None = None):
         self.path = path or settings.db_path
@@ -526,17 +530,11 @@ except ImportError:  # psycopg not installed — SQLite mode only
 # which set AEGIS_DB_DRIVER=sqlite explicitly (tests/conftest.py). Running the
 # app in production without a valid PostgreSQL now fails fast with a clear
 # error instead of silently falling back to a file-backed SQLite database.
-_db_driver = getattr(settings, "DB_DRIVER", None) or getattr(settings, "db_driver", "postgres")
-if _db_driver == "postgres":
-    if PGDatabase is None:
-        raise RuntimeError(
-            "AEGIS_DB_DRIVER=postgres but psycopg is not installed. "
-            "PostgreSQL is the production database; install psycopg or set "
-            "AEGIS_DB_DRIVER=sqlite explicitly for isolated tests only."
-        )
-    if not getattr(settings, "DATABASE_URL", ""):
-        raise RuntimeError(
-            "AEGIS_DB_DRIVER=postgres but DATABASE_URL is empty. PostgreSQL is "
-            "the production database; set DATABASE_URL (postgresql://...) to run."
-        )
-    Database = PGDatabase  # noqa: F811
+# AEGIS is PostgreSQL-only (production AND tests). `Database` is ALWAYS the
+# PostgreSQL backend; there is no SQLite fallback path anymore.
+if PGDatabase is None:
+    raise RuntimeError(
+        "psycopg is not installed. AEGIS requires PostgreSQL (psycopg). "
+        "Install psycopg to run the platform or its tests."
+    )
+Database = PGDatabase  # noqa: F811

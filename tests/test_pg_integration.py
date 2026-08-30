@@ -18,17 +18,26 @@ import threading
 
 import pytest
 from app.core.config import settings
-from app.db import Database
 
-pytestmark = pytest.mark.skipif(
-    settings.DB_DRIVER != "postgres",
-    reason="requires AEGIS_DB_DRIVER=postgres",
-)
+import os
+
+# Structural tests run on the isolated aegis_test DB (fresh per module) — never live.
+
+# All structural tests here run against the ISOLATED aegis_test database created
+# fresh by the fixture — never the live database. The two live-data smoke tests
+# below stay opt-in via AEGIS_PG_LIVE_TESTS=1.
 
 
 @pytest.fixture(scope="module")
 def db():
-    d = Database()
+    import os as _os
+
+    _os.environ.setdefault("AEGIS_OWNER_TOKEN", "test-owner-token-2026")
+    _os.environ.setdefault("AEGIS_SECRET_KEY", "test-secret-key-that-is-long-enough-for-hs256")
+    from tests.conftest import make_test_db
+
+    d = make_test_db()
+    d.migrate()
     yield d
     d.close()
 
@@ -65,6 +74,7 @@ def test_connection_and_migrations_applied(db):
     print("MIGRATIONS", names)
 
 
+@pytest.mark.skipif(os.environ.get("AEGIS_PG_LIVE_TESTS") != "1", reason="live-DB smoke test — opt-in only")
 def test_legacy_data_preserved(db):
     rows = db.query(
         "SELECT 'tenants' t, COUNT(*) c FROM tenants "
@@ -168,9 +178,11 @@ def test_concurrent_writes(db):
     n_threads, per_thread = 8, 25
     errors = []
 
+    from tests.conftest import make_test_db
+
     def worker(seed):
         try:
-            local = Database()
+            local = make_test_db(fresh=False)  # same isolated test DB, per-thread conn
             for i in range(per_thread):
                 local.execute("INSERT INTO pg_conc_test (payload) VALUES (%s)", (f"{seed}-{i}",))
             local.close()
@@ -189,12 +201,20 @@ def test_concurrent_writes(db):
 
 
 def test_restart_persistence(db):
-    fresh = Database()  # brand-new connection object
+    # Isolated DB semantics: rows committed by this test session persist across
+    # a brand-new connection to the same test database.
+    from tests.conftest import make_test_db
+
+    _insert_tenant(db, "pg-restart", "api_pg_restart_unique")
+    fresh = make_test_db(fresh=False)  # brand-new connection object, same isolated DB
     try:
-        n = fresh.query_one("SELECT COUNT(*) c FROM decisions")["c"]
-        assert n >= 130
+        n = fresh.query_one(
+            "SELECT COUNT(*) c FROM tenants WHERE tenant_id='pg-restart'"
+        )["c"]
+        assert n == 1, "committed rows must survive a fresh connection"
     finally:
         fresh.close()
+    db.execute("DELETE FROM tenants WHERE tenant_id='pg-restart'")
 
 
 def test_unique_constraint_enforced(db):

@@ -14,12 +14,10 @@ import pytest
 
 def test_update_policy_rejects_inverted_thresholds():
     """update_policy must raise ValueError on challenge > review > block inversion."""
-    import tempfile
-
-    from app.db import Database
     from app.repositories.tenant_repo import TenantRepository
+    from tests.conftest import make_test_db
 
-    db = Database(str(tempfile.mkdtemp() + "/t.db"))
+    db = make_test_db()
     db.migrate()
     repo = TenantRepository(db)
     tenant = repo.create({"name": "Policy Guard Test", "type": "wallet", "country": "YE"})
@@ -39,12 +37,10 @@ def test_update_policy_rejects_inverted_thresholds():
 
 def test_update_policy_allows_partial_and_non_numeric():
     """Partial policies (only some thresholds) and missing keys must not be rejected."""
-    import tempfile
-
-    from app.db import Database
     from app.repositories.tenant_repo import TenantRepository
+    from tests.conftest import make_test_db
 
-    db = Database(str(tempfile.mkdtemp() + "/t.db"))
+    db = make_test_db()
     db.migrate()
     repo = TenantRepository(db)
     tenant = repo.create({"name": "Partial Policy", "type": "bank", "country": "YE"})
