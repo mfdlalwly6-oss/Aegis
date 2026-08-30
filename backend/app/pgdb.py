@@ -124,6 +124,13 @@ class PGDatabase:
             raise
 
     # -- versioned migrations -------------------------------------------
+    # Files matching *_owner_alters.sql carry statements (e.g. ALTER TABLE on
+    # tables owned by the bootstrap superuser) that the app role (aegis_app)
+    # must NOT run. They apply only when the connected role can own objects
+    # (superuser / CREATE-privileged); otherwise they are deferred with a clear
+    # operator instruction instead of crashing startup.
+    _OWNER_SUFFIX = "_owner_alters.sql"
+
     def migrate(self) -> list[str]:
         applied: list[str] = []
         conn = self._conn()
@@ -132,8 +139,19 @@ class PGDatabase:
             "name TEXT PRIMARY KEY, applied_at TEXT NOT NULL, sha256 TEXT NOT NULL)"
         )
         conn.commit()
+        _role_row = conn.execute(
+            "SELECT (rolsuper OR rolcreatedb) AS can_own FROM pg_roles WHERE rolname=current_user"
+        ).fetchone()
+        is_owner = bool(_role_row["can_own"] if _role_row else False)
         for f in sorted(_VERSIONS_DIR.glob("*.sql")):
             if conn.execute("SELECT 1 FROM schema_migrations WHERE name=%s", (f.name,)).fetchone():
+                continue
+            if f.name.endswith(self._OWNER_SUFFIX) and not is_owner:
+                print(
+                    f"MIGRATION_DEFERRED {f.name} — owner-only; apply manually:\n"
+                    f"  docker exec aegis-postgres psql -U aegis -d aegis "
+                    f"-f /migrations/versions/{f.name}"
+                )
                 continue
             sql = f.read_text(encoding="utf-8")
             conn.execute(sql)

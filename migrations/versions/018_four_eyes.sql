@@ -1,4 +1,4 @@
--- Four-eyes (dual-approval) for high-severity alerts + investigator logout stamp.
+-- Four-eyes (dual-approval) for high-severity alerts.
 --
 -- Four-eyes principle: a high/critical alert can never be marked resolved by a
 -- single investigator. The first resolve request creates a pending approval
@@ -6,11 +6,10 @@
 -- before the alert transitions to a resolved terminal state. Enforcement lives
 -- in the backend (investigator.py), not the UI.
 --
--- Architectural note: NO cross-table FK (same as 016/017) — post-RLS the app
--- connects as `aegis_app` without REFERENCES privilege; linkage is enforced at
--- the repository layer and isolation via RLS below.
-ALTER TABLE investigators ADD COLUMN IF NOT EXISTS last_logout_at TEXT;
-
+-- NOTE: the investigators.last_logout_at column moved to 019_owner_alters.sql.
+-- aegis_app (the app role) cannot ALTER investigators — it does not own that
+-- table — so this migration stays aegis_app-safe (it only CREATEs its own
+-- table, which aegis_app may own via the 010 schema-CREATE grant).
 CREATE TABLE IF NOT EXISTS alert_approvals (
     approval_id  TEXT PRIMARY KEY,
     tenant_id    TEXT NOT NULL,
