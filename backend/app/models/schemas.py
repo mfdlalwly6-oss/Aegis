@@ -123,6 +123,14 @@ class Transaction(BaseModel):
     beneficiary_user_id: str | None = None
     beneficiary_bank: str | None = None
     beneficiary_country: str | None = None
+    # Optional entity names for watchlist screening (backward-compatible, additive).
+    sender_name: str | None = None
+    beneficiary_name: str | None = None
+    customer_name: str | None = None
+    # Optional secondary attributes used to cut false positives during screening.
+    customer_dob: str | None = None
+    customer_country: str | None = None
+    customer_identifiers: dict[str, Any] = {}
 
     card_bin: str | None = None
     card_last4: str | None = None
@@ -178,6 +186,10 @@ class AMLSignal(BaseModel):
     fatf_high_risk_country: bool = False
     score: float = 0.0
     risk_flags: list[str] = []
+    # Point-in-time watchlist evidence for every hit (auditable even after
+    # the list changes). Each item: entry_id, list_type, value, matched_on,
+    # match_type, score, source, external_id, entity_kind, secondary, tenant.
+    watchlist_evidence: list[dict[str, Any]] = []
 
 
 class RiskAssessment(BaseModel):

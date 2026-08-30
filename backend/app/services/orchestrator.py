@@ -153,7 +153,7 @@ class DecisionOrchestrator:
                 if cached:
                     return {**cached, "duplicate": True}
 
-        # 2. Feature extraction (real queries against SQLite history)
+        # 2. Feature extraction (real queries against PostgreSQL history)
         features = self.features.extract(tx)
 
         # 3. Rule engine (real rules from DB/YAML)
@@ -352,7 +352,8 @@ class DecisionOrchestrator:
                 {"tx_id": tx.tx_id, "severity": severity},
             )
 
-        # 17. Notify + publish event
+        # 17. Notify + publish event (best-effort: NotificationService.notify
+        # already swallows provider errors internally — TASK 12)
         if created_alert and decision in (Decision.REVIEW, Decision.BLOCK):
             await self.notifications.notify(
                 f"decision.{decision.value}", created_alert, assessment.model_dump(mode="json")
