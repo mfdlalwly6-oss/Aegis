@@ -316,6 +316,39 @@ _MIGRATIONS: list[tuple[str, list[str]]] = [
             "ALTER TABLE decisions ADD COLUMN request_id TEXT",
         ],
     ),
+    (
+        # Watchlist v2 (mirrors migrations/versions/014_watchlist_v2.sql for the
+        # SQLite test path; _apply_statements skips duplicate columns safely).
+        "014_watchlist_v2",
+        [
+            "ALTER TABLE watchlist ADD COLUMN entity_kind TEXT NOT NULL DEFAULT 'entity'",
+            "ALTER TABLE watchlist ADD COLUMN aliases_json TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE watchlist ADD COLUMN dob TEXT",
+            "ALTER TABLE watchlist ADD COLUMN country TEXT",
+            "ALTER TABLE watchlist ADD COLUMN identifiers_json TEXT NOT NULL DEFAULT '{}'",
+            "ALTER TABLE watchlist ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'",
+            "ALTER TABLE watchlist ADD COLUMN external_id TEXT",
+            "ALTER TABLE watchlist ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+            "ALTER TABLE watchlist ADD COLUMN valid_from TEXT",
+            "ALTER TABLE watchlist ADD COLUMN valid_to TEXT",
+            "ALTER TABLE watchlist ADD COLUMN created_at TEXT",
+            "ALTER TABLE watchlist ADD COLUMN updated_at TEXT",
+            "ALTER TABLE watchlist ADD COLUMN deactivated_at TEXT",
+            """CREATE TABLE IF NOT EXISTS watchlist_sync_log (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id   TEXT NOT NULL DEFAULT 'platform',
+                provider    TEXT NOT NULL,
+                status      TEXT NOT NULL DEFAULT 'running',
+                started_at  TEXT NOT NULL,
+                finished_at TEXT,
+                added       INTEGER NOT NULL DEFAULT 0,
+                updated     INTEGER NOT NULL DEFAULT 0,
+                removed     INTEGER NOT NULL DEFAULT 0,
+                error       TEXT,
+                detail_json TEXT NOT NULL DEFAULT '{}'
+            );""",
+        ],
+    ),
 ]
 
 
