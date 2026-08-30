@@ -998,10 +998,10 @@ async function renderPage() {
       await Promise.all([loadFxCurrencies(), loadFxRates()]);
       c.replaceChildren(renderFx());
     } else if (state.page === "watchlists") {
-      await loadWatchlist();
+      await loadWatchlists();
       c.replaceChildren(renderWatchlists());
     } else if (state.page === "policy") {
-      await Promise.all([loadPolicyTenants(), loadWatchlist()]);
+      await loadPolicyTenants();
       c.replaceChildren(renderPolicyStudio());
     } else if (state.page === "audit") {
       await loadAudit();
@@ -1092,9 +1092,6 @@ async function loadFxCurrencies() {
 async function loadFxRates() {
   try { const r = await api("/fx/rates"); state.fxRates = r.rates || []; } catch { state.fxRates = []; }
 }
-async function loadWatchlist() {
-  try { const r = await api("/watchlist"); state.watchlistEntries = r.entries || []; } catch { state.watchlistEntries = []; }
-}
 async function loadPolicyTenants() {
   try { const r = await api("/tenants"); state.policyTenants = r.tenants || []; } catch { state.policyTenants = []; }
 }
@@ -1168,47 +1165,6 @@ function renderFx() {
   );
 }
 
-function renderWatchlists() {
-  const rows = state.watchlistEntries || [];
-  const lt = el("select", { class: "form-control", style: "width:170px" },
-    ...["sanctions", "high_risk_country", "pep", "custom"].map(o => el("option", { value: o }, o)));
-  const val = el("input", { class: "form-control", placeholder: "IR / اسم / قيمة", dir: "ltr", style: "width:220px" });
-  const wmsg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
-  const byType = {};
-  rows.forEach(r => { const k = r.list_type || "custom"; byType[k] = (byType[k] || 0) + 1; });
-  return el("div", {},
-    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "🚫 قوائم المراقبة (AML / Watchlists)"),
-    el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" }, "عقوبات، PEP، دول عالية المخاطر — تُستخدم في فحص AML قبل القرار"),
-    el("div", { class: "grid" },
-      kpi("إجمالي الإدخالات", rows.length, "كل القوائم", "brand"),
-      kpi("عقوبات", byType.sanctions || 0, "sanctions", "danger"),
-      kpi("دول عالية المخاطر", byType.high_risk_country || 0, "high_risk_country", "warn"),
-      kpi("PEP", byType.pep || 0, "pep", "info"),
-    ),
-    el("div", { class: "card" },
-      el("h3", { style: "margin-bottom:12px" }, "➕ إضافة إدخال"),
-      el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center" }, lt, val,
-        el("button", { class: "btn success", onclick: async () => {
-          wmsg.textContent = ""; wmsg.style.color = "var(--muted)";
-          if (!val.value.trim()) { wmsg.textContent = "أدخل القيمة"; wmsg.style.color = "#FCA5A5"; return; }
-          try {
-            await api("/watchlist", { method: "POST", body: { list_type: lt.value, value: val.value.trim() } });
-            toast("أُضيف للقائمة", "success"); await loadWatchlist(); render();
-          } catch (e) { wmsg.textContent = e.message; wmsg.style.color = "#FCA5A5"; }
-        } }, "إضافة")),
-      wmsg),
-    el("div", { class: "card" },
-      el("h3", { style: "margin-bottom:12px" }, "📋 الإدخالات الحالية"),
-      rows.length === 0 ? el("div", { style: "color:var(--muted)" }, "لا إدخالات.") :
-      el("table", {},
-        el("thead", {}, el("tr", {}, el("th", {}, "النوع"), el("th", {}, "القيمة"), el("th", {}, "المؤسسة"))),
-        el("tbody", {}, ...rows.map(x => el("tr", {},
-          el("td", {}, el("span", { class: "badge " + (x.list_type === "sanctions" ? "block" : x.list_type === "high_risk_country" ? "review" : "info") }, x.list_type)),
-          el("td", { style: "font-weight:700" }, el("code", {}, x.value)),
-          el("td", { style: "font-size:11px;color:var(--muted)" }, x.tenant_id || "platform"),
-        ))))),
-  );
-}
 
 function renderPolicyStudio() {
   const tenants = state.policyTenants || [];

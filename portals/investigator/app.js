@@ -621,6 +621,42 @@ async function loadDecisionDetail(id) {
     }
   } catch (e) { toast(e.message, "error"); state.decisionDetail = null; }
 }
+const MATCH_RESULT_AR = { confirmed: "مؤكّدة", potential: "محتملة", no_match: "لا مطابقة" };
+const LIST_TYPE_AR = { sanctions: "عقوبات", pep: "PEP", high_risk_country: "دولة عالية المخاطر", custom: "مخصّصة" };
+
+function _watchlistEvidenceCard(aml) {
+  const ev = (aml && aml.watchlist_evidence) || [];
+  if (!ev.length) return null;
+  const rows = ev.map(e => {
+    const res = e.match_result || (e.match_type === "exact" || e.match_type === "country_exact" ? "confirmed" : "potential");
+    const sec = e.secondary || {};
+    const secTxt = Object.keys(sec).length
+      ? Object.entries(sec).map(([k, v]) => k + ":" + (Array.isArray(v) ? v.join(",") : v)).join(" · ")
+      : "-";
+    return el("tr", {},
+      el("td", {}, badge(res === "confirmed" ? "block" : "challenge", MATCH_RESULT_AR[res] || res)),
+      el("td", { style: "direction:ltr;text-align:left;font-weight:700" }, e.value || "-"),
+      el("td", {}, LIST_TYPE_AR[e.list_type] || e.list_type || "-"),
+      el("td", {}, e.match_type || "-"),
+      el("td", { style: "direction:ltr;text-align:left" }, e.score != null ? Number(e.score).toFixed(2) : "-"),
+      el("td", { style: "font-size:11px;color:var(--muted);direction:ltr;text-align:left" },
+        (e.source || "manual") + (e.role ? " · " + e.role : "") + (e.entry_id ? " · #" + e.entry_id : "")),
+      el("td", { style: "font-size:11px;color:var(--muted);direction:ltr;text-align:left" }, secTxt),
+      el("td", { style: "font-size:11px;color:var(--muted)" }, e.list_snapshot_at ? dt(e.list_snapshot_at) : "-"));
+  });
+  return el("div", { class: "card", style: "margin-top:12px;border-color:var(--danger,#ef4444)" },
+    el("h3", { style: "margin-bottom:4px" }, "🚫 دليل قوائم المراقبة (Watchlist evidence)"),
+    el("p", { style: "color:var(--muted);font-size:12px;margin-bottom:10px" },
+      "مطابقات القوائم كما سُجّلت لحظة القرار — مع المصدر ونوع المطابقة وتصنيف النتيجة (مؤكّدة/محتملة) والسمات الثانوية. لا يتغيّر هذا الدليل بتغيّر القوائم لاحقًا."),
+    el("div", { style: "overflow:auto" },
+      el("table", { class: "table" },
+        el("thead", {}, el("tr", {},
+          el("th", {}, "النتيجة"), el("th", {}, "القيمة المُطابَقة"), el("th", {}, "القائمة"),
+          el("th", {}, "نوع المطابقة"), el("th", {}, "الدرجة"), el("th", {}, "المصدر/الدور"),
+          el("th", {}, "سمات ثانوية"), el("th", {}, "لقطة القائمة"))),
+        el("tbody", {}, ...rows))));
+}
+
 function renderDecisionTrace() {
   const d = state.decisionDetail;
   const back = () => el("button", { class: "btn sm", onclick: () => { state.page = "decisions"; render(); } }, "→ رجوع إلى القرارات");
@@ -630,7 +666,11 @@ function renderDecisionTrace() {
   try { evidence = d.evidence_json ? JSON.parse(d.evidence_json) : (Array.isArray(d.evidence) ? d.evidence : (Array.isArray(d.evidence_list) ? d.evidence_list : null)); } catch (e) { evidence = null; }
   let feats = null;
   try { feats = d.features_json ? JSON.parse(d.features_json) : (d.features && typeof d.features === "object" ? d.features : null); } catch (e) { feats = null; }
+  let aml = null;
+  try { aml = d.aml_json ? JSON.parse(d.aml_json) : (d.aml && typeof d.aml === "object" ? d.aml : null); } catch (e) { aml = null; }
   const cards = [];
+  const wlCard = _watchlistEvidenceCard(aml);
+  if (wlCard) cards.push(wlCard);
   if (evidence && evidence.length) cards.push(el("div", { class: "card", style: "margin-top:12px" },
     el("h3", { style: "margin-bottom:10px" }, "🧩 الأدلة"),
     el("ul", { style: "padding-right:18px" }, ...evidence.map(ev => el("li", { style: "font-size:12.5px;line-height:1.8" }, typeof ev === "object" ? JSON.stringify(ev) : String(ev))))));
