@@ -17,6 +17,7 @@ from app.features import FeatureExtractor
 from app.graph.engine import GraphEngine
 from app.ml.ensemble import EnsembleScorer
 from app.repositories import (
+    AlertApprovalRepository,
     AlertRepository,
     AuditRepository,
     CaseRepository,
@@ -74,6 +75,7 @@ class ServiceRegistry:
         self.transactions = TransactionRepository(self.db)
         self.decisions = DecisionRepository(self.db)
         self.alerts = AlertRepository(self.db)
+        self.alert_approvals = AlertApprovalRepository(self.db)
         self.cases = CaseRepository(self.db)
         self.audit_repo = AuditRepository(self.db)
         self.rule_repo = RuleRepository(self.db)

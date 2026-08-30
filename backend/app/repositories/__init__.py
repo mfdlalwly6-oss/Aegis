@@ -2,6 +2,7 @@
 Never call app.db.Database directly from routers/services.
 """
 
+from .alert_approval_repo import AlertApprovalRepository
 from .alert_repo import AlertRepository
 from .audit_repo import AuditRepository
 from .case_repo import CaseRepository
@@ -19,6 +20,7 @@ __all__ = [
     "TransactionRepository",
     "DecisionRepository",
     "AlertRepository",
+    "AlertApprovalRepository",
     "CaseRepository",
     "AuditRepository",
     "RuleRepository",

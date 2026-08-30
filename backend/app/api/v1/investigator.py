@@ -27,6 +27,13 @@ ALERT_STATUSES = {
 CASE_STATUSES = {"open", "in_progress", "escalated", "closed"}
 CASE_RESOLUTIONS = {"confirmed_fraud", "false_positive", "inconclusive"}
 ALERT_RESOLUTIONS = {"resolved_true_positive", "resolved_false_positive"}
+# Four-eyes: these severities can never reach a resolved terminal state on a
+# single investigator's action — a second, DIFFERENT investigator must approve.
+FOUR_EYES_SEVERITIES = {"high", "critical"}
+
+
+class LogoutBody(BaseModel):
+    pass
 
 
 class InvestigatorLogin(BaseModel):
@@ -46,6 +53,11 @@ class NoteBody(BaseModel):
 class ResolveAlertBody(BaseModel):
     resolution: str
     note: str = ""
+
+
+class ApprovalDecisionBody(BaseModel):
+    approve: bool
+    approver_note: str | None = None
 
 
 def _mark_known_fraud_senders(registry, tenant_id: str, tx_ids) -> int:
@@ -394,9 +406,35 @@ def alert_resolve(
     if body.resolution not in ALERT_RESOLUTIONS:
         raise HTTPException(400, f"invalid_resolution: allowed {sorted(ALERT_RESOLUTIONS)}")
     tid = inv["tenant_id"]
-    _get_alert(registry, alert_id, tid)
+    existing = _get_alert(registry, alert_id, tid)
+    actor = inv.get("sub", "investigator")
+
+    # Four-eyes gate (backend-enforced): high/critical alerts require a second
+    # investigator's approval before resolving. First call -> pending request.
+    if (existing or {}).get("severity") in FOUR_EYES_SEVERITIES:
+        pending = registry.alert_approvals.pending_for_alert(alert_id)
+        if not pending:
+            req_row = registry.alert_approvals.create_request(
+                tid, alert_id, body.resolution, body.note, actor
+            )
+            registry.audit.log(
+                tid, actor, "alert.resolution_requested", "alert", alert_id,
+                getattr(request.state, "request_id", None),
+                {"resolution": body.resolution, "approval_id": req_row["approval_id"]},
+            )
+            raise HTTPException(
+                409,
+                f"four_eyes_pending: resolution requires approval by a second "
+                f"investigator (approval_id={req_row['approval_id']})",
+            )
+        raise HTTPException(
+            409,
+            f"four_eyes_pending: approval {pending['approval_id']} already awaits "
+            f"a second investigator",
+        )
+
     alert = registry.alerts.resolve(
-        alert_id, body.resolution, body.note, author=inv.get("sub", "investigator")
+        alert_id, body.resolution, body.note, author=actor
     )
     if body.resolution == "resolved_true_positive" and alert and alert.get("tx_id"):
         # Confirmed investigation outcome => known-fraud evidence feeds the graph.
@@ -412,6 +450,84 @@ def alert_resolve(
         {"resolution": body.resolution},
     )
     return alert
+
+
+@router.post("/approvals/{approval_id}/decide")
+def approval_decide(
+    approval_id: str,
+    body: ApprovalDecisionBody,
+    request: Request,
+    inv=Depends(require_investigator),
+    registry=Depends(get_registry),
+):
+    """Second-investigator decision on a pending four-eyes request.
+    Approve -> the alert resolves with the originally requested resolution.
+    Reject  -> the alert stays open and the request is closed.
+    The approver MUST differ from the requester (enforced here AND in repo)."""
+    tid = inv["tenant_id"]
+    actor = inv.get("sub", "investigator")
+    row = registry.alert_approvals.get(approval_id)
+    if not row or row["tenant_id"] != tid:
+        raise HTTPException(404, "approval_not_found")
+    if row["status"] != "pending":
+        raise HTTPException(409, f"approval_not_pending: status={row['status']}")
+    # Four-eyes core invariant: the approver must be a DIFFERENT investigator
+    # than the one who requested the resolution.
+    if actor == row["requested_by"]:
+        raise HTTPException(403, "four_eyes_self_approval_forbidden")
+    if body.approve and body.approver_note is not None and len(body.approver_note) > 4000:
+        raise HTTPException(400, "note_too_long")
+
+    alert = _get_alert(registry, row["alert_id"], tid)
+    if body.approve:
+        # Resolve the alert with the originally requested resolution.
+        resolved = registry.alerts.resolve(
+            row["alert_id"], row["resolution"], row.get("note", ""), author=actor
+        )
+        registry.alert_approvals.decide(approval_id, "approved", actor)
+        if row["resolution"] == "resolved_true_positive" and resolved and resolved.get("tx_id"):
+            _mark_known_fraud_senders(registry, tid, [resolved["tx_id"]])
+        registry.audit.log(
+            tid, actor, "alert.resolution_approved", "alert", row["alert_id"],
+            getattr(request.state, "request_id", None),
+            {"approval_id": approval_id, "resolution": row["resolution"]},
+        )
+        return {"ok": True, "approval_id": approval_id, "status": "approved", "alert": resolved}
+    # reject
+    registry.alert_approvals.decide(approval_id, "rejected", actor)
+    registry.audit.log(
+        tid, actor, "alert.resolution_rejected", "alert", row["alert_id"],
+        getattr(request.state, "request_id", None),
+        {"approval_id": approval_id, "resolution": row["resolution"]},
+    )
+    return {"ok": True, "approval_id": approval_id, "status": "rejected"}
+
+
+@router.post("/approvals")
+def approvals_list(
+    inv=Depends(require_investigator), registry=Depends(get_registry)
+):
+    """List pending four-eyes approvals for the caller's tenant (queue)."""
+    return registry.alert_approvals.list_for(inv["tenant_id"], status="pending")
+
+
+@router.post("/logout")
+def investigator_logout(
+    request: Request, inv=Depends(require_investigator), registry=Depends(get_registry)
+):
+    """Record the logout timestamp and audit the session close.
+    JWT is stateless; this stamps last_logout_at for session forensics."""
+    registry.investigators.touch_logout(inv["investigator_id"])
+    registry.audit.log(
+        inv["tenant_id"],
+        inv.get("sub", "investigator"),
+        "authentication.logout",
+        "investigator_logout",
+        inv["investigator_id"],
+        getattr(request.state, "request_id", None),
+        {},
+    )
+    return {"ok": True}
 
 
 @router.post("/alerts/{alert_id}/escalate-to-case")

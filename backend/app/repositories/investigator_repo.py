@@ -128,6 +128,12 @@ class InvestigatorRepository:
             (_utcnow(), investigator_id),
         )
 
+    def touch_logout(self, investigator_id: str) -> None:
+        self.db.execute(
+            "UPDATE investigators SET last_logout_at=? WHERE investigator_id=?",
+            (_utcnow(), investigator_id),
+        )
+
     def set_status(self, tenant_id: str, investigator_id: str, status: str) -> bool:
         cur = self.db.execute(
             "UPDATE investigators SET status=? WHERE investigator_id=? AND tenant_id=?",
