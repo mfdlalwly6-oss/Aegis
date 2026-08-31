@@ -2,11 +2,28 @@
 All values come from environment variables or .env. No secrets in code.
 """
 
+import os
 from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _railway_env_shim() -> None:
+    """Map platform-standard env vars to AEGIS_* names when unset.
+
+    Railway injects DATABASE_URL (unprefixed) on its Postgres plugin; AEGIS reads
+    AEGIS_DATABASE_URL (env_prefix="AEGIS_"). If only the unprefixed form exists,
+    adopt it — local/dev behavior (AEGIS_DATABASE_URL) always wins when set.
+    No secrets are logged or written; this only re-points an env var reference.
+    """
+    if not os.environ.get("AEGIS_DATABASE_URL") and os.environ.get("DATABASE_URL"):
+        os.environ["AEGIS_DATABASE_URL"] = os.environ["DATABASE_URL"]
+        os.environ.setdefault("AEGIS_DB_DRIVER", "postgres")
+
+
+_railway_env_shim()
 
 
 class Settings(BaseSettings):
