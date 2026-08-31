@@ -55,6 +55,7 @@ const state = {
   caseDetail: null,
   selectedTx: null,
   filters: { alertStatus: "", alertSeverity: "", caseStatus: "" },
+  approvals: [],
   live: false,
   es: null,
 };
@@ -103,7 +104,12 @@ async function api(path, opts = {}) {
   return d;
 }
 
-function logout() {
+async function logout() {
+  // Best-effort server-side session close (stamps last_logout_at + audit);
+  // local session is always cleared regardless of the call outcome.
+  if (state.token) {
+    try { await fetch(API + "/logout", { method: "POST", headers: { "Authorization": "Bearer " + state.token } }); } catch {}
+  }
   localStorage.removeItem(TK); localStorage.removeItem(INV);
   state.token = null; state.profile = null;
   if (state.es) { state.es.close(); state.es = null; }
@@ -170,6 +176,7 @@ async function loadCases() {
 }
 async function loadDecisions() { try { state.decisions = await api("/decisions/recent?limit=100"); } catch { state.decisions = []; } }
 async function loadInsights() { try { state.insights = await api("/graph/insights"); } catch { state.insights = null; } }
+async function loadApprovals() { try { state.approvals = await api("/approvals", { method: "POST" }); } catch { state.approvals = []; } }
 async function loadAlertDetail(id) { state.alertDetail = await api("/alerts/" + id); }
 async function loadCaseDetail(id) { state.caseDetail = await api("/cases/" + id); }
 
@@ -334,7 +341,14 @@ function renderAlertDetail() {
     onclick: async () => {
       if (confirmMsg && !confirm(confirmMsg)) return;
       try { await fn(); await loadAlertDetail(a.alert_id); toast("تم", "success"); render(); }
-      catch (e) { toast(e.message, "error"); }
+      catch (e) {
+        // Four-eyes gate: a high/critical resolve returns 409 pending — surface
+        // it as an informational state (request recorded), not a failure.
+        if ((e.message || "").includes("four_eyes_pending")) {
+          toast("⏳ سُجّل طلب الحل — بانتظار موافقة محقق ثانٍ (صفحة الموافقات المزدوجة)", "info");
+          await loadAlertDetail(a.alert_id); render();
+        } else { toast(e.message, "error"); }
+      }
     }
   }, label);
 
@@ -828,6 +842,48 @@ async function renderTxDetail() {
   return box;
 }
 
+/* ═══════════════ FOUR-EYES APPROVALS ═══════════════ */
+function renderApprovals() {
+  const rows = state.approvals || [];
+  const me = state.profile?.email || "";
+  const decide = async (ap, approve) => {
+    const verb = approve ? "اعتماد" : "رفض";
+    if (!confirm(`تأكيد ${verb} طلب الحل للتنبيه ${ap.alert_id.slice(0, 14)}؟`)) return;
+    try {
+      const r = await api(`/approvals/${ap.approval_id}/decide`, { method: "POST", body: { approve } });
+      toast(approve ? "✅ اعتُمد الحل وأُغلق التنبيه" : "⛔ رُفض الحل وبقي التنبيه مفتوحًا", "success");
+      await loadApprovals(); render();
+    } catch (e) { toast(e.message, "error"); }
+  };
+  return el("div", {},
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "👥 موافقات مزدوجة (Four-Eyes)"),
+    el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" },
+      "التنبيهات عالية/الحرجة لا تُحَل إلا بموافقة محقق ثانٍ مختلف عن طالب الحل — لا يمكنك اعتماد طلبك الخاص"),
+    rows.length === 0
+      ? el("div", { class: "card", style: "color:var(--muted);text-align:center;padding:30px" }, "لا توجد طلبات حل معلقة حاليًا.")
+      : el("div", { class: "card" },
+          el("table", {},
+            el("thead", {}, el("tr", {},
+              el("th", {}, "التنبيه"), el("th", {}, "الحل المطلوب"), el("th", {}, "طلبه"),
+              el("th", {}, "الوقت"), el("th", {}, "ملاحظة"), el("th", {}, "إجراء"))),
+            el("tbody", {}, ...rows.map(ap => {
+              const mine = ap.requested_by === me;
+              return el("tr", {},
+                el("td", {}, el("button", { class: "btn sm", onclick: async () => { await loadAlertDetail(ap.alert_id); state.page = "alertDetail"; render(); } }, String(ap.alert_id).slice(0, 16))),
+                el("td", {}, badge(ap.resolution, ST_AR[ap.resolution] || ap.resolution)),
+                el("td", { style: "font-size:12px" }, ap.requested_by + (mine ? " (أنت)" : "")),
+                el("td", { style: "font-size:11px" }, dt(ap.created_at)),
+                el("td", { style: "font-size:11px;color:var(--muted)" }, ap.note || "-"),
+                el("td", { style: "display:flex;gap:6px" },
+                  mine
+                    ? el("span", { class: "badge escalated", title: "لا يمكنك اعتماد طلبك الخاص" }, "بانتظار محقق آخر")
+                    : el("span", {},
+                        el("button", { class: "btn sm success", onclick: () => decide(ap, true) }, "✅ اعتماد"),
+                        " ",
+                        el("button", { class: "btn sm danger", onclick: () => decide(ap, false) }, "⛔ رفض"))));
+            })))));
+}
+
 /* ═══════════════ ROUTER ═══════════════ */
 async function renderPage() {
   const c = $("#content");
@@ -840,6 +896,7 @@ async function renderPage() {
     else if (state.page === "alertDetail") { c.replaceChildren(renderAlertDetail()); }
     else if (state.page === "cases") { await loadCases(); c.replaceChildren(renderCases()); }
     else if (state.page === "caseDetail") { c.replaceChildren(renderCaseDetail()); }
+    else if (state.page === "approvals") { await loadApprovals(); c.replaceChildren(renderApprovals()); }
     else if (state.page === "decisions") { await loadDecisions(); c.replaceChildren(renderDecisions()); }
     else if (state.page === "graph") { await loadInsights(); c.replaceChildren(renderGraph()); }
     else if (state.page === "graphAccount") { c.replaceChildren(renderGraphAccount()); }
@@ -862,6 +919,7 @@ function render() {
     { id: "queue", icon: "⏳", label: tl("قائمة المراجعة") },
     { id: "alerts", icon: "🚨", label: tl("التنبيهات") },
     { id: "cases", icon: "📁", label: tl("القضايا") },
+    { id: "approvals", icon: "👥", label: tl("موافقات مزدوجة") },
     { id: "decisions", icon: "📡", label: tl("القرارات الحيّة") },
     { id: "decisionTrace", icon: "🔍", label: tl("أثر القرار") },
     { id: "graph", icon: "🕸️", label: tl("تحليل الشبكة") },
