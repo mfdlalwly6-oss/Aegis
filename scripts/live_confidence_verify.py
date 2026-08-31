@@ -7,7 +7,7 @@ import hashlib, hmac, json, os, sys, urllib.request
 from datetime import UTC, datetime
 from uuid import uuid4
 
-BASE = "http://localhost:8000"
+BASE = os.environ.get("AEGIS_BASE_URL", "http://localhost:8000")
 TOKEN = os.environ.get("OWNER_TOKEN") or open("/home/zr0/Aegis/.env").read().split("AEGIS_OWNER_TOKEN=")[1].split("\n")[0].strip()
 PASS = FAIL = 0
 def ok(m):

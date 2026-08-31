@@ -1,0 +1,15 @@
+# Railway deployment — AEGIS backend (+ 3 static portals served by FastAPI).
+# Build context MUST be the repo root: backend/Dockerfile COPYs backend/,
+# portals/, migrations/, models/, training/, scripts/ from the root.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "backend/Dockerfile"
+dockerContext = "."
+
+[deploy]
+# The app binds 0.0.0.0:$PORT (Railway injects PORT). Dockerfile healthcheck
+# hits /health; the platform's own /ready is the deep check (db+rules+ml).
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
