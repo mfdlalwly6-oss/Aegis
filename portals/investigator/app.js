@@ -96,7 +96,7 @@ async function api(path, opts = {}) {
   const h = { "Content-Type": "application/json", ...(opts.headers || {}) };
   if (state.token) h["Authorization"] = "Bearer " + state.token;
   const r = await fetch(API + path, { ...opts, headers: h, body: opts.body ? JSON.stringify(opts.body) : undefined });
-  if (r.status === 401) { logout(); throw new Error("انتهت الجلسة — سجّل الدخول مجددًا"); }
+  if (r.status === 401) { localStorage.removeItem(TK); localStorage.removeItem(INV); state.token = null; logout(); throw new Error("انتهت الجلسة — سجّل الدخول مجددًا"); }
   const txt = await r.text();
   let d = {};
   try { d = txt ? JSON.parse(txt) : {}; } catch { d = { raw: txt }; }
@@ -104,15 +104,20 @@ async function api(path, opts = {}) {
   return d;
 }
 
-async function logout() {
-  // Best-effort server-side session close (stamps last_logout_at + audit);
-  // local session is always cleared regardless of the call outcome.
-  if (state.token) {
-    try { await fetch(API + "/logout", { method: "POST", headers: { "Authorization": "Bearer " + state.token } }); } catch {}
-  }
+function logout() {
+  // Local session clears SYNCHRONOUSLY first (a 401/expired token must never
+  // strand the user on an empty dashboard while a network call is in flight).
+  const tok = state.token;
   localStorage.removeItem(TK); localStorage.removeItem(INV);
   state.token = null; state.profile = null;
   if (state.es) { state.es.close(); state.es = null; }
+  // Best-effort server-side session close (stamps last_logout_at + audit) —
+  // fire-and-forget so logout is never blocked by the network.
+  if (tok) {
+    try {
+      fetch(API + "/logout", { method: "POST", headers: { "Authorization": "Bearer " + tok } }).catch(() => {});
+    } catch {}
+  }
   render();
 }
 

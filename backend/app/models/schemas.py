@@ -238,3 +238,9 @@ class RiskAssessment(BaseModel):
     component_health: dict[str, Any] = {}
     degraded_mode: bool = False
     degraded_reason: str | None = None
+
+    # Explicit decision confidence (0..1): fraction of nominal policy weight
+    # contributed by fully-healthy components at decision time. Interpretable,
+    # persisted verbatim, never recomputed retroactively, fully reconstructible
+    # from component_health + policy weights. See migrations 020.
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)

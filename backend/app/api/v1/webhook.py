@@ -297,6 +297,10 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
         "component_health": result.get("component_health", {}),
         "degraded_mode": result.get("degraded_mode", False),
         "degraded_reason": result.get("degraded_reason"),
+        # Explicit decision confidence (0..1): share of nominal policy weight
+        # backed by fully-healthy components at decision time. Persisted with
+        # the decision; a failed/degraded engine always lowers it.
+        "confidence": result.get("confidence", 0.0),
     }
 
 

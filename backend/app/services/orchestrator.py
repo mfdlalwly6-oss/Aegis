@@ -233,6 +233,28 @@ class DecisionOrchestrator:
             else None
         )
 
+        # Confidence: explicit, interpretable, non-retroactive. Computed from the
+        # NOMINAL policy weights (before availability renormalization) weighted by
+        # each component's state at decision time: healthy=1.0, degraded=0.5,
+        # unavailable=0.0. A failed/degraded engine therefore shrinks confidence
+        # by exactly its nominal share — a degraded decision can never look more
+        # confident than the evidence that produced it. Fully reconstructible
+        # from the persisted component_health + policy weights.
+        confidence = round(
+            min(
+                1.0,
+                max(
+                    0.0,
+                    sum(
+                        {"healthy": 1.0, "degraded": 0.5}.get(h["status"], 0.0)
+                        * weights.get(k, 0.0)
+                        for k, h in health.items()
+                    ),
+                ),
+            ),
+            4,
+        )
+
         # 9. Decision — sanctions hit forces BLOCK; FX missing forces review;
         # AML unavailable fails CLOSED (sanctions obligation: never silently
         # allow when we could not screen); heavy component loss forces REVIEW.
@@ -329,6 +351,7 @@ class DecisionOrchestrator:
             component_health=health,
             degraded_mode=degraded_mode,
             degraded_reason=degraded_reason,
+            confidence=confidence,
         )
 
         # 13. Persist transaction + decision
