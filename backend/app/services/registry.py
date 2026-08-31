@@ -145,6 +145,10 @@ class ServiceRegistry:
         self.investigators = InvestigatorRepository(self.db)
         self.currency_repo = CurrencyRepository(self.db)
         self.fx_rate_repo = FxRateRepository(self.db)
+        # Aliases the FX admin API expects (fx.py uses registry.currencies /
+        # registry.fx_rates). Both names point at the same instances.
+        self.currencies = self.currency_repo
+        self.fx_rates = self.fx_rate_repo
         self.currency_repo.seed_defaults()
         self.fx = FxService(
             self.fx_rate_repo, currency_checker=lambda c: self.currency_repo.is_known(c)
