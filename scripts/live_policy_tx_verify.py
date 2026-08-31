@@ -62,12 +62,12 @@ def send_tx(tag):
     return st, payload["tx_id"], d
 
 def decision_stamp(tx_id):
-    import subprocess
-    out = subprocess.run(
-        ["docker", "exec", "aegis-postgres", "psql", "-U", "aegis", "-d", "aegis", "-tA", "-c",
-         f"SELECT rule_set_version FROM decisions WHERE tx_id='{tx_id}'"],
-        capture_output=True, text=True)
-    return out.stdout.strip()
+    """Read the decision's policy_version stamp via the owner API (works for any
+    AEGIS_BASE_URL — local Docker or Railway — no direct DB access needed)."""
+    st, b = req("GET", "/api/v1/admin/decisions/recent?limit=50", None, OWNER)
+    rows = json.loads(b); rows = rows if isinstance(rows, list) else rows.get("decisions", [])
+    r = next((x for x in rows if x.get("tx_id") == tx_id), None)
+    return (r.get("rule_set_version") or "") if r else ""
 
 # 2) policy v1 -> tx1 stamps v1
 r = put_policy(0.85, "v1")
