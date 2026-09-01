@@ -184,6 +184,10 @@ class AMLSignal(BaseModel):
     adverse_media_hit: bool = False
     typology_matches: list[str] = []
     fatf_high_risk_country: bool = False
+    # Exact account/user-identifier watchlist hit on a non-sanctions list —
+    # the orchestrator floors any such transaction at REVIEW so a listed
+    # account never silently receives ALLOW.
+    watchlist_account_hit: bool = False
     score: float = 0.0
     risk_flags: list[str] = []
     # Point-in-time watchlist evidence for every hit (auditable even after

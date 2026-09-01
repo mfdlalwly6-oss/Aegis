@@ -140,6 +140,14 @@ class DecisionOrchestrator:
                 cached = self.decisions.get_by_idempotency(idempotency_key)
                 if cached:
                     return {**cached, "duplicate": True}
+            # Same tx resubmitted under a DIFFERENT key must still replay the
+            # stored decision — retries (new key, same tx) are semantically the
+            # same operation; re-scoring would violate idempotency.
+            # Tenant-scoped: tx_id collisions across tenants must never leak a
+            # cached decision to another tenant.
+            prior_tx = self.decisions.get_by_tx(tx.tx_id)
+            if prior_tx and prior_tx.get("tenant_id") == tx.tenant_id:
+                return {**prior_tx, "duplicate": True}
 
         # 2. Feature extraction (real queries against PostgreSQL history)
         features = self.features.extract(tx)
@@ -258,6 +266,18 @@ class DecisionOrchestrator:
         # 9. Decision — sanctions hit forces BLOCK; FX missing forces review;
         # AML unavailable fails CLOSED (sanctions obligation: never silently
         # allow when we could not screen); heavy component loss forces REVIEW.
+        #
+        # Fail-safe floors (component degradation must never downgrade a
+        # hard-signalled transaction to ALLOW):
+        #   * watchlisted account (non-sanctions list) -> REVIEW floor
+        #   * any HIGH-severity rule hit                -> CHALLENGE floor
+        if getattr(aml_sig, "watchlist_account_hit", False) and not aml_sig.sanctions_hit:
+            final = max(final, policy["thresholds"]["review"])
+        high_rule_hit = any(
+            getattr(h, "severity", "") == "high" for h in rules_hits
+        )
+        if high_rule_hit and health.get("behavior", {}).get("status") != "healthy":
+            final = max(final, policy["thresholds"]["challenge"])
         if aml_unavailable:
             decision = Decision.REVIEW
             final = max(final, policy["thresholds"]["review"])
@@ -443,4 +463,8 @@ class DecisionOrchestrator:
         result = assessment.model_dump(mode="json")
         result["alert"] = created_alert
         result["case"] = created_case
+        # FX reference fields exposed at response root so integrators can read
+        # the FATF-equivalent amount/currency without digging into fx_proof.
+        result["reference_amount"] = getattr(tx, "reference_amount", None)
+        result["reference_currency"] = getattr(tx, "reference_currency", None)
         return result

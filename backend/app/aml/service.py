@@ -129,6 +129,41 @@ class AMLService:
                     evidence.append({**_evidence(m, list_type), "role": role})
         return score
 
+    def _screen_accounts(self, tx: Transaction, signal: AMLSignal,
+                         flags: list[str], evidence: list[dict]) -> float:
+        """Exact account/identifier screening — sender/beneficiary account and
+        user ids against sanctions/custom watchlist values.
+
+        Name screening is fuzzy; account identifiers must match EXACTLY. A
+        watchlisted account can never pass silently: sanctions-listed -> hard
+        BLOCK (sanctions_hit), custom-listed -> watchlist_account_hit which the
+        orchestrator floors at REVIEW."""
+        score = 0.0
+        candidates: list[tuple[str, list]] = [
+            ("sender", [tx.sender_account_id, tx.sender_user_id]),
+            ("beneficiary", [tx.beneficiary_account_id, tx.beneficiary_user_id]),
+        ]
+        for list_type, weight, flag in (("sanctions", 0.60, "SANCTIONS_ACCOUNT_HIT"),
+                                        ("custom", 0.30, "CUSTOM_ACCOUNT_HIT")):
+            for role, ids in candidates:
+                for ident in ids:
+                    if not ident:
+                        continue
+                    hit = self.watchlist.check(list_type, str(ident), tx.tenant_id)
+                    if not hit:
+                        continue
+                    if list_type == "sanctions":
+                        signal.sanctions_hit = True
+                    else:
+                        signal.watchlist_account_hit = True
+                    score += weight
+                    flags.append(f"{flag}:{role}:{ident}")
+                    evidence.append({**_evidence({"entry": hit, "matched_on": str(ident),
+                                                  "match_type": "account_exact",
+                                                  "score": 1.0}, list_type),
+                                     "role": role})
+        return score
+
     async def screen(self, tx: Transaction, features: dict[str, Any]) -> AMLSignal:
         signal = AMLSignal()
         score = 0.0
@@ -140,6 +175,11 @@ class AMLService:
 
         # 2. Name screening — sanctions / PEP / custom (new, additive)
         score += self._screen_names(tx, signal, flags, evidence)
+
+        # 2b. Account screening — exact match on account/user identifiers;
+        # a watchlisted account never silently passes (sanctions -> BLOCK via
+        # sanctions_hit, custom -> REVIEW floor via watchlist_account_hit)
+        score += self._screen_accounts(tx, signal, flags, evidence)
 
         # 3. Typology detection (unchanged from previous engine)
         amount = float(tx.amount)

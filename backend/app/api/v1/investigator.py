@@ -60,6 +60,14 @@ class ApprovalDecisionBody(BaseModel):
     approver_note: str | None = None
 
 
+class ApprovalCreateBody(BaseModel):
+    """Explicit four-eyes approval request. Absent entirely => legacy queue list
+    (portal's `POST /approvals` with no body still returns pending approvals)."""
+    alert_id: str
+    resolution: str
+    note: str = ""
+
+
 def _mark_known_fraud_senders(registry, tenant_id: str, tx_ids) -> int:
     """Mark senders of the given transactions as known-fraud in the graph.
 
@@ -504,11 +512,41 @@ def approval_decide(
 
 
 @router.post("/approvals")
-def approvals_list(
+def approvals_list_or_create(
+    body: ApprovalCreateBody | None = None,
+    request: Request = None,
     inv=Depends(require_investigator), registry=Depends(get_registry)
 ):
-    """List pending four-eyes approvals for the caller's tenant (queue)."""
-    return registry.alert_approvals.list_for(inv["tenant_id"], status="pending")
+    """Dual-purpose (backward-compatible):
+    - no body          -> pending approvals queue (portal unchanged)
+    - {alert_id, resolution, note} -> explicit four-eyes approval request;
+      only for high/critical alerts (four-eyes severities), idempotent on
+      existing pending request, 409s with the pending approval_id."""
+    if body is None:
+        return registry.alert_approvals.list_for(inv["tenant_id"], status="pending")
+    if body.resolution not in ALERT_RESOLUTIONS:
+        raise HTTPException(400, f"invalid_resolution: allowed {sorted(ALERT_RESOLUTIONS)}")
+    tid = inv["tenant_id"]
+    alert = _get_alert(registry, body.alert_id, tid)
+    if alert.get("severity") not in FOUR_EYES_SEVERITIES:
+        raise HTTPException(409, "four_eyes_not_required_for_severity")
+    pending = registry.alert_approvals.pending_for_alert(body.alert_id)
+    if pending:
+        raise HTTPException(
+            409,
+            f"four_eyes_pending: approval {pending['approval_id']} already awaits "
+            f"a second investigator",
+        )
+    actor = inv.get("sub", "investigator")
+    req_row = registry.alert_approvals.create_request(
+        tid, body.alert_id, body.resolution, body.note, actor
+    )
+    registry.audit.log(
+        tid, actor, "alert.resolution_requested", "alert", body.alert_id,
+        getattr(request.state, "request_id", None),
+        {"resolution": body.resolution, "approval_id": req_row["approval_id"]},
+    )
+    return req_row
 
 
 @router.post("/logout")
