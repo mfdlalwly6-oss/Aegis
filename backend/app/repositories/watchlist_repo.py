@@ -84,6 +84,10 @@ class WatchlistRepository:
 
     # ── legacy-compatible read (single, exact, country codes) ─────────
     def check(self, list_type: str, value: str, tenant_id: str = "platform") -> dict | None:
+        # Entries are stored canonically (uppercased, whitespace-collapsed) by
+        # add_entry; screening must normalize the same way or case variants of
+        # a listed entity slip through exact-match checks.
+        value = " ".join(str(value).split()).upper()
         return self.db.query_one(
             "SELECT * FROM watchlist WHERE list_type=? AND value=? AND tenant_id IN (?, 'platform') "
             "AND status='active' "
