@@ -8,7 +8,9 @@ pytest -q                 # من جذر المشروع (pytest.ini يضبط pyth
 
 داخل Docker (الطريقة الرسمية — PostgreSQL معزولة):
 ```bash
-docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
+docker compose -f docker-compose.test.yml -p aegis-test up --build --abort-on-container-exit
+# ملاحظة حرجة: لا تشغّل حزمة الاختبار بدون -p aegis-test (أو بدون name: في الملف)
+# وإلا اشتقّ compose اسم المشروع من الدليل وتصادم مع حزمة الإنتاج وأوقف حاوياتها.
 ```
 
 الطريقة اليدوية داخل الحاوية:

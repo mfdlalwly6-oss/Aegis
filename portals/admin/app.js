@@ -313,6 +313,20 @@ function renderOverview() {
 }
 
 /* ─────────────────────────────────────────── PAGE: TENANTS ─── */
+function _tenantPanelRow(t) {
+  // Renders the active detail panel INLINE, directly beneath this institution's
+  // table row — never at the bottom of the page. One panel per institution.
+  const tid = t.tenant_id;
+  let content = null;
+  if (state.tenantRules && state.tenantRulesFor === tid) content = renderTenantRules();
+  else if (state.selectedTenant && state.selectedTenantId === tid) content = renderTenantDetail();
+  else if (state.tenantInvs && state.tenantInvsFor === tid) content = renderTenantInvestigators();
+  if (!content) return null;
+  return el("tr", { class: "inline-detail-row" },
+    el("td", { colspan: "7", style: "padding:0 0 4px;background:rgba(59,130,246,.04)" },
+      el("div", { style: "padding:2px 10px 12px" }, content)));
+}
+
 function renderTenants() {
   const box = el("div", {});
   const header = el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px" },
@@ -346,7 +360,7 @@ function renderTenants() {
       el("td", {},
         el("div", { style: "display:flex;gap:4px;flex-wrap:wrap" },
           el("button", { class: "btn", style: "padding:5px 8px;font-size:11px",
-            onclick: async () => { try { await loadTenantDetail(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } }
+            onclick: async () => { state.tenantRules = null; state.tenantRulesFor = null; state.tenantInvs = null; state.tenantInvsFor = null; try { await loadTenantDetail(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } }
           }, "🔌 مفاتيح"),
           t.status === "active"
             ? el("button", { class: "btn sm danger", style: "padding:5px 8px;font-size:11px",
@@ -356,15 +370,17 @@ function renderTenants() {
                 onclick: async () => { try { await api("/tenants/" + t.tenant_id + "/activate", { method: "POST", body: {} }); toast("نُشطت المؤسسة", "success"); await loadTenants(); render(); } catch (e) { toast(e.message, "error"); } }
               }, "▶ تنشيط"),
           el("button", { class: "btn", style: "padding:5px 8px;font-size:11px",
-            onclick: async () => { try { await loadTenantInvestigators(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } }
+            onclick: async () => { state.tenantRules = null; state.tenantRulesFor = null; state.selectedTenant = null; state.selectedTenantId = null; try { await loadTenantInvestigators(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } }
           }, "👥 محققون"),
           el("button", { class: "btn", style: "padding:5px 8px;font-size:11px",
-            onclick: async () => { try { await loadTenantRules(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } }
+            onclick: async () => { state.selectedTenant = null; state.selectedTenantId = null; state.tenantInvs = null; state.tenantInvsFor = null; try { await loadTenantRules(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } }
           }, "⚙️ قواعد"),
           el("button", { class: "btn danger", style: "padding:5px 8px;font-size:11px",
             onclick: () => deleteTenant(t.tenant_id)
           }, "🗑️"))),
     ));
+    const _pr = _tenantPanelRow(t);
+    if (_pr) rows.push(_pr);
   });
 
   box.appendChild(el("div", { class: "card" },
@@ -379,14 +395,8 @@ function renderTenants() {
         )
   ));
 
-  // Tenant rule-customization panel
-  if (state.tenantRules && state.tenantRulesFor) box.appendChild(renderTenantRules());
-
-  // Selected tenant details
-  if (state.selectedTenant) box.appendChild(renderTenantDetail());
-
-  // Tenant investigators panel
-  if (state.tenantInvs && state.tenantInvsFor) box.appendChild(renderTenantInvestigators());
+  // Detail panels render INLINE inside the table directly beneath the selected
+  // institution's row (see _tenantPanelRow) — never at the bottom of the page.
 
   return box;
 }
@@ -406,7 +416,33 @@ function renderAddTenantForm() {
   const emailI = el("input", { class: "form-control", type: "email", placeholder: "api@bank.example (اختياري)" });
   const phoneI = el("input", { class: "form-control", placeholder: "+967 77 123 4567 (اختياري)" });
   const limitI = el("input", { class: "form-control", type: "number", value: "5", min: "0", max: "500" });
-  const tzI = el("input", { class: "form-control", value: "Asia/Aden", dir: "ltr" });
+  const ARAB_TZ = [
+    ["Asia/Aden", "اليمن — عدن (UTC+3)"],
+    ["Asia/Riyadh", "السعودية — الرياض (UTC+3)"],
+    ["Asia/Dubai", "الإمارات — دبي (UTC+4)"],
+    ["Asia/Qatar", "قطر — الدوحة (UTC+3)"],
+    ["Asia/Bahrain", "البحرين — المنامة (UTC+3)"],
+    ["Asia/Kuwait", "الكويت — الكويت (UTC+3)"],
+    ["Asia/Muscat", "عُمان — مسقط (UTC+4)"],
+    ["Asia/Baghdad", "العراق — بغداد (UTC+3)"],
+    ["Asia/Amman", "الأردن — عمّان (UTC+3)"],
+    ["Asia/Beirut", "لبنان — بيروت (UTC+2)"],
+    ["Asia/Damascus", "سوريا — دمشق (UTC+3)"],
+    ["Asia/Jerusalem", "فلسطين — القدس (UTC+2)"],
+    ["Africa/Cairo", "مصر — القاهرة (UTC+2)"],
+    ["Africa/Khartoum", "السودان — الخرطوم (UTC+2)"],
+    ["Africa/Tripoli", "ليبيا — طرابلس (UTC+2)"],
+    ["Africa/Tunis", "تونس — تونس (UTC+1)"],
+    ["Africa/Algiers", "الجزائر — الجزائر (UTC+1)"],
+    ["Africa/Casablanca", "المغرب — الدار البيضاء (UTC+1)"],
+    ["Africa/Nouakchott", "موريتانيا — نواكشوط (UTC+0)"],
+    ["Africa/Djibouti", "جيبوتي — جيبوتي (UTC+3)"],
+    ["Africa/Mogadishu", "الصومال — مقديشو (UTC+3)"],
+    ["Indian/Comoros", "جزر القمر — موروني (UTC+3)"]
+  ];
+  const tzI = el("select", { class: "form-control", dir: "rtl" },
+    ...ARAB_TZ.map(([v, label]) => el("option", { value: v }, label)));
+  tzI.value = "Asia/Aden";
   const err = el("div", { style: "color:#FCA5A5;font-size:13px;margin-top:8px" });
 
   const btn = el("button", { class: "btn primary", style: "padding:12px 24px;font-size:14px" }, "✨ إنشاء + توليد المفاتيح");
@@ -946,13 +982,63 @@ function renderRules() {
         el("h1", { style: "font-size:1.7rem;font-weight:900" }, "📜 قواعد الاحتيال"),
         el("p", { style: "color:var(--muted);font-size:13px;margin-top:4px" }, (state.rules || []).length + " قاعدة منصة نشطة — اضغط لعرض التفاصيل والتفعيل/التعطيل"),
       ),
-      el("button", { class: "btn primary", onclick: async () => { try { await apiRoot("/rules/reload", { method: "POST" }); } catch(e){} await loadRules(); renderPage(); toast("أُعيد تحميل القواعد", "success"); } }, "🔄 إعادة تحميل"),
+      el("div", { style: "display:flex;gap:8px" },
+        el("button", { class: "btn primary", onclick: () => { state.showAddRule = !state.showAddRule; renderPage(); } }, "➕ إضافة قاعدة"),
+        el("button", { class: "btn", onclick: async () => { try { await apiRoot("/rules/reload", { method: "POST" }); } catch(e){} await loadRules(); renderPage(); toast("أُعيد تحميل القواعد", "success"); } }, "🔄 إعادة تحميل")),
     ),
+    state.showAddRule ? renderAddRuleForm() : null,
     el("div", { class: "card" },
       el("table", {},
         el("thead", {}, el("tr", {}, el("th", {}, "المعرّف"), el("th", {}, "الاسم"), el("th", {}, "الخطورة"), el("th", {}, "النقاط"), el("th", {}, "الحالة"), el("th", {}, "الوسوم"))),
         el("tbody", {}, ...rows))),
   );
+}
+
+function renderAddRuleForm() {
+  const tenants = state.tenants || [];
+  const tenI = el("select", { class: "form-control" },
+    tenants.length
+      ? tenants.map(t => el("option", { value: t.tenant_id }, (t.name || t.tenant_id) + " — " + t.tenant_id))
+      : [el("option", { value: "" }, "لا توجد مؤسسات — حمّل القائمة أولًا")]);
+  const idI = el("input", { class: "form-control", placeholder: "R-CUSTOM-001", dir: "ltr" });
+  const nameI = el("input", { class: "form-control", placeholder: "اسم القاعدة — مثال: مبلغ كبير جدًا" });
+  const sevI = el("select", { class: "form-control" },
+    ["low", "medium", "high", "critical"].map(v => el("option", { value: v }, v)));
+  sevI.value = "high";
+  const scoreI = el("input", { class: "form-control", type: "number", step: "0.01", min: "0", max: "1", value: "0.30", dir: "ltr" });
+  const descI = el("input", { class: "form-control", placeholder: "وصف يظهر للمحقق عند انطلاق القاعدة" });
+  const whenI = el("textarea", { class: "form-control", rows: "3", dir: "ltr", style: "font-family:monospace;font-size:12px",
+    placeholder: '{"and": [{">": [{"var":"tx.amount"}, 1000]}, {"==": [{"var":"features.device.is_new"}, true]}]}' });
+  return el("div", { class: "card", style: "border-color:var(--accent);border-width:2px;margin-bottom:14px" },
+    el("h3", { style: "margin-bottom:8px" }, "➕ قاعدة جديدة (خاصة بمؤسسة — لا تُغيّر قواعد المنصة)"),
+    el("p", { style: "color:var(--muted);font-size:12.5px;margin-bottom:10px" },
+      "الشرط بصيغة JSONLogic على السياق: tx.* (المعاملة) و features.* (الخصائص المحسوبة). تُحفظ في قاعدة البيانات (rule_overrides) وتُحمَّل في محرك القواعد فورًا وتدخل في Risk Fusion لهذه المؤسسة فقط — المؤسسات الأخرى لا تتأثر."),
+    el("div", { style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:10px" },
+      tenI, idI, nameI, sevI, scoreI),
+    descI, el("div", { style: "height:8px" }), whenI,
+    el("div", { style: "display:flex;gap:8px;margin-top:10px" },
+      el("button", { class: "btn primary", onclick: async () => {
+        const id = idI.value.trim();
+        if (!/^R-[A-Z0-9-]{2,40}$/.test(id)) { toast("المعرّف بصيغة R-XXX-### (أحرف إنجليزية كبيرة)", "error"); return; }
+        let when;
+        try { when = JSON.parse(whenI.value); } catch { toast("شرط JSONLogic غير صالح — راجع الصيغة", "error"); return; }
+        const score = parseFloat(scoreI.value);
+        if (isNaN(score) || score < 0 || score > 1) { toast("النقاط بين 0 و 1", "error"); return; }
+        const tid = tenI.value;
+        if (!tid) { toast("اختر المؤسسة أولًا", "error"); return; }
+        try {
+          await apiRoot("/rules/overrides/" + encodeURIComponent(tid) + "/" + encodeURIComponent(id),
+            { method: "PUT", body: {
+              enabled: true, score, severity: sevI.value,
+              name: nameI.value.trim() || id, description: descI.value.trim(),
+              when, tags: ["custom"] } });
+          toast("✅ أُنشئت القاعدة وحُفظت في قاعدة البيانات ودخلت محرك التقييم فورًا", "success");
+          state.showAddRule = false;
+          if (state.tenantRulesFor === tid) { await loadTenantRules(tid); }
+          await loadRules(); renderPage();
+        } catch (e) { toast(e.message, "error"); }
+      } }, "💾 إنشاء وتفعيل"),
+      el("button", { class: "btn", onclick: () => { state.showAddRule = false; renderPage(); } }, "إلغاء")));
 }
 
 function renderRuleDetail() {

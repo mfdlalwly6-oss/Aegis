@@ -2,6 +2,11 @@
 # test database (`aegis_test`) created from real migrations, never the live
 # `aegis` database. conftest.py hard-fails if the URL does not target
 # aegis_test. No SQLite path exists.
+# DEF-03: explicit project name prevents this stack from ever touching the
+# production stack (default project name is derived from the directory and
+# would collide with prod, making compose stop prod as orphans).
+name: aegis-test
+
 services:
   postgres:
     image: postgres:16-alpine
