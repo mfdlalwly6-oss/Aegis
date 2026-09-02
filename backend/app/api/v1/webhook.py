@@ -50,9 +50,14 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
     # BUG3 fix: validate numeric amount up-front so a malformed value yields a
     # clean 400 (not an uncaught ValueError -> 500) at the float() call below.
     try:
-        float(amount)
+        amount_f = float(amount)
     except (TypeError, ValueError):
         raise HTTPException(400, "amount_invalid") from None
+    # G08/DEF-02: the Transaction schema enforces amount > 0 (Field(gt=0)).
+    # Reject non-positive amounts here with a clean 400 instead of letting the
+    # pydantic ValidationError bubble up as an uncaught 500.
+    if amount_f <= 0:
+        raise HTTPException(400, "amount_must_be_positive") from None
 
     metadata = dict(src.get("metadata") or {})
     for k in ("velocity", "account", "beneficiary", "geo", "customer"):
