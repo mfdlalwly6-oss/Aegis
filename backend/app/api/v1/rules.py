@@ -14,34 +14,20 @@ class ToggleBody(BaseModel):
 
 @router.get("/")
 def list_rules(request: Request, owner=Depends(require_owner), registry=Depends(get_registry)):
+    """Platform rules only (tenant_id IS NULL). Tenant-specific custom rules live
+    in rule_overrides and are surfaced per-institution via /rules/overrides —
+    they must never appear in this platform list."""
     return [
         {
-            "id": r.id,
-            "name": r.name,
-            "severity": r.severity.value,
-            "score": r.score,
-            "enabled": r.enabled,
-            "tags": r.tags,
+            "id": r["id"],
+            "name": r["name"],
+            "severity": r["severity"],
+            "score": r["score"],
+            "enabled": r["enabled"],
+            "tags": r["tags"],
         }
-        for r in registry.rule_engine.rules
+        for r in registry.rule_repo.list_all()  # platform rules only
     ]
-
-
-@router.get("/{rule_id}")
-def rule_detail(rule_id: str, owner=Depends(require_owner), registry=Depends(get_registry)):
-    for r in registry.rule_engine.rules:
-        if r.id == rule_id:
-            return {
-                "id": r.id,
-                "name": r.name,
-                "severity": r.severity.value,
-                "score": r.score,
-                "enabled": r.enabled,
-                "tags": r.tags,
-                "description": r.description,
-                "when": r.when,
-            }
-    raise HTTPException(404, "rule_not_found")
 
 
 @router.post("/{rule_id}/toggle")
@@ -137,6 +123,23 @@ def tenant_effective_rules(
         "effective": registry.rule_repo.effective_rules_for(tenant_id),
         "overrides": registry.rule_repo.list_overrides(tenant_id),
     }
+
+
+@router.get("/{rule_id}")
+def rule_detail(rule_id: str, owner=Depends(require_owner), registry=Depends(get_registry)):
+    for r in registry.rule_engine.rules:
+        if r.id == rule_id:
+            return {
+                "id": r.id,
+                "name": r.name,
+                "severity": r.severity.value,
+                "score": r.score,
+                "enabled": r.enabled,
+                "tags": r.tags,
+                "description": r.description,
+                "when": r.when,
+            }
+    raise HTTPException(404, "rule_not_found")
 
 
 @router.put("/overrides/{tenant_id}/{rule_id}")

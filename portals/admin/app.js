@@ -68,6 +68,8 @@ const state = {
   tenantInvsFor: null,
   tenantRules: null,
   tenantRulesFor: null,
+  showCustomTenants: false,
+  customTenantList: [],
 };
 
 const $ = s => document.querySelector(s);
@@ -984,9 +986,11 @@ function renderRules() {
       ),
       el("div", { style: "display:flex;gap:8px" },
         el("button", { class: "btn primary", onclick: () => { state.showAddRule = !state.showAddRule; renderPage(); } }, "➕ إضافة قاعدة"),
+        el("button", { class: "btn", onclick: async () => { await loadCustomTenants(); renderPage(); } }, "🏢 المؤسسات والبنوك ذات القواعد الخاصة"),
         el("button", { class: "btn", onclick: async () => { try { await apiRoot("/rules/reload", { method: "POST" }); } catch(e){} await loadRules(); renderPage(); toast("أُعيد تحميل القواعد", "success"); } }, "🔄 إعادة تحميل")),
     ),
     state.showAddRule ? renderAddRuleForm() : null,
+    state.showCustomTenants ? renderCustomTenants() : null,
     el("div", { class: "card" },
       el("table", {},
         el("thead", {}, el("tr", {}, el("th", {}, "المعرّف"), el("th", {}, "الاسم"), el("th", {}, "الخطورة"), el("th", {}, "النقاط"), el("th", {}, "الحالة"), el("th", {}, "الوسوم"))),
@@ -994,12 +998,55 @@ function renderRules() {
   );
 }
 
+
+/* ── قائمة المؤسسات والبنوك ذات القواعد الخاصة (تعرض فقط من لديها rule_overrides) ── */
+async function loadCustomTenants() {
+  try {
+    const all = await apiRoot("/rules/overrides");  // كل المؤسسات ذات التخصيصات
+    const byT = {};
+    (Array.isArray(all) ? all : []).forEach(o => {
+      const tid = o.tenant_id; if (!tid) return;
+      byT[tid] = (byT[tid] || 0) + 1;
+    });
+    state.customTenantList = Object.entries(byT).map(([tid, n]) => ({
+      tid, n, name: (state.tenants.find(t => t.tenant_id === tid) || {}).name || tid,
+    }));
+  } catch (e) { state.customTenantList = []; }
+  state.showCustomTenants = true;
+}
+
+function renderCustomTenants() {
+  const list = state.customTenantList || [];
+  const body = list.length === 0
+    ? el("div", { style: "color:var(--muted);text-align:center;padding:20px" }, "لا توجد مؤسسات لديها قواعد مخصصة حاليًا.")
+    : el("div", { style: "display:flex;flex-direction:column;gap:6px" },
+        ...list.map(t => el("div", {
+            style: "display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;cursor:pointer",
+            onclick: async () => {
+              state.tenantRules = null; state.tenantRulesFor = null;
+              try { await loadTenantRules(t.tid); renderPage(); } catch (e) { toast(e.message, "error"); }
+            } },
+          el("span", { style: "font-weight:600" }, "🏢 " + t.name),
+          el("span", { class: "badge review" }, t.n + (t.n === 1 ? " قاعدة مخصصة" : " قواعد مخصصة")))));
+  return el("div", { class: "card", style: "border-color:var(--accent);border-width:2px;margin-bottom:14px" },
+    el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:10px" },
+      el("h3", {}, "🏢 المؤسسات والبنوك ذات القواعد الخاصة"),
+      el("button", { class: "btn", onclick: () => { state.showCustomTenants = false; renderPage(); } }, "✕")),
+    el("p", { style: "color:var(--muted);font-size:12.5px;margin-bottom:12px" },
+      "يُعرض هنا فقط المؤسسات التي لديها قاعدة مخصصة واحدة أو أكثر. اضغط على مؤسسة لإدارة قواعدها."),
+    body,
+    // عرض قواعد المؤسسة المختارة بنفس نمط ⚙️ قواعد (إعادة استخدام renderTenantRules)
+    state.tenantRules && state.tenantRulesFor ? renderTenantRules() : null);
+}
+
 function renderAddRuleForm() {
   const tenants = state.tenants || [];
-  const tenI = el("select", { class: "form-control" },
-    tenants.length
-      ? tenants.map(t => el("option", { value: t.tenant_id }, (t.name || t.tenant_id) + " — " + t.tenant_id))
-      : [el("option", { value: "" }, "لا توجد مؤسسات — حمّل القائمة أولًا")]);
+  // Multi-select: same custom rule applied to every checked institution.
+  const tenBoxes = tenants.map(t => {
+    const cb = el("input", { type: "checkbox", value: t.tenant_id, style: "accent-color:var(--accent)" });
+    return { cb, tid: t.tenant_id, node: el("label", { style: "display:flex;align-items:center;gap:6px;padding:4px 8px;background:var(--surface);border:1px solid var(--border);border-radius:7px;font-size:12.5px;cursor:pointer" },
+      cb, el("span", {}, (t.name || t.tenant_id))) };
+  });
   const idI = el("input", { class: "form-control", placeholder: "R-CUSTOM-001", dir: "ltr" });
   const nameI = el("input", { class: "form-control", placeholder: "اسم القاعدة — مثال: مبلغ كبير جدًا" });
   const sevI = el("select", { class: "form-control" },
@@ -1010,11 +1057,17 @@ function renderAddRuleForm() {
   const whenI = el("textarea", { class: "form-control", rows: "3", dir: "ltr", style: "font-family:monospace;font-size:12px",
     placeholder: '{"and": [{">": [{"var":"tx.amount"}, 1000]}, {"==": [{"var":"features.device.is_new"}, true]}]}' });
   return el("div", { class: "card", style: "border-color:var(--accent);border-width:2px;margin-bottom:14px" },
-    el("h3", { style: "margin-bottom:8px" }, "➕ قاعدة جديدة (خاصة بمؤسسة — لا تُغيّر قواعد المنصة)"),
+    el("h3", { style: "margin-bottom:8px" }, "➕ قاعدة جديدة (خاصة بمؤسسة أو أكثر — لا تُغيّر قواعد المنصة)"),
     el("p", { style: "color:var(--muted);font-size:12.5px;margin-bottom:10px" },
-      "الشرط بصيغة JSONLogic على السياق: tx.* (المعاملة) و features.* (الخصائص المحسوبة). تُحفظ في قاعدة البيانات (rule_overrides) وتُحمَّل في محرك القواعد فورًا وتدخل في Risk Fusion لهذه المؤسسة فقط — المؤسسات الأخرى لا تتأثر."),
+      "الشرط بصيغة JSONLogic على السياق: tx.* (المعاملة) و features.* (الخصائص المحسوبة). تُحفظ في rule_overrides وتُحمَّل في محرك القواعد فورًا وتدخل في Risk Fusion للمؤسسات المختارة فقط — المؤسسات الأخرى لا تتأثر."),
+    el("div", { style: "margin-bottom:10px" },
+      el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:6px" }, "المؤسسات المستهدفة (اختر واحدة أو أكثر):"),
+      tenBoxes.length
+        ? el("div", { style: "display:flex;flex-wrap:wrap;gap:6px;max-height:150px;overflow:auto;padding:6px;border:1px solid var(--border);border-radius:8px" },
+            ...tenBoxes.map(b => b.node))
+        : el("div", { style: "color:var(--muted);padding:8px" }, "لا توجد مؤسسات — حمّل القائمة أولًا")),
     el("div", { style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:10px" },
-      tenI, idI, nameI, sevI, scoreI),
+      idI, nameI, sevI, scoreI),
     descI, el("div", { style: "height:8px" }), whenI,
     el("div", { style: "display:flex;gap:8px;margin-top:10px" },
       el("button", { class: "btn primary", onclick: async () => {
@@ -1024,17 +1077,24 @@ function renderAddRuleForm() {
         try { when = JSON.parse(whenI.value); } catch { toast("شرط JSONLogic غير صالح — راجع الصيغة", "error"); return; }
         const score = parseFloat(scoreI.value);
         if (isNaN(score) || score < 0 || score > 1) { toast("النقاط بين 0 و 1", "error"); return; }
-        const tid = tenI.value;
-        if (!tid) { toast("اختر المؤسسة أولًا", "error"); return; }
+        const selTids = tenBoxes.filter(b => b.cb.checked).map(b => b.tid);
+        if (!selTids.length) { toast("اختر مؤسسة واحدة على الأقل", "error"); return; }
+        const body = { enabled: true, score, severity: sevI.value,
+          name: nameI.value.trim() || id, description: descI.value.trim(),
+          when, tags: ["custom"] };
         try {
-          await apiRoot("/rules/overrides/" + encodeURIComponent(tid) + "/" + encodeURIComponent(id),
-            { method: "PUT", body: {
-              enabled: true, score, severity: sevI.value,
-              name: nameI.value.trim() || id, description: descI.value.trim(),
-              when, tags: ["custom"] } });
-          toast("✅ أُنشئت القاعدة وحُفظت في قاعدة البيانات ودخلت محرك التقييم فورًا", "success");
+          let okN = 0, failN = 0;
+          for (const tid of selTids) {
+            try {
+              await apiRoot("/rules/overrides/" + encodeURIComponent(tid) + "/" + encodeURIComponent(id),
+                { method: "PUT", body });
+              okN++;
+            } catch (e) { failN++; }
+          }
+          if (failN === 0) toast("✅ أُنشئت القاعدة على " + okN + " مؤسسة وحُفظت ودخلت محرك التقييم فورًا", "success");
+          else toast("⚠️ نجح " + okN + " وفشل " + failN, failN && !okN ? "error" : "success");
           state.showAddRule = false;
-          if (state.tenantRulesFor === tid) { await loadTenantRules(tid); }
+          if (state.tenantRulesFor && selTids.includes(state.tenantRulesFor)) { await loadTenantRules(state.tenantRulesFor); }
           await loadRules(); renderPage();
         } catch (e) { toast(e.message, "error"); }
       } }, "💾 إنشاء وتفعيل"),
