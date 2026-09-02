@@ -6,11 +6,16 @@ pip install -r backend/requirements.txt pytest pytest-asyncio
 pytest -q                 # من جذر المشروع (pytest.ini يضبط pythonpath=backend)
 ```
 
-داخل Docker:
+داخل Docker (الطريقة الرسمية — PostgreSQL معزولة):
+```bash
+docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
+```
+
+الطريقة اليدوية داخل الحاوية:
 ```bash
 docker compose exec aegis sh -c "pip install -q pytest pytest-asyncio && python -m pytest /app/../tests -q"
 ```
-(الاختبارات غير منسوخة داخل الصورة افتراضيًا — شغّلها من الجذر على جهازك.)
+(AEGIS PostgreSQL-only: الاختبارات تعمل على قاعدة PostgreSQL معزولة aegis_test مبنية من migrations الحقيقية — لا SQLite إطلاقًا.)
 
 ## الخريطة
 | الملف | ماذا يغطي |
@@ -21,4 +26,4 @@ docker compose exec aegis sh -c "pip install -q pytest pytest-asyncio && python 
 | `tests/test_components.py` | قواعد، graph، AML، ML fallback، behavior score |
 | `tests/test_seed_rules.py` | صحة ruleset الافتراضي وتحميله |
 
-كل اختبار يستخدم قاعدة SQLite مؤقتة معزولة (tmp_path) — لا يمس بياناتك.
+كل اختبار ينشئ قاعدة PostgreSQL معزولة aegis_test (drop/create لكل اختبار) ويفشل بأمان إذا حاول لمس قاعدة الإنتاج — لا يوجد أي مسار SQLite.

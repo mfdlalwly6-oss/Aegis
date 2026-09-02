@@ -1,20 +1,47 @@
-# Test runner — does NOT touch the production image (Option B).
-# Mounts tests/ read-only into a throwaway container built from the same image,
-# installs pinned dev deps from requirements-dev.txt (reproducible), runs pytest
-# against an isolated sqlite driver (never the live PostgreSQL).
+# Test runner — runs the full pytest suite against an ISOLATED PostgreSQL
+# test database (`aegis_test`) created from real migrations, never the live
+# `aegis` database. conftest.py hard-fails if the URL does not target
+# aegis_test. No SQLite path exists.
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aegis-test-postgres
+    environment:
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: AegisPg2026Dev
+      POSTGRES_DB: aegis
+    volumes:
+      - pg-test-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegis -d aegis"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
   aegis-test:
-    build: .
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     image: aegis-aegis
     working_dir: /app
     environment:
-      AEGIS_DB_DRIVER: sqlite
-      AEGIS_DATA_DIR: /tmp/aegis-test
-      AEGIS_DB_PATH: /tmp/aegis-test/aegis.db
+      AEGIS_DB_DRIVER: postgres
+      AEGIS_TEST_ADMIN_URL: postgresql://aegis:AegisPg2026Dev@postgres:5432/aegis
       AEGIS_ENV: development
     volumes:
       - ./tests:/app/tests:ro
       - ./pytest.ini:/app/pytest.ini:ro
       - ./ruff.toml:/app/ruff.toml:ro
       - ./backend/requirements-dev.txt:/app/requirements-dev.txt:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
     command: ["sh", "-c", "pip install -q -r /app/requirements-dev.txt && python -m pytest /app/tests -q"]
+
+volumes:
+  pg-test-data:
+
+networks:
+  default:
+    driver: bridge

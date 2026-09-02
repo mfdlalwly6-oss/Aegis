@@ -7,6 +7,21 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: aegis
+          POSTGRES_PASSWORD: AegisPg2026Dev
+          POSTGRES_DB: aegis
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aegis -d aegis"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      AEGIS_DB_DRIVER: postgres
+      AEGIS_TEST_ADMIN_URL: postgresql://aegis:AegisPg2026Dev@127.0.0.1:5432/aegis
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

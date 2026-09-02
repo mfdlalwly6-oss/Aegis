@@ -10,12 +10,14 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _railway_env_shim() -> None:
+def _database_url_env_shim() -> None:
     """Map platform-standard env vars to AEGIS_* names when unset.
 
-    Railway injects DATABASE_URL (unprefixed) on its Postgres plugin; AEGIS reads
+    Many PostgreSQL providers inject a standard unprefixed DATABASE_URL
+    (Railway, Heroku, Render, managed Postgres, generic Docker). AEGIS reads
     AEGIS_DATABASE_URL (env_prefix="AEGIS_"). If only the unprefixed form exists,
-    adopt it — local/dev behavior (AEGIS_DATABASE_URL) always wins when set.
+    adopt it — the explicitly-prefixed form always wins when set. This keeps the
+    app deployment-agnostic: configuration comes from env, code knows no provider.
     No secrets are logged or written; this only re-points an env var reference.
     """
     if not os.environ.get("AEGIS_DATABASE_URL") and os.environ.get("DATABASE_URL"):
@@ -23,7 +25,7 @@ def _railway_env_shim() -> None:
         os.environ.setdefault("AEGIS_DB_DRIVER", "postgres")
 
 
-_railway_env_shim()
+_database_url_env_shim()
 
 
 class Settings(BaseSettings):
@@ -44,8 +46,12 @@ class Settings(BaseSettings):
     OWNER_TOKEN: str = "aegis-dev-owner-token"
     DATA_DIR: str = "/tmp/aegis-data"
     DB_PATH: str = ""
-    DB_DRIVER: str = "sqlite"  # sqlite | postgres (TASK 1)
-    DATABASE_URL: str = ""  # postgresql://user:pass@host:5432/db when postgres (TASK 1)
+    DB_DRIVER: str = "postgres"  # PostgreSQL only — no SQLite driver exists
+    DATABASE_URL: str = ""  # postgresql://user:pass@host:5432/db — runtime (least-privilege aegis_app)
+    # Optional superuser/owner connection used ONLY by pgdb.migrate() to create
+    # roles/schema (migration 008 creates aegis_app itself). If empty, migrate()
+    # falls back to DATABASE_URL (works for pre-migrated databases).
+    DATABASE_ADMIN_URL: str = ""
     LEGACY_SECRET: str = ""
     PUBLIC_URL: str = "http://localhost:8000"
 

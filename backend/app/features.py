@@ -1,5 +1,5 @@
 """Feature extraction — computes signals from transaction + historical data.
-All features are real: they query the actual transaction history in SQLite.
+All features are real: they query the actual transaction history in PostgreSQL.
 """
 
 from __future__ import annotations

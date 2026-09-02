@@ -39,7 +39,13 @@ def _load_admin_url() -> str:
             "No PostgreSQL URL found for tests. Set AEGIS_TEST_ADMIN_URL or "
             "AEGIS_DATABASE_URL (or define AEGIS_DATABASE_URL in .env)."
         )
-    # docker-compose service name is unreachable from the host test process
+    # The compose service name is unreachable only when pytest runs on the
+    # HOST. Inside the test container (compose network) "postgres" resolves,
+    # so an explicit AEGIS_TEST_ADMIN_URL is used as-is. Heuristic: if the
+    # URL targets the compose host and we are not on the host, keep it.
+    in_container = Path("/.dockerenv").exists()
+    if in_container or os.environ.get("AEGIS_TEST_ADMIN_URL"):
+        return url
     return url.replace("@postgres:", "@127.0.0.1:").replace("@postgres/", "@127.0.0.1/")
 
 

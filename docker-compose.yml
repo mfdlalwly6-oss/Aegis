@@ -27,10 +27,13 @@ services:
     container_name: aegis-platform
     restart: unless-stopped
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       AEGIS_DATA_DIR: /data
-      AEGIS_DB_PATH: /data/aegis.db
+      AEGIS_DB_DRIVER: postgres
+      AEGIS_DATABASE_URL: ${AEGIS_DATABASE_URL:-postgresql://aegis_app:AegisApp2026Dev@postgres:5432/aegis}
+      AEGIS_DATABASE_ADMIN_URL: ${AEGIS_DATABASE_ADMIN_URL:-postgresql://aegis:${POSTGRES_PASSWORD:-AegisPg2026Dev}@postgres:5432/aegis}
       PORT: "8000"
     ports:
       - "8000:8000"

@@ -28,7 +28,7 @@ COPY models ./models
 COPY training ./training
 COPY scripts ./scripts
 
-# Data dir (SQLite + any file state) — mount a volume here
+# Data dir (file state only — the database is PostgreSQL) — mount a volume here
 RUN mkdir -p /data
 
 EXPOSE 8000

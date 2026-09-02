@@ -58,6 +58,15 @@ class PGDatabase:
         self.url = url or (
             getattr(settings, "DATABASE_URL", None) or getattr(settings, "database_url", "") or ""
         )
+        # Migrations must NOT run as the least-privilege runtime role: migration
+        # 008 is what CREATES aegis_app, so running them as aegis_app is a
+        # circular bootstrap dependency. A dedicated superuser/owner connection
+        # (AEGIS_DATABASE_ADMIN_URL) is used for migrate(); runtime stays on
+        # aegis_app. Falls back to the runtime URL when no admin URL is set
+        # (pre-migrated databases keep working unchanged).
+        self.admin_url = (
+            getattr(settings, "DATABASE_ADMIN_URL", None) or self.url
+        )
 
     # -- connection management ----------------------------------------
     def _conn(self) -> psycopg.Connection:
@@ -133,7 +142,9 @@ class PGDatabase:
 
     def migrate(self) -> list[str]:
         applied: list[str] = []
-        conn = self._conn()
+        conn = psycopg.connect(
+            self.admin_url, row_factory=dict_row, connect_timeout=10, autocommit=True
+        )
         conn.execute(
             "CREATE TABLE IF NOT EXISTS schema_migrations ("
             "name TEXT PRIMARY KEY, applied_at TEXT NOT NULL, sha256 TEXT NOT NULL)"

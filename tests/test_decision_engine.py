@@ -1,6 +1,6 @@
 """Decision Engine tests — thresholds, sanctions forcing, fx_missing, fusion bounds, alert/case creation.
 
-These exercise the DecisionOrchestrator end-to-end against a real (sqlite, isolated)
+These exercise the DecisionOrchestrator end-to-end against a real isolated PostgreSQL test database
 registry via the FastAPI client, plus direct unit tests of _decide/_band logic.
 """
 
@@ -59,7 +59,7 @@ class TestDecideThresholds:
 
 
 class TestDecisionEngineE2E:
-    """End-to-end decision behavior via the real webhook pipeline (isolated sqlite)."""
+    """End-to-end decision behavior via the real webhook pipeline (isolated PostgreSQL aegis_test)."""
 
     def _tenant(self, client):
         import uuid
