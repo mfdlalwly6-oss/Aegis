@@ -43,6 +43,9 @@ async def login(body: LoginBody, registry=Depends(get_registry)) -> TokenPair:
     No hardcoded credentials. Bootstrap an admin via
     AEGIS_PLATFORM_ADMIN_EMAIL / AEGIS_PLATFORM_ADMIN_PASSWORD.
     """
+    # Pre-auth runs in platform scope: reset pooled connection GUC before any
+    # DB work (same stale-GUC hazard documented in webhook.py).
+    registry.db.set_tenant("platform")
     user = registry.user_repo.authenticate_global(body.email, body.password)
     if not user or user.get("role") != "admin":
         raise HTTPException(401, "invalid_credentials")
@@ -52,6 +55,9 @@ async def login(body: LoginBody, registry=Depends(get_registry)) -> TokenPair:
 @router.post("/institution/login")
 def institution_login(body: LoginBody, request: "Request", registry=Depends(get_registry)):
     """Institution Owner login — email/password → tenant-scoped JWT."""
+    # Pre-auth runs in platform scope: reset pooled connection GUC before the
+    # global user lookup + audit insert (audit_log RLS is platform-scoped).
+    registry.db.set_tenant("platform")
     user = registry.user_repo.authenticate_global(body.email, body.password)
     if not user:
         registry.audit.log(

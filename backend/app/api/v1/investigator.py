@@ -108,6 +108,10 @@ def _parse_notes(rows: list[dict]) -> list[dict]:
 
 @router.post("/login")
 def investigator_login(body: InvestigatorLogin, request: Request, registry=Depends(get_registry)):
+    # Pre-auth runs in platform scope: reset pooled connection GUC before the
+    # global investigator lookup + audit insert (audit_log RLS is platform-scoped;
+    # a stale tenant GUC from a prior request caused InsufficientPrivilege 500s).
+    registry.db.set_tenant("platform")
     inv = registry.investigators.authenticate(body.email, body.password)
     if not inv:
         registry.audit.log(
