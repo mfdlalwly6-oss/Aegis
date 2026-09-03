@@ -37,6 +37,7 @@ class FxService:
         region: str | None = None,
         institution_rate: float | None = None,
         at: datetime | None = None,
+        tenant_id: str | None = None,
     ) -> Money:
         """Produce the Money object: original untouched + reference value + FX proof."""
         ccy = (currency or "").upper()
@@ -83,14 +84,15 @@ class FxService:
         # Look up the AEGIS reference rate valid at the transaction time.
         # Try direct pair first, then the inverse pair (1/rate) — rates are often
         # stored in one direction only.
-        rate_row, inverted = self._lookup(ccy, ref_ccy, region=region, at=at)
+        rate_row, inverted = self._lookup(ccy, ref_ccy, region=region, at=at, tenant_id=tenant_id)
         if rate_row is None:
             # Try cross-rate via reference currency (e.g., YER->SAR via USD)
-            rate_row, inverted = self.cross_rate(ccy, ref_ccy, region=region, at=at)
+            rate_row, inverted = self.cross_rate(ccy, ref_ccy, region=region, at=at, tenant_id=tenant_id)
         if rate_row is None:
             # Fallback: newest known rate regardless of validity window, flagged STALE.
             stale_row = self.fx_repo.latest_valid(
-                ccy, ref_ccy, region=region, at=datetime.max.replace(tzinfo=UTC)
+                ccy, ref_ccy, region=region, at=datetime.max.replace(tzinfo=UTC),
+                tenant_id=tenant_id,
             )
             if stale_row is None:
                 money.reference_amount = None
@@ -156,20 +158,40 @@ class FxService:
         return money
 
     def _lookup(
-        self, base: str, quote: str, *, region: str | None, at: datetime | None
+        self, base: str, quote: str, *, region: str | None, at: datetime | None,
+        tenant_id: str | None = None,
     ) -> tuple[dict | None, bool]:
         """Find a usable rate row. Returns (row, inverted). Tries direct pair,
         then the inverse pair which is inverted to serve the requested direction."""
-        row = self.fx_repo.latest_valid(base, quote, region=region, at=at)
-        if row is not None:
-            return row, False
-        inv = self.fx_repo.latest_valid(quote, base, region=region, at=at)
-        if inv is not None and float(inv["rate"]) > 0:
-            return inv, True
-        return None, False
+        candidates: list[tuple[dict, bool]] = []
+        if tenant_id:
+            # Tier 0 — Tenant FX Override, both directions, before any platform rate.
+            for b, q, inv_flag in ((base, quote, False), (quote, base, True)):
+                t = self.fx_repo.latest_valid(b, q, region=region, at=at,
+                                              tenant_id=tenant_id, tenant_only=True)
+                if t is not None and float(t["rate"]) > 0:
+                    candidates.append((t, inv_flag))
+            if candidates:
+                # direct hit preferred; else the inverse override
+                return candidates[0]
+        # Platform rates: gather both directions, then rank by source authority.
+        for b, q, inv_flag in ((base, quote, False), (quote, base, True)):
+            r = self.fx_repo.latest_valid(b, q, region=region, at=at)
+            if r is not None and float(r["rate"]) > 0:
+                candidates.append((r, inv_flag))
+        if not candidates:
+            return None, False
+        # Highest authority wins (official > aegis_reference > ...); on ties prefer
+        # the direct pair (no inversion rounding), then the freshest fetch.
+        candidates.sort(
+            key=lambda c: (c[0].get("_rank", 0), not c[1], c[0].get("fetched_at", "")),
+            reverse=True,
+        )
+        return candidates[0]
 
     def cross_rate(
-        self, base: str, quote: str, *, region: str | None = None, at: datetime | None = None
+        self, base: str, quote: str, *, region: str | None = None, at: datetime | None = None,
+        tenant_id: str | None = None,
     ) -> tuple[dict | None, bool]:
         """Find a cross rate via the reference currency when no direct pair exists.
         Example: YER->SAR when only YER->USD and USD->SAR are stored.
@@ -178,8 +200,8 @@ class FxService:
         if base == ref or quote == ref:
             return None, False  # not a cross-rate case
         # Try base->ref and ref->quote
-        row1, inv1 = self._lookup(base, ref, region=region, at=at)
-        row2, inv2 = self._lookup(ref, quote, region=region, at=at)
+        row1, inv1 = self._lookup(base, ref, region=region, at=at, tenant_id=tenant_id)
+        row2, inv2 = self._lookup(ref, quote, region=region, at=at, tenant_id=tenant_id)
         if row1 is None or row2 is None:
             return None, False
         rate1 = float(row1["rate"])

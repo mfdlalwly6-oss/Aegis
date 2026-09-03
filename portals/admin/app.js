@@ -1221,7 +1221,7 @@ async function renderPage() {
       await loadInvestigators();
       c.replaceChildren(renderInvestigators());
     } else if (state.page === "fx") {
-      await Promise.all([loadFxCurrencies(), loadFxRates()]);
+      await Promise.all([loadFxCurrencies(), loadFxRates(), loadTenants()]);
       c.replaceChildren(renderFx());
     } else if (state.page === "watchlists") {
       await loadWatchlists();
@@ -1334,7 +1334,13 @@ function renderFx() {
   const rb = el("input", { class: "form-control", placeholder: "YER", maxlength: 3, dir: "ltr", style: "width:80px" });
   const rq = el("input", { class: "form-control", placeholder: "USD", maxlength: 3, dir: "ltr", style: "width:80px" });
   const rr = el("input", { class: "form-control", type: "number", step: "any", placeholder: "0.000636", dir: "ltr", style: "width:130px" });
-  const rsrc = el("input", { class: "form-control", value: "aegis_reference", dir: "ltr", style: "width:150px" });
+  const rsrc = el("select", { class: "form-control", style: "width:150px" },
+    el("option", { value: "official" }, "رسمي (official)"),
+    el("option", { value: "aegis_reference", selected: true }, "مرجعي (aegis)"),
+    el("option", { value: "manual" }, "يدوي (manual)"));
+  const rscope = el("select", { class: "form-control", style: "min-width:200px" },
+    el("option", { value: "" }, "🌐 كل المؤسسات (عام)"),
+    ...(state.tenants || []).map(t => el("option", { value: t.tenant_id }, "🏢 " + (t.name || t.tenant_id))));
   const fmsg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
   return el("div", {},
     el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "💱 إدارة العملات وأسعار الصرف"),
@@ -1366,29 +1372,72 @@ function renderFx() {
         ))))),
     el("div", { class: "card" },
       el("h3", { style: "margin-bottom:12px" }, "📈 أسعار الصرف (لقطات تاريخية)"),
-      el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px" }, rb, rq, rr, rsrc,
+      el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px" }, rb, rq, rr, rsrc, rscope,
         el("button", { class: "btn success", onclick: async () => {
           fmsg.textContent = ""; fmsg.style.color = "var(--muted)";
           if (!rb.value.trim() || !rq.value.trim() || !rr.value) { fmsg.textContent = "أدخل الزوج والسعر"; fmsg.style.color = "#FCA5A5"; return; }
           try {
-            await api("/fx/rates", { method: "POST", body: { base_ccy: rb.value.trim().toUpperCase(), quote_ccy: rq.value.trim().toUpperCase(), rate: Number(rr.value), source: rsrc.value.trim() || "aegis_reference" } });
-            toast("أُضيف السعر (لقطة جديدة)", "success"); await loadFxRates(); render();
+            const scopeTid = rscope.value || null;
+            await api("/fx/rates", { method: "POST", body: { base_ccy: rb.value.trim().toUpperCase(), quote_ccy: rq.value.trim().toUpperCase(), rate: Number(rr.value), source: rsrc.value, tenant_id: scopeTid } });
+            toast(scopeTid ? "أُضيف السعر كاستثناء لهذه المؤسسة" : "أُضيف السعر العام (لقطة جديدة)", "success"); await loadFxRates(); render();
           } catch (e) { fmsg.textContent = e.message; fmsg.style.color = "#FCA5A5"; }
         } }, "➕ إضافة سعر")),
       fmsg,
       rates.length === 0 ? el("div", { style: "color:var(--muted)" }, "لا أسعار مسجَّلة بعد.") :
       el("table", {},
-        el("thead", {}, el("tr", {}, el("th", {}, "الزوج"), el("th", {}, "السعر"), el("th", {}, "النوع"), el("th", {}, "المصدر"), el("th", {}, "صالح من"), el("th", {}, "صالح إلى"), el("th", {}, "سُجّل"))),
+        el("thead", {}, el("tr", {}, el("th", {}, "الزوج"), el("th", {}, "السعر"), el("th", {}, "النوع"), el("th", {}, "المصدر"), el("th", {}, "النطاق"), el("th", {}, "صالح من"), el("th", {}, "صالح إلى"), el("th", {}, "سُجّل"))),
         el("tbody", {}, ...rates.map(x => el("tr", {},
           el("td", { style: "font-weight:700" }, el("code", { style: "font-size:11px" }, (x.base_ccy || "") + "/" + (x.quote_ccy || ""))),
           el("td", {}, String(x.rate)),
           el("td", {}, x.rate_type || "mid"),
           el("td", {}, el("span", { class: "badge info" }, x.source || "")),
+          el("td", {}, x.tenant_id
+            ? el("span", { class: "badge review" }, "🏢 " + ((state.tenants.find(t => t.tenant_id === x.tenant_id) || {}).name || x.tenant_id))
+            : el("span", { class: "badge allow" }, "🌐 عام")),
           el("td", { style: "font-size:11px" }, fmtTs(x.valid_from)),
           el("td", { style: "font-size:11px" }, x.valid_to ? fmtTs(x.valid_to) : "مفتوح"),
           el("td", { style: "font-size:11px" }, fmtTs(x.fetched_at)),
         ))))),
+    renderFxOverrides(),
   );
+}
+
+/* 🎯 استثناءات المؤسسات — Tenant FX Overrides (أسعار خاصة بمؤسسة معينة) */
+function renderFxOverrides() {
+  const rates = state.fxRates || [];
+  const nowIso = new Date().toISOString();
+  const tenantRows = rates.filter(x => x.tenant_id);
+  const activeOf = x => !x.valid_to || x.valid_to > nowIso;
+  return el("div", { class: "card" },
+    el("h3", { style: "margin-bottom:6px" }, "🎯 استثناءات المؤسسات (Tenant FX Overrides)"),
+    el("p", { style: "color:var(--muted);font-size:12.5px;margin-bottom:12px" },
+      "سعر الاستثناء يتفوق على السعر العام لهذه المؤسسة فقط. الإنهاء يغلق نافذة الصلاحية دون حذف — اللقطات التاريخية تبقى سليمة للتدقيق."),
+    tenantRows.length === 0
+      ? el("div", { style: "color:var(--muted)" }, "لا استثناءات مسجّلة — كل المؤسسات تستخدم السعر العام أو سعرها المُرسَل.")
+      : el("div", { style: "overflow:auto" }, el("table", {},
+          el("thead", {}, el("tr", {},
+            el("th", {}, "المؤسسة"), el("th", {}, "الزوج"), el("th", {}, "السعر"),
+            el("th", {}, "المصدر"), el("th", {}, "الحالة"), el("th", {}, "صالح من"), el("th", {}, "إجراء"))),
+          el("tbody", {}, ...tenantRows.map(x => {
+            const tname = (state.tenants.find(t => t.tenant_id === x.tenant_id) || {}).name || x.tenant_id;
+            const act = activeOf(x);
+            return el("tr", { style: act ? "" : "opacity:.55" },
+              el("td", { style: "font-weight:600;font-size:12.5px" }, "🏢 " + tname),
+              el("td", {}, el("code", { style: "font-size:11px" }, (x.base_ccy || "") + "/" + (x.quote_ccy || ""))),
+              el("td", { style: "font-weight:700" }, String(x.rate)),
+              el("td", {}, el("span", { class: "badge info" }, x.source || "")),
+              el("td", {}, el("span", { class: "badge " + (act ? "allow" : "block") }, act ? "فعّال" : "منتهٍ")),
+              el("td", { style: "font-size:11px" }, fmtTs(x.valid_from)),
+              el("td", {}, act ? el("button", { class: "btn sm danger", style: "padding:3px 8px;font-size:10.5px",
+                onclick: async () => {
+                  if (!confirm("إنهاء هذا الاستثناء؟ ستعود المؤسسة للسعر العام فورًا.")) return;
+                  try {
+                    await api("/fx/rates/" + encodeURIComponent(x.rate_id) + "/end", { method: "POST", body: {} });
+                    toast("أُنهي الاستثناء — عادت المؤسسة للسعر العام", "success");
+                    await loadFxRates(); render();
+                  } catch (e) { toast(e.message, "error"); }
+                } }, "⏹ إنهاء") : null));
+          })))));
 }
 
 

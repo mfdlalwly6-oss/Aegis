@@ -164,11 +164,13 @@ def _apply_fx(registry, tx: Transaction, body: dict) -> Transaction:
     region = src.get("region") or ctx.get("region") or settings.FX_DEFAULT_REGION
     institution_rate = src.get("institution_rate") or ctx.get("institution_rate")
     institution_rate = float(institution_rate) if institution_rate else None
-    money = registry.fx.normalize(tx.amount, ccy, region=region, institution_rate=institution_rate)
+    money = registry.fx.normalize(tx.amount, ccy, region=region, institution_rate=institution_rate,
+                                  tenant_id=getattr(tx, "tenant_id", None))
     tx.reference_amount = money.reference_amount
     tx.reference_currency = money.reference_currency
     tx.fx_status = money.fx.status.value if money.fx else None
     tx.fx_snapshot_id = getattr(money.fx, "rate_id", None) if money.fx else None
+    tx.fx = money.fx  # full immutable snapshot -> persisted into fx_proof for audit
     return tx
 
 

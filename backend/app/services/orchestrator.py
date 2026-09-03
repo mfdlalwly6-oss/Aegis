@@ -331,6 +331,7 @@ class DecisionOrchestrator:
                 logger.warning("ai.explanation_failed", error=str(e))
 
         # 12. Build assessment (with FX proof for audit)
+        _fxs = getattr(tx, "fx", None)
         fx_proof = {
             "original_amount": tx.amount,
             "original_currency": tx.currency,
@@ -338,6 +339,15 @@ class DecisionOrchestrator:
             "reference_currency": getattr(tx, "reference_currency", None),
             "fx_snapshot_id": getattr(tx, "fx_snapshot_id", None),
             "fx_status": getattr(tx, "fx_status", None),
+            # Full audit trail of the rate actually used at decision time.
+            "rate": getattr(_fxs, "rate", None),
+            "rate_type": getattr(_fxs, "rate_type", None),
+            "source": getattr(_fxs, "source", None),
+            "region": getattr(_fxs, "region", None),
+            "institution_rate": getattr(_fxs, "institution_rate", None),
+            "divergence_pct": getattr(_fxs, "divergence_pct", None),
+            "is_stale": getattr(_fxs, "is_stale", None),
+            "valid_from": (str(getattr(_fxs, "valid_from")) if getattr(_fxs, "valid_from", None) else None),
         }
         assessment = RiskAssessment(
             tx_id=tx.tx_id,

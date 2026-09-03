@@ -149,6 +149,7 @@ class Transaction(BaseModel):
     reference_currency: str | None = None
     fx_snapshot_id: str | None = None
     fx_status: str | None = None  # ok | native | stale | divergent | missing
+    fx: FxSnapshot | None = None  # full immutable snapshot (audit trail in fx_proof)
 
 
 class RuleHit(BaseModel):

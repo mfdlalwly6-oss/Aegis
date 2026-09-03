@@ -48,14 +48,15 @@ class FxRateRepository:
         spread_pct: float | None = None,
         valid_from: str | None = None,
         valid_to: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict:
         now = utcnow()
         rid = generate_id("fxr")
         vf = valid_from or now
         self.db.execute(
             "INSERT INTO fx_rates (rate_id,base_ccy,quote_ccy,rate,rate_type,source,"
-            "region,spread_pct,fetched_at,valid_from,valid_to,created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "region,spread_pct,fetched_at,valid_from,valid_to,created_at,tenant_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 rid,
                 base_ccy.upper(),
@@ -69,6 +70,7 @@ class FxRateRepository:
                 vf,
                 valid_to,
                 now,
+                tenant_id,
             ),
         )
         return self.get(rid)
@@ -83,11 +85,30 @@ class FxRateRepository:
         *,
         region: str | None = None,
         at: datetime | None = None,
+        tenant_id: str | None = None,
+        tenant_only: bool = False,
     ) -> dict | None:
-        """Newest rate valid at `at` (default now). Region-specific beats 'global'.
-        Among ties, higher-trust source wins, then most recent fetched_at."""
+        """Newest rate valid at `at` (default now). Priority: a rate scoped to this
+        tenant (Tenant FX Override) always wins; otherwise region-specific beats
+        'global'. Among ties, higher-trust source wins, then most recent fetched_at."""
         base, quote = base_ccy.upper(), quote_ccy.upper()
         at_iso = (at or datetime.now(UTC)).isoformat()
+
+        # Tier 0 — Tenant FX Override: a rate row scoped to this exact tenant.
+        if tenant_id:
+            trows = self.db.query(
+                "SELECT * FROM fx_rates WHERE base_ccy=? AND quote_ccy=? AND tenant_id=? "
+                "AND valid_from<=? AND (valid_to IS NULL OR valid_to>?) "
+                "ORDER BY fetched_at DESC",
+                (base, quote, tenant_id, at_iso, at_iso),
+            )
+            if trows:
+                trows.sort(key=lambda r: (_rank(r["source"]), r["fetched_at"]), reverse=True)
+                out = dict(trows[0]); out["_rank"] = _rank(out["source"])
+                return out
+            if tenant_only:
+                return None  # caller wants tenant-scoped rates only
+
         regions = (
             [region, "global"]
             if region and region != "global"
@@ -97,6 +118,7 @@ class FxRateRepository:
         for reg in regions:
             rows = self.db.query(
                 "SELECT * FROM fx_rates WHERE base_ccy=? AND quote_ccy=? AND region=? "
+                "AND tenant_id IS NULL "
                 "AND valid_from<=? AND (valid_to IS NULL OR valid_to>?) "
                 "ORDER BY fetched_at DESC",
                 (base, quote, reg, at_iso, at_iso),
