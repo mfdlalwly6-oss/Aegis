@@ -67,9 +67,14 @@ class TransactionRepository:
         return self.db.query("SELECT * FROM transactions ORDER BY ts DESC LIMIT ?", (limit,))
 
     def velocity(self, tenant_id: str, sender: str, window_sec: int) -> dict:
-        """Count + sum of transactions from this sender in the last window."""
+        """Count + currency-normalized sum of this sender's transactions in the window.
+
+        Sums reference_amount (already converted to the platform reference currency
+        at decision time) so amounts in different currencies are never added raw.
+        Legacy rows without a reference amount fall back to their raw amount —
+        flagged via mixed_currency=False only when every row had a reference value."""
         rows = self.db.query(
-            "SELECT amount, ts FROM transactions "
+            "SELECT amount, reference_amount, ts FROM transactions "
             "WHERE tenant_id=? AND sender_account_id=? "
             "ORDER BY ts DESC LIMIT 200",
             (tenant_id, sender),
@@ -77,6 +82,7 @@ class TransactionRepository:
         now = datetime.now(UTC)
         cutoff = now.timestamp() - window_sec
         count, total = 0, 0.0
+        used_fallback = False
         for r in rows:
             try:
                 ts = datetime.fromisoformat(r["ts"]).timestamp()
@@ -84,8 +90,14 @@ class TransactionRepository:
                 continue
             if ts >= cutoff:
                 count += 1
-                total += float(r["amount"])
-        return {"count": count, "total_amount": total}
+                ref = r.get("reference_amount")
+                if ref is not None:
+                    total += float(ref)
+                else:
+                    total += float(r["amount"])
+                    used_fallback = True
+        return {"count": count, "total_amount": total,
+                "mixed_currency_fallback": used_fallback}
 
     def distinct_devices(self, tenant_id: str, sender: str) -> int:
         row = self.db.query_one(

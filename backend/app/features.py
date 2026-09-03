@@ -43,8 +43,18 @@ class FeatureExtractor:
         meta = tx.metadata or {}
         hour = tx.timestamp.hour if tx.timestamp else datetime.now(UTC).hour
 
+        # amount_usd: transaction value normalized to the reference currency.
+        # FX is applied at ingestion (webhook._apply_fx) before extraction, so
+        # reference_amount is already set. Native-currency tx -> amount itself.
+        # Missing FX -> fall back to raw amount (fx_status=missing already flags it
+        # upstream; policy fx_missing_action decides, never a silent wrong value).
+        _ref = getattr(tx, "reference_amount", None)
+        amount_usd = float(_ref) if _ref is not None else float(tx.amount)
+
         return {
             "amount": float(tx.amount),
+            "amount_usd": amount_usd,
+            "currency": (tx.currency or "").upper(),
             "hour_sin": math.sin((hour / 24) * 2 * math.pi),
             "hour_cos": math.cos((hour / 24) * 2 * math.pi),
             "velocity": {
