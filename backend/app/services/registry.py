@@ -32,6 +32,7 @@ from app.repositories import (
 )
 from app.repositories.currency_repo import CurrencyRepository
 from app.repositories.fx_rate_repo import FxRateRepository
+from app.repositories.fx_reference_repo import FxReferenceRepository
 from app.rules.engine import RuleEngine
 from app.services.fx_service import FxService
 from app.services.notifications import NotificationService, provider_from_settings
@@ -150,8 +151,10 @@ class ServiceRegistry:
         self.currencies = self.currency_repo
         self.fx_rates = self.fx_rate_repo
         self.currency_repo.seed_defaults()
+        self.fx_reference_repo = FxReferenceRepository(self.db)
         self.fx = FxService(
-            self.fx_rate_repo, currency_checker=lambda c: self.currency_repo.is_known(c)
+            self.fx_rate_repo, currency_checker=lambda c: self.currency_repo.is_known(c),
+            reference_repo=self.fx_reference_repo,
         )
 
         # Bootstrap a first investigator from env when none exists (dev convenience).

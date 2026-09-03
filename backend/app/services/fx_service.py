@@ -24,10 +24,38 @@ logger = structlog.get_logger(__name__)
 
 
 class FxService:
-    def __init__(self, fx_repo: FxRateRepository, currency_checker=None):
+    def __init__(self, fx_repo: FxRateRepository, currency_checker=None, reference_repo=None):
         self.fx_repo = fx_repo
         # currency_checker(code)->bool tells whether the currency is known/active.
         self._is_known_currency = currency_checker or (lambda code: True)
+        # reference_repo: named USD/YER + SAR/YER sets assignable to institutions.
+        self.reference_repo = reference_repo
+
+    def _reference_set_rate(self, base: str, quote: str, tenant_id: str | None, at):
+        """If this tenant is assigned to an active reference set, build a synthetic
+        rate row for base->quote (or its inverse) from the set's USD/YER & SAR/YER.
+        Returns (row, inverted) or (None, False)."""
+        if not (self.reference_repo and tenant_id):
+            return None, False
+        s = self.reference_repo.set_for_tenant(tenant_id)
+        if not s:
+            return None, False
+        usd_yer = float(s["usd_yer"]); sar_yer = float(s["sar_yer"])
+        pair = {("USD", "YER"): usd_yer, ("SAR", "YER"): sar_yer}
+        if (base, quote) in pair:
+            rate, inv = pair[(base, quote)], False
+        elif (quote, base) in pair:
+            rate, inv = pair[(quote, base)], True
+        else:
+            # cross via YER: X->YER / (USD->YER) etc. — only when both known
+            ref_usd = pair.get(("USD", "YER"))
+            return None, False
+        ts = at.isoformat() if at else None
+        row = {"rate_id": f"refset_{s['set_id']}", "base_ccy": base, "quote_ccy": quote,
+               "rate": rate, "rate_type": "reference_set", "source": "reference",
+               "region": "global", "spread_pct": None, "fetched_at": s["updated_at"],
+               "valid_from": s["created_at"], "valid_to": None, "_rank": 35}
+        return row, inv
 
     def normalize(
         self,
@@ -174,6 +202,10 @@ class FxService:
             if candidates:
                 # direct hit preferred; else the inverse override
                 return candidates[0]
+        # Tier 1 — Reference Set assigned to this tenant (USD/YER & SAR/YER).
+        rs_row, rs_inv = self._reference_set_rate(base, quote, tenant_id, at)
+        if rs_row is not None:
+            return rs_row, rs_inv
         # Platform rates: gather both directions, then rank by source authority.
         for b, q, inv_flag in ((base, quote, False), (quote, base, True)):
             r = self.fx_repo.latest_valid(b, q, region=region, at=at)

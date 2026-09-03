@@ -141,3 +141,89 @@ def end_rate(rate_id: str, owner=Depends(require_owner), registry=Depends(get_re
          "source": row["source"], "tenant_id": row.get("tenant_id"), "ended_at": now},
     )
     return registry.fx_rates.get(rate_id)
+
+# ─────────────────────────── Reference Rate Sets (4-tier FX) ─────────────────
+class FxRefSetIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    usd_yer: float = Field(gt=0)
+    sar_yer: float = Field(gt=0)
+    tenant_ids: list[str] = []
+
+
+@router.get("/admin/fx/reference-sets")
+def list_reference_sets(owner=Depends(require_owner), registry=Depends(get_registry)):
+    return {"total": len(registry.fx_reference_repo.list_sets()),
+            "sets": registry.fx_reference_repo.list_sets()}
+
+
+@router.post("/admin/fx/reference-sets", status_code=201)
+def create_reference_set(body: FxRefSetIn, owner=Depends(require_owner), registry=Depends(get_registry)):
+    for tid in body.tenant_ids:
+        if not registry.tenants.get(tid):
+            raise HTTPException(404, f"tenant_not_found:{tid}")
+    s = registry.fx_reference_repo.create_set(body.name, body.usd_yer, body.sar_yer)
+    for tid in body.tenant_ids:
+        registry.fx_reference_repo.assign(s["set_id"], tid)
+    registry.audit.log("platform", "owner", "fx_reference_set.created", "fx_reference_set",
+                       s["set_id"], None,
+                       {"name": body.name, "usd_yer": body.usd_yer, "sar_yer": body.sar_yer,
+                        "tenants": body.tenant_ids})
+    return registry.fx_reference_repo.get_set(s["set_id"])
+
+
+class FxRefSetUpdate(BaseModel):
+    usd_yer: float | None = Field(default=None, gt=0)
+    sar_yer: float | None = Field(default=None, gt=0)
+
+
+@router.put("/admin/fx/reference-sets/{set_id}")
+def update_reference_set(set_id: str, body: FxRefSetUpdate,
+                         owner=Depends(require_owner), registry=Depends(get_registry)):
+    cur = registry.fx_reference_repo.get_set(set_id)
+    if not cur:
+        raise HTTPException(404, "reference_set_not_found")
+    row = registry.fx_reference_repo.update_set(set_id, body.usd_yer, body.sar_yer)
+    registry.audit.log("platform", "owner", "fx_reference_set.updated", "fx_reference_set",
+                       set_id, {"usd_yer": cur["usd_yer"], "sar_yer": cur["sar_yer"]},
+                       {"usd_yer": row["usd_yer"], "sar_yer": row["sar_yer"]})
+    return row
+
+
+@router.post("/admin/fx/reference-sets/{set_id}/status")
+def set_reference_status(set_id: str, active: bool = True,
+                         owner=Depends(require_owner), registry=Depends(get_registry)):
+    row = registry.fx_reference_repo.set_active(set_id, active)
+    if not row:
+        raise HTTPException(404, "reference_set_not_found")
+    registry.audit.log("platform", "owner",
+                       "fx_reference_set.activated" if active else "fx_reference_set.deactivated",
+                       "fx_reference_set", set_id, None, {"active": active})
+    return row
+
+
+class FxRefAssignIn(BaseModel):
+    tenant_ids: list[str] = Field(min_length=1)
+
+
+@router.post("/admin/fx/reference-sets/{set_id}/assign")
+def assign_reference_set(set_id: str, body: FxRefAssignIn,
+                         owner=Depends(require_owner), registry=Depends(get_registry)):
+    if not registry.fx_reference_repo.get_set(set_id):
+        raise HTTPException(404, "reference_set_not_found")
+    moves = []
+    for tid in body.tenant_ids:
+        if not registry.tenants.get(tid):
+            raise HTTPException(404, f"tenant_not_found:{tid}")
+        moves.append(registry.fx_reference_repo.assign(set_id, tid))
+    registry.audit.log("platform", "owner", "fx_reference_set.assigned", "fx_reference_set",
+                       set_id, None, {"tenants": body.tenant_ids, "moves": moves})
+    return {"set_id": set_id, "moves": moves}
+
+
+@router.post("/admin/fx/reference-sets/unassign/{tenant_id}")
+def unassign_reference(tenant_id: str, owner=Depends(require_owner), registry=Depends(get_registry)):
+    removed = registry.fx_reference_repo.unassign(tenant_id)
+    registry.audit.log("platform", "owner", "fx_reference_set.unassigned", "tenant",
+                       tenant_id, None, {"removed": removed})
+    return {"tenant_id": tenant_id, "removed": removed}
+
