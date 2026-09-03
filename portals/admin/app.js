@@ -44,6 +44,7 @@ const state = {
   page: "overview",
   fxCurrencies: [],
   fxRates: [],
+  fxRefSets: [],
   watchlistEntries: [],
   auditLog: [],
   auditVerifyResult: null,
@@ -1221,7 +1222,7 @@ async function renderPage() {
       await loadInvestigators();
       c.replaceChildren(renderInvestigators());
     } else if (state.page === "fx") {
-      await Promise.all([loadFxCurrencies(), loadFxRates(), loadTenants()]);
+      await Promise.all([loadFxCurrencies(), loadFxRates(), loadTenants(), loadFxRefSets()]);
       c.replaceChildren(renderFx());
     } else if (state.page === "watchlists") {
       await loadWatchlists();
@@ -1318,11 +1319,167 @@ async function loadFxCurrencies() {
 async function loadFxRates() {
   try { const r = await api("/fx/rates"); state.fxRates = r.rates || []; } catch { state.fxRates = []; }
 }
+async function loadFxRefSets() {
+  try { const r = await api("/fx/reference-sets"); state.fxRefSets = r.sets || []; } catch { state.fxRefSets = []; }
+}
 async function loadPolicyTenants() {
   try { const r = await api("/tenants"); state.policyTenants = r.tenants || []; } catch { state.policyTenants = []; }
 }
 async function loadAudit() {
   try { const r = await api("/audit?limit=200"); state.auditLog = Array.isArray(r) ? r : (r.events || []); } catch { state.auditLog = []; }
+}
+
+
+/* 💱 سعر الصرف المرجعي — إدارة مجموعات الأسعار المرجعية (Reference Sets) */
+function renderFxReferenceSets() {
+  const sets = state.fxRefSets || [];
+  const tenants = state.tenants || [];
+  const tname = tid => (tenants.find(t => t.tenant_id === tid) || {}).name || tid;
+
+  const nmI = el("input", { class: "form-control", placeholder: "اسم المجموعة — مثال: مرجع صنعاء", style: "min-width:170px" });
+  const usdI = el("input", { class: "form-control", type: "number", step: "any", placeholder: "534", dir: "ltr", style: "width:110px" });
+  const sarI = el("input", { class: "form-control", type: "number", step: "any", placeholder: "140", dir: "ltr", style: "width:110px" });
+  const tBoxes = tenants.map(t => {
+    const cb = el("input", { type: "checkbox", value: t.tenant_id, style: "accent-color:var(--accent)" });
+    return { cb, tid: t.tenant_id, node: el("label", { style: "display:flex;align-items:center;gap:6px;padding:4px 8px;background:var(--surface);border:1px solid var(--border);border-radius:7px;font-size:12px;cursor:pointer" },
+      cb, el("span", {}, t.name || t.tenant_id)) };
+  });
+  const cmsg = el("div", { style: "font-size:12.5px;min-height:16px" });
+
+  const createCard = el("div", { class: "card", style: "border-color:var(--accent);border-width:2px;margin-bottom:12px" },
+    el("h3", { style: "margin-bottom:6px" }, "➕ سعر صرف مرجعي جديد"),
+    el("p", { style: "color:var(--muted);font-size:12px;margin-bottom:10px" },
+      "USD/YER = عدد الريالات مقابل 1 دولار · SAR/YER = عدد الريالات مقابل 1 ريال سعودي. اختر المؤسسات التي تستخدم هذا السعر (يمكن اختيار أكثر من مؤسسة)."),
+    el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px" },
+      nmI,
+      el("span", { style: "font-size:12.5px" }, "1 USD ="), usdI, el("span", { style: "font-size:12.5px" }, "YER"),
+      el("span", { style: "font-size:12.5px;margin-inline-start:10px" }, "1 SAR ="), sarI, el("span", { style: "font-size:12.5px" }, "YER")),
+    el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:5px" }, "البنوك والمؤسسات التي تستخدم هذا السعر:"),
+    el("div", { style: "display:flex;flex-wrap:wrap;gap:6px;max-height:130px;overflow:auto;padding:6px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px" },
+      ...tBoxes.map(b => b.node)),
+    el("div", { style: "display:flex;gap:8px;align-items:center" },
+      el("button", { class: "btn success", onclick: async () => {
+        cmsg.textContent = ""; cmsg.style.color = "var(--muted)";
+        const usd = parseFloat(usdI.value), sar = parseFloat(sarI.value);
+        if (!nmI.value.trim()) { cmsg.textContent = "أدخل اسم المجموعة"; cmsg.style.color = "#FCA5A5"; return; }
+        if (isNaN(usd) || usd <= 0 || isNaN(sar) || sar <= 0) { cmsg.textContent = "أدخل سعري USD/YER و SAR/YER موجبين"; cmsg.style.color = "#FCA5A5"; return; }
+        const tids = tBoxes.filter(b => b.cb.checked).map(b => b.tid);
+        try {
+          await api("/fx/reference-sets", { method: "POST", body: { name: nmI.value.trim(), usd_yer: usd, sar_yer: sar, tenant_ids: tids } });
+          toast("✅ أُنشئت المجموعة المرجعية وأُسندت للمؤسسات المختارة", "success");
+          await loadFxRefSets(); render();
+        } catch (e) { cmsg.textContent = e.message; cmsg.style.color = "#FCA5A5"; }
+      } }, "💾 إنشاء المجموعة"),
+      cmsg));
+
+  const setRows = sets.map(st => {
+    const eUsd = el("input", { class: "form-control", type: "number", step: "any", value: st.usd_yer, dir: "ltr", style: "width:100px" });
+    const eSar = el("input", { class: "form-control", type: "number", step: "any", value: st.sar_yer, dir: "ltr", style: "width:100px" });
+    const membersBox = el("div", { style: "display:none;padding:8px;background:var(--surface);border-radius:8px;margin-top:6px" });
+    const addBox = el("div", { style: "display:none;padding:8px;background:var(--surface);border-radius:8px;margin-top:6px" });
+
+    const loadMembersInto = () => {
+      const mrows = (st.members || []).map(tid => {
+        const rmBtn = el("button", { class: "btn sm danger", style: "padding:2px 8px;font-size:10.5px", onclick: async () => {
+          if (!confirm("إزالة " + tname(tid) + " من هذه المجموعة؟ ستعود تلقائيًا إلى سعر المؤسسة/العام.")) return;
+          try {
+            await api("/fx/reference-sets/unassign/" + encodeURIComponent(tid), { method: "POST", body: {} });
+            toast("أُزيلت المؤسسة من المجموعة (fallback تلقائي)", "success");
+            await loadFxRefSets(); render();
+          } catch (e) { toast(e.message, "error"); }
+        } }, "إزالة");
+        return el("div", { style: "display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px" },
+          el("span", { style: "font-size:12.5px" }, "🏢 " + tname(tid)), rmBtn);
+      });
+      const hdr = el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:5px" },
+        "المؤسسات المرتبطة (" + (st.members || []).length + "):");
+      membersBox.replaceChildren(hdr, ...mrows);
+    };
+
+    const loadAddInto = () => {
+      const free = tenants.filter(t => !(st.members || []).includes(t.tenant_id));
+      const boxes = free.map(t => {
+        const cb = el("input", { type: "checkbox", value: t.tenant_id, style: "accent-color:var(--accent)" });
+        return { cb, tid: t.tenant_id, node: el("label", { style: "display:flex;align-items:center;gap:6px;padding:3px 7px;border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer" },
+          cb, el("span", {}, t.name || t.tenant_id)) };
+      });
+      const kids = [];
+      kids.push(el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:5px" }, "المؤسسات غير المرتبطة بهذه المجموعة:"));
+      if (free.length === 0) {
+        kids.push(el("div", { style: "color:var(--muted);font-size:12px" }, "كل المؤسسات مرتبطة بهذه المجموعة."));
+      } else {
+        kids.push(el("div", { style: "display:flex;flex-wrap:wrap;gap:5px;max-height:110px;overflow:auto;margin-bottom:6px" }, ...boxes.map(b => b.node)));
+        kids.push(el("button", { class: "btn sm success", onclick: async () => {
+          const tids = boxes.filter(b => b.cb.checked).map(b => b.tid);
+          if (!tids.length) { toast("اختر مؤسسة واحدة على الأقل", "error"); return; }
+          try {
+            await api("/fx/reference-sets/" + encodeURIComponent(st.set_id) + "/assign", { method: "POST", body: { tenant_ids: tids } });
+            toast("✅ أُضيفت المؤسسات (مع نقل تلقائي من أي مجموعة سابقة)", "success");
+            await loadFxRefSets(); render();
+          } catch (e) { toast(e.message, "error"); }
+        } }, "➕ إضافة المحدد"));
+      }
+      addBox.replaceChildren(...kids);
+    };
+
+    const statusBtn = el("button", { class: "btn sm", style: "padding:3px 8px;font-size:10.5px", onclick: async () => {
+      try {
+        await api("/fx/reference-sets/" + encodeURIComponent(st.set_id) + "/status?active=" + (!st.active), { method: "POST", body: {} });
+        toast(st.active ? "عُطّلت المجموعة" : "فُعّلت المجموعة", "success");
+        await loadFxRefSets(); render();
+      } catch (e) { toast(e.message, "error"); }
+    } }, st.active ? "⏸ تعطيل" : "▶ تفعيل");
+
+    const membersBtn = el("button", { class: "btn sm", style: "padding:3px 8px;font-size:10.5px", onclick: () => {
+      const open = membersBox.style.display !== "none";
+      if (!open) loadMembersInto();
+      membersBox.style.display = open ? "none" : "block";
+      addBox.style.display = "none";
+    } }, "👥 المؤسسات");
+
+    const addBtn = el("button", { class: "btn sm", style: "padding:3px 8px;font-size:10.5px", onclick: () => {
+      const open = addBox.style.display !== "none";
+      if (!open) loadAddInto();
+      addBox.style.display = open ? "none" : "block";
+      membersBox.style.display = "none";
+    } }, "➕ إضافة");
+
+    const saveEditBtn = el("button", { class: "btn sm primary", style: "padding:3px 8px;font-size:10.5px", onclick: async () => {
+      const usd = parseFloat(eUsd.value), sar = parseFloat(eSar.value);
+      if (isNaN(usd) || usd <= 0 || isNaN(sar) || sar <= 0) { toast("أدخل قيمًا موجبة", "error"); return; }
+      try {
+        await api("/fx/reference-sets/" + encodeURIComponent(st.set_id), { method: "PUT", body: { usd_yer: usd, sar_yer: sar } });
+        toast("✅ عُدّل السعر — المؤسسات المرتبطة بقيت كما هي", "success");
+        await loadFxRefSets(); render();
+      } catch (e) { toast(e.message, "error"); }
+    } }, "💾 حفظ التعديل");
+
+    return el("div", { style: "padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;background:var(--surface)" },
+      el("div", { style: "display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px" },
+        el("div", {},
+          el("div", { style: "font-weight:700" }, "📌 " + st.name),
+          el("div", { style: "font-size:12.5px;margin-top:3px" },
+            "1 USD = ", el("b", { dir: "ltr" }, String(st.usd_yer)), " YER · 1 SAR = ", el("b", { dir: "ltr" }, String(st.sar_yer)), " YER"),
+          el("div", { style: "font-size:11.5px;color:var(--muted);margin-top:2px" },
+            "عدد المؤسسات: " + (st.member_count || 0) + " · أُنشئت: " + fmtTs(st.created_at) + " · آخر تعديل: " + fmtTs(st.updated_at))),
+        el("div", { style: "display:flex;gap:5px;flex-wrap:wrap;align-items:center" },
+          el("span", { class: "badge " + (st.active ? "allow" : "block") }, st.active ? "فعّالة" : "معطّلة"),
+          membersBtn, addBtn, statusBtn)),
+      el("div", { style: "display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap" },
+        el("span", { style: "font-size:12px" }, "✏️ تعديل: 1 USD ="), eUsd,
+        el("span", { style: "font-size:12px" }, "· 1 SAR ="), eSar,
+        saveEditBtn),
+      membersBox, addBox);
+  });
+
+  return el("div", { class: "card" },
+    el("h3", { style: "margin-bottom:4px" }, "💱 سعر الصرف المرجعي (Reference Rates)"),
+    el("p", { style: "color:var(--muted);font-size:12.5px;margin-bottom:12px" },
+      "مجموعات أسعار مرجعية تُسند لمؤسسات محددة. الأولوية: يدوي > سعر المؤسسة > مرجعي > عام. تعديل المجموعة لا يعيد تسعير القرارات القديمة."),
+    createCard,
+    sets.length === 0
+      ? el("div", { style: "color:var(--muted);padding:12px" }, "لا مجموعات مرجعية بعد — أنشئ أول واحدة أعلاه.")
+      : el("div", {}, ...setRows));
 }
 
 function renderFx() {
@@ -1338,6 +1495,11 @@ function renderFx() {
     el("option", { value: "official" }, "رسمي (official)"),
     el("option", { value: "aegis_reference", selected: true }, "مرجعي (aegis)"),
     el("option", { value: "manual" }, "يدوي (manual)"));
+  const rregion = el("select", { class: "form-control", style: "width:150px" },
+    el("option", { value: "" }, "🌍 كل المناطق"),
+    el("option", { value: "global" }, "global"),
+    el("option", { value: "sanaa" }, "صنعاء (sanaa)"),
+    el("option", { value: "aden" }, "عدن (aden)"));
   const rscope = el("select", { class: "form-control", style: "min-width:200px" },
     el("option", { value: "" }, "🌐 كل المؤسسات (عام)"),
     ...(state.tenants || []).map(t => el("option", { value: t.tenant_id }, "🏢 " + (t.name || t.tenant_id))));
@@ -1372,32 +1534,43 @@ function renderFx() {
         ))))),
     el("div", { class: "card" },
       el("h3", { style: "margin-bottom:12px" }, "📈 أسعار الصرف (لقطات تاريخية)"),
-      el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px" }, rb, rq, rr, rsrc, rscope,
+      el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px" }, rb, rq, rr, rsrc, rregion, rscope,
         el("button", { class: "btn success", onclick: async () => {
           fmsg.textContent = ""; fmsg.style.color = "var(--muted)";
           if (!rb.value.trim() || !rq.value.trim() || !rr.value) { fmsg.textContent = "أدخل الزوج والسعر"; fmsg.style.color = "#FCA5A5"; return; }
           try {
             const scopeTid = rscope.value || null;
-            await api("/fx/rates", { method: "POST", body: { base_ccy: rb.value.trim().toUpperCase(), quote_ccy: rq.value.trim().toUpperCase(), rate: Number(rr.value), source: rsrc.value, tenant_id: scopeTid } });
+            await api("/fx/rates", { method: "POST", body: { base_ccy: rb.value.trim().toUpperCase(), quote_ccy: rq.value.trim().toUpperCase(), rate: Number(rr.value), source: rsrc.value, region: rregion.value || null, tenant_id: scopeTid } });
             toast(scopeTid ? "أُضيف السعر كاستثناء لهذه المؤسسة" : "أُضيف السعر العام (لقطة جديدة)", "success"); await loadFxRates(); render();
           } catch (e) { fmsg.textContent = e.message; fmsg.style.color = "#FCA5A5"; }
         } }, "➕ إضافة سعر")),
       fmsg,
       rates.length === 0 ? el("div", { style: "color:var(--muted)" }, "لا أسعار مسجَّلة بعد.") :
       el("table", {},
-        el("thead", {}, el("tr", {}, el("th", {}, "الزوج"), el("th", {}, "السعر"), el("th", {}, "النوع"), el("th", {}, "المصدر"), el("th", {}, "النطاق"), el("th", {}, "صالح من"), el("th", {}, "صالح إلى"), el("th", {}, "سُجّل"))),
+        el("thead", {}, el("tr", {}, el("th", {}, "الزوج"), el("th", {}, "السعر"), el("th", {}, "النوع"), el("th", {}, "المصدر"), el("th", {}, "المنطقة"), el("th", {}, "النطاق"), el("th", {}, "صالح من"), el("th", {}, "صالح إلى"), el("th", {}, "سُجّل"), el("th", {}, "إجراء"))),
         el("tbody", {}, ...rates.map(x => el("tr", {},
           el("td", { style: "font-weight:700" }, el("code", { style: "font-size:11px" }, (x.base_ccy || "") + "/" + (x.quote_ccy || ""))),
           el("td", {}, String(x.rate)),
           el("td", {}, x.rate_type || "mid"),
           el("td", {}, el("span", { class: "badge info" }, x.source || "")),
+          el("td", { style: "font-size:11px" }, x.region || "global"),
           el("td", {}, x.tenant_id
             ? el("span", { class: "badge review" }, "🏢 " + ((state.tenants.find(t => t.tenant_id === x.tenant_id) || {}).name || x.tenant_id))
             : el("span", { class: "badge allow" }, "🌐 عام")),
           el("td", { style: "font-size:11px" }, fmtTs(x.valid_from)),
           el("td", { style: "font-size:11px" }, x.valid_to ? fmtTs(x.valid_to) : "مفتوح"),
           el("td", { style: "font-size:11px" }, fmtTs(x.fetched_at)),
+          el("td", {}, (!x.tenant_id && (!x.valid_to || x.valid_to > new Date().toISOString())) ? el("button", { class: "btn sm danger", style: "padding:3px 8px;font-size:10.5px",
+            onclick: async () => {
+              if (!confirm("إنهاء هذا السعر العام؟ الزوج سيعود للسعر الأقدم الصالح (fallback) أو يصبح بلا سعر.")) return;
+              try {
+                await api("/fx/rates/" + encodeURIComponent(x.rate_id) + "/end", { method: "POST", body: {} });
+                toast("أُنهي السعر العام — طُبّق الـ fallback", "success");
+                await loadFxRates(); render();
+              } catch (e) { toast(e.message, "error"); }
+            } }, "⏹ إنهاء") : null),
         ))))),
+    renderFxReferenceSets(),
     renderFxOverrides(),
   );
 }
