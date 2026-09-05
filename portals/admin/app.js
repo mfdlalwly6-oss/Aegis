@@ -1777,42 +1777,117 @@ function renderFx() {
 
 
 /* 🎯 استثناءات المؤسسات — Tenant FX Overrides (أسعار خاصة بمؤسسة معينة) */
+/* 🎯 Tenant FX Overrides — full management: create form (institution + currency
+   pair + rate), list, edit (versioned), disable/enable, safe end. Real API only.
+   The override is MANDATORY for the tenant while active (outranks institution rate). */
+
+function _fxOverrideActions(x) {
+  const isDisabled = (x.active === 0 || x.active === false);
+  const btnEdit = el("button", { class: "btn sm", style: "padding:3px 8px;font-size:10.5px" }, "✏️");
+  btnEdit.onclick = async () => {
+    const nr = prompt("السعر الجديد لـ " + x.base_ccy + "/" + x.quote_ccy + " (" + (x.tenant_name || x.tenant_id) + ") — الحالي: " + x.rate + ":");
+    if (nr === null) return;
+    try {
+      await api("/fx/rates/" + encodeURIComponent(x.rate_id), { method: "PUT", body: { rate: Number(nr) } });
+      toast("حُدّث الاستثناء (التاريخ محفوظ)", "success");
+      await loadFxRates(); render();
+    } catch (e) { toast(e.message, "error"); }
+  };
+  const btnToggle = el("button", { class: "btn sm " + (isDisabled ? "success" : ""), style: "padding:3px 8px;font-size:10.5px" }, isDisabled ? "▶️" : "⏸");
+  btnToggle.onclick = async () => {
+    try {
+      await api("/fx/rates/" + encodeURIComponent(x.rate_id) + "/status", { method: "POST", body: { active: isDisabled } });
+      toast(isDisabled ? "فُعّل الاستثناء — أصبح إجباريًا لهذه المؤسسة" : "عُطّل الاستثناء — عادت المؤسسة للمصدر التالي", "success");
+      await loadFxRates(); render();
+    } catch (e) { toast(e.message, "error"); }
+  };
+  const btnEnd = el("button", { class: "btn sm danger", style: "padding:3px 8px;font-size:10.5px" }, "🗑");
+  btnEnd.onclick = async () => {
+    if (!confirm("إنهاء هذا الاستثناء نهائيًا؟ سيُغلق نطاق صلاحيته (valid_to) دون حذف — التاريخ يبقى سليمًا.")) return;
+    try {
+      await api("/fx/rates/" + encodeURIComponent(x.rate_id) + "/end", { method: "POST", body: {} });
+      toast("أُنهي الاستثناء", "success");
+      await loadFxRates(); render();
+    } catch (e) { toast(e.message, "error"); }
+  };
+  return el("div", { style: "display:flex;gap:4px" }, btnEdit, btnToggle, btnEnd);
+}
+
 function renderFxOverrides() {
   const rates = state.fxRates || [];
   const nowIso = new Date().toISOString();
   const tenantRows = rates.filter(x => x.tenant_id);
-  const activeOf = x => !x.valid_to || x.valid_to > nowIso;
-  return el("div", { class: "card" },
-    el("h3", { style: "margin-bottom:6px" }, "🎯 استثناءات المؤسسات (Tenant FX Overrides)"),
-    el("p", { style: "color:var(--muted);font-size:12.5px;margin-bottom:12px" },
-      "سعر الاستثناء يتفوق على السعر العام لهذه المؤسسة فقط. الإنهاء يغلق نافذة الصلاحية دون حذف — اللقطات التاريخية تبقى سليمة للتدقيق."),
-    tenantRows.length === 0
-      ? el("div", { style: "color:var(--muted)" }, "لا استثناءات مسجّلة — كل المؤسسات تستخدم السعر العام أو سعرها المُرسَل.")
-      : el("div", { style: "overflow:auto" }, el("table", {},
-          el("thead", {}, el("tr", {},
-            el("th", {}, "المؤسسة"), el("th", {}, "الزوج"), el("th", {}, "السعر"),
-            el("th", {}, "المصدر"), el("th", {}, "الحالة"), el("th", {}, "صالح من"), el("th", {}, "إجراء"))),
-          el("tbody", {}, ...tenantRows.map(x => {
-            const tname = (state.tenants.find(t => t.tenant_id === x.tenant_id) || {}).name || x.tenant_id;
-            const act = activeOf(x);
-            return el("tr", { style: act ? "" : "opacity:.55" },
-              el("td", { style: "font-weight:600;font-size:12.5px" }, "🏢 " + tname),
-              el("td", {}, el("code", { style: "font-size:11px" }, (x.base_ccy || "") + "/" + (x.quote_ccy || ""))),
-              el("td", { style: "font-weight:700" }, String(x.rate)),
-              el("td", {}, el("span", { class: "badge info" }, x.source || "")),
-              el("td", {}, el("span", { class: "badge " + (act ? "allow" : "block") }, act ? "فعّال" : "منتهٍ")),
-              el("td", { style: "font-size:11px" }, fmtTs(x.valid_from)),
-              el("td", {}, act ? el("button", { class: "btn sm danger", style: "padding:3px 8px;font-size:10.5px",
-                onclick: async () => {
-                  if (!confirm("إنهاء هذا الاستثناء؟ ستعود المؤسسة للسعر العام فورًا.")) return;
-                  try {
-                    await api("/fx/rates/" + encodeURIComponent(x.rate_id) + "/end", { method: "POST", body: {} });
-                    toast("أُنهي الاستثناء — عادت المؤسسة للسعر العام", "success");
-                    await loadFxRates(); render();
-                  } catch (e) { toast(e.message, "error"); }
-                } }, "⏹ إنهاء") : null));
-          })))));
+  const actOf = x => (!x.valid_to || x.valid_to > nowIso) && x.active !== 0 && x.active !== false;
+  const activesCcy = (state.fxCurrencies || []).filter(c => c.active);
+  const tenants = (state.tenants || []).filter(t => t.status !== "deleted");
+
+  // Create form — institution + from/to currency + rate (real dropdowns).
+  const tSel = el("select", { class: "form-control", style: "min-width:200px" },
+    el("option", { value: "" }, "— اختر المؤسسة —"),
+    ...tenants.map(t => el("option", { value: t.tenant_id }, "🏢 " + (t.name || t.tenant_id))));
+  if (state.fxTenantId) tSel.value = state.fxTenantId;  // preselect when opened from a tenant
+  const fromSel = el("select", { class: "form-control", style: "width:110px" }, ...activesCcy.map(c => el("option", { value: c.code }, c.code)));
+  const toSel = el("select", { class: "form-control", style: "width:110px" }, ...activesCcy.map(c => el("option", { value: c.code }, c.code)));
+  if (activesCcy.some(c => c.code === "USD")) fromSel.value = "USD";
+  if (activesCcy.some(c => c.code === "YER")) toSel.value = "YER";
+  const rateIn = el("input", { class: "form-control", type: "number", step: "any", placeholder: "550", dir: "ltr", style: "width:120px" });
+  const hint = el("div", { style: "font-size:12px;color:var(--muted);margin-top:2px;min-height:14px" }, "");
+  function updHint() { hint.textContent = (fromSel.value && toSel.value && rateIn.value) ? ("1 " + fromSel.value + " = " + rateIn.value + " " + toSel.value) : ""; }
+  fromSel.onchange = updHint; toSel.onchange = updHint; rateIn.oninput = updHint;
+  const omsg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
+
+  const saveBtn = el("button", { class: "btn success" }, "➕ إضافة استثناء");
+  saveBtn.onclick = async () => {
+    omsg.textContent = ""; omsg.style.color = "var(--muted)";
+    if (!tSel.value) { omsg.textContent = "اختر المؤسسة"; omsg.style.color = "#FCA5A5"; return; }
+    if (!fromSel.value || !toSel.value || !rateIn.value) { omsg.textContent = "أدخل الزوج والسعر"; omsg.style.color = "#FCA5A5"; return; }
+    if (fromSel.value === toSel.value) { omsg.textContent = "العملتان يجب أن تختلفا"; omsg.style.color = "#FCA5A5"; return; }
+    try {
+      await api("/fx/rates", { method: "POST", body: { base_ccy: fromSel.value, quote_ccy: toSel.value, rate: Number(rateIn.value), source: "manual", tenant_id: tSel.value } });
+      toast("أُضيف الاستثناء — أصبح إجباريًا لهذه المؤسسة", "success");
+      rateIn.value = ""; hint.textContent = "";
+      await loadFxRates(); render();
+    } catch (e) { omsg.textContent = e.message; omsg.style.color = "#FCA5A5"; }
+  };
+
+  const form = el("div", { style: "border:1px dashed var(--brand);border-radius:10px;padding:12px;margin-bottom:14px" },
+    el("div", { style: "font-weight:700;font-size:13px;margin-bottom:8px" }, "➕ إضافة استثناء مؤسسة جديد (يصبح فعّالًا وإجباريًا فورًا)"),
+    el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center" },
+      el("span", { style: "font-size:12px;color:var(--muted)" }, "المؤسسة:"), tSel,
+      el("span", { style: "font-size:12px;color:var(--muted)" }, "من:"), fromSel,
+      el("span", { style: "font-size:12px;color:var(--muted)" }, "إلى:"), toSel,
+      el("span", { style: "font-size:12px;color:var(--muted)" }, "السعر:"), rateIn,
+      saveBtn),
+    hint, omsg);
+
+  // Current overrides list — full management actions.
+  const rows = tenantRows.map(x => {
+    const tname = (state.tenants.find(t => t.tenant_id === x.tenant_id) || {}).name || x.tenant_id;
+    const act = actOf(x);
+    x.tenant_name = tname;
+    return el("tr", { style: act ? "" : "opacity:.55" },
+      el("td", { style: "font-weight:600;font-size:12.5px" }, "🏢 " + tname,
+        el("div", { style: "font-size:10px;color:var(--muted)" }, el("code", { style: "font-size:10px" }, x.tenant_id))),
+      el("td", {}, el("code", { style: "font-size:11px" }, (x.base_ccy || "") + "/" + (x.quote_ccy || ""))),
+      el("td", { style: "font-weight:700" }, "1 " + (x.base_ccy || "") + " = " + x.rate + " " + (x.quote_ccy || "")),
+      el("td", {}, el("span", { class: "badge info" }, x.source || "manual")),
+      el("td", {}, el("span", { class: "badge " + (act ? "allow" : "block") }, act ? "🟢 فعّال" : (x.active === 0 || x.active === false ? "⏸ معطّل" : "منتهٍ"))),
+      el("td", { style: "font-size:11px" }, fmtTs(x.valid_from)),
+      el("td", {}, (!x.valid_to || x.valid_to > nowIso) ? _fxOverrideActions(x) : null));
+  });
+  const table = tenantRows.length === 0
+    ? el("div", { style: "color:var(--muted)" }, "لا استثناءات مسجّلة — كل المؤسسات تستخدم السعر العام أو سعرها المُرسَل أو مجموعتها المرجعية.")
+    : el("div", { style: "overflow:auto" }, el("table", {},
+        el("thead", {}, el("tr", {},
+          el("th", {}, "المؤسسة"), el("th", {}, "الزوج"), el("th", {}, "السعر"), el("th", {}, "المصدر"),
+          el("th", {}, "الحالة"), el("th", {}, "صالح من"), el("th", {}, "إجراءات"))),
+        el("tbody", {}, ...rows)));
+
+  return el("div", {}, form,
+    el("h4", { style: "margin:0 0 8px" }, "📋 الاستثناءات الحالية"),
+    table);
 }
+
 
 
 function renderPolicyStudio() {

@@ -106,6 +106,10 @@ class FxRateRepository:
             if trows:
                 trows.sort(key=lambda r: (_rank(r["source"]), r["fetched_at"]), reverse=True)
                 out = dict(trows[0]); out["_rank"] = _rank(out["source"])
+                # §7: a tenant-scoped row is always a Tenant FX Override for fx_proof,
+                # regardless of the admin-chosen source label.
+                out["source"] = "tenant_override"
+                out["rate_type"] = out.get("rate_type") or "tenant_override"
                 return out
             if tenant_only:
                 return None  # caller wants tenant-scoped rates only
@@ -133,6 +137,8 @@ class FxRateRepository:
             return None
         out = dict(best)
         out["_rank"] = _rank(out["source"])
+        # §7: a platform-wide row is the General Rate tier for fx_proof.
+        out["source"] = "general"
         return out
 
     def set_active(self, rate_id: str, active: bool) -> dict | None:

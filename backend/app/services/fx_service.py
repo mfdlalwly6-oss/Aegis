@@ -66,15 +66,26 @@ class FxService:
 
     def _platform_reference(self, base: str, quote: str, *, region: str | None,
                             at: datetime | None, tenant_id: str | None) -> float | None:
-        """Best-effort platform reference rate for base->quote, used ONLY to judge
-        whether an institution-provided rate is trustworthy (divergence budget).
-        Never returned as the chosen rate by itself here."""
+        """Best-effort platform reference for base->quote, used ONLY to judge whether
+        an institution-provided rate is trustworthy. Mirrors the resolver chain minus
+        override/institution: the tenant's reference set first, then the FRESHEST
+        general rate in either direction (freshness beats direction convenience)."""
+        if tenant_id:
+            rs_row, rs_inv = self._reference_set_rate(base, quote, tenant_id, at)
+            if rs_row is not None:
+                r = float(rs_row["rate"])
+                return (1.0 / r) if rs_inv else r
+        best = None
         for b, q, inv in ((base, quote, False), (quote, base, True)):
             r = self.fx_repo.latest_valid(b, q, region=region, at=at, tenant_id=None)
             if r is not None and float(r["rate"]) > 0:
-                rate = float(r["rate"])
-                return (1.0 / rate) if inv else rate
-        return None
+                eff = float(r["rate"])
+                if inv:
+                    eff = 1.0 / eff
+                key = (r.get("_rank", 0), str(r.get("fetched_at", "")))
+                if best is None or key > best[0]:
+                    best = (key, eff)
+        return best[1] if best is not None else None
 
     def _institution_row(self, base: str, quote: str, institution_rate: float | None,
                          *, region: str | None, at: datetime, tenant_id: str | None) -> tuple[dict | None, bool]:
@@ -91,10 +102,18 @@ class FxService:
             return None, False
         if rate <= 0:
             return None, False
+        # Direction normalization: institutions commonly quote in the canonical
+        # direction (e.g. USD/YER = 545) while this lookup runs in the transaction
+        # direction (YER->USD). Compare BOTH directions against the platform
+        # reference and keep the one that matches within the trust budget.
         ref = self._platform_reference(base, quote, region=region, at=at, tenant_id=tenant_id)
+        direct = rate            # institution rate as-is (base->quote)
+        inverse = 1.0 / rate     # institution rate flipped (quote->base expressed as base->quote)
         if ref is not None and ref > 0:
-            divergence_pct = abs(rate - ref) / ref * 100.0
             budget = float(getattr(settings, "FX_INSTITUTION_TRUST_PCT", settings.FX_DIVERGENCE_PCT * 2))
+            div_direct = abs(direct - ref) / ref * 100.0
+            div_inverse = abs(inverse - ref) / ref * 100.0
+            use_rate, divergence_pct = (direct, div_direct) if div_direct <= div_inverse else (inverse, div_inverse)
             if divergence_pct > budget:
                 logger.warning(
                     "fx.institution_rate_rejected",
@@ -103,9 +122,14 @@ class FxService:
                     divergence_pct=round(divergence_pct, 2), budget=budget,
                 )
                 return None, False  # untrusted -> fall through to lower tiers
+        else:
+            # No platform reference to compare against: prefer the canonical
+            # direction heuristic — rates > 1 for X->YER-style pairs are quoted
+            # quote->base, so invert when the raw value looks like the inverse.
+            use_rate = inverse if (rate > 100 and base == settings.DISPLAY_CURRENCY.upper()) else rate
         return ({
             "rate_id": f"inst_{base}_{quote}", "base_ccy": base, "quote_ccy": quote,
-            "rate": rate, "rate_type": "institution", "source": "institution",
+            "rate": use_rate, "rate_type": "institution", "source": "institution",
             "region": region or "global", "spread_pct": None,
             "fetched_at": at.isoformat(), "valid_from": at.isoformat(), "valid_to": None,
             "_rank": 50,
@@ -191,15 +215,28 @@ class FxService:
         status = FxStatus.STALE if is_stale else FxStatus.OK
         divergence_pct = None
         if institution_rate:
-            baseline = ref_rate
             if rate_row["source"] == "institution":
+                # Institution rate WAS selected: ref_rate is already its
+                # direction-normalized value; compare against what the resolver
+                # would have used without it (reference set / general).
+                baseline = ref_rate
                 alt_row, alt_inv = self._lookup(ccy, ref_ccy, region=region, at=at,
-                                                tenant_id=tenant_id)  # no institution_rate -> skips Tier 1
+                                                tenant_id=tenant_id)  # no institution_rate -> skips Tier 2
                 if alt_row is not None:
                     baseline = float(alt_row["rate"])
                     if alt_inv:
                         baseline = 1.0 / baseline
-            divergence_pct = abs(float(institution_rate) - baseline) / baseline * 100.0
+                divergence_pct = abs(ref_rate - baseline) / baseline * 100.0
+            else:
+                # Institution offer lost to a higher tier: compare the raw offer in
+                # BOTH directions against the selected rate and keep the closer one,
+                # so the audit flag reflects genuine deviation, not direction artifact.
+                inst_d = float(institution_rate)
+                inst_i = 1.0 / inst_d
+                divergence_pct = min(
+                    abs(inst_d - ref_rate) / ref_rate * 100.0,
+                    abs(inst_i - ref_rate) / ref_rate * 100.0,
+                )
             # Divergence is an AUDIT signal, recorded whenever the institution rate
             # deviates from the platform reference — even when the institution rate
             # itself was trusted enough to be selected (trust budget decides usage,
@@ -240,15 +277,10 @@ class FxService:
         -> general platform rates (each tier both directions where applicable)."""
         now = at or datetime.now(UTC)
 
-        # Tier 1 — institution-provided rate, only when the platform trusts it.
-        inst_row, inst_inv = self._institution_row(
-            base, quote, institution_rate, region=region, at=now, tenant_id=tenant_id)
-        if inst_row is not None:
-            return inst_row, inst_inv
-
+        # Tier 1 — Tenant FX Override (mandatory when active): the rate an AEGIS
+        # owner pins for this tenant ALWAYS wins, even over a valid institution rate.
         candidates: list[tuple[dict, bool]] = []
         if tenant_id:
-            # Tier 2 — Manual FX Override (tenant-scoped row), both directions.
             for b, q, inv_flag in ((base, quote, False), (quote, base, True)):
                 t = self.fx_repo.latest_valid(b, q, region=region, at=at,
                                               tenant_id=tenant_id, tenant_only=True)
@@ -256,6 +288,12 @@ class FxService:
                     candidates.append((t, inv_flag))
             if candidates:
                 return candidates[0]
+
+        # Tier 2 — institution-provided rate, only when the platform trusts it.
+        inst_row, inst_inv = self._institution_row(
+            base, quote, institution_rate, region=region, at=now, tenant_id=tenant_id)
+        if inst_row is not None:
+            return inst_row, inst_inv
 
         # Tier 3 — Reference FX Group assigned to this tenant (USD/YER & SAR/YER).
         rs_row, rs_inv = self._reference_set_rate(base, quote, tenant_id, at)
@@ -269,8 +307,11 @@ class FxService:
                 candidates.append((r, inv_flag))
         if not candidates:
             return None, False
+        # Highest authority wins; among same-authority general rates the FRESHEST
+        # wins (a fresh inverse beats an ancient direct row); direction is only a
+        # tie-break for identical timestamps (avoids inversion rounding on ties).
         candidates.sort(
-            key=lambda c: (c[0].get("_rank", 0), not c[1], c[0].get("fetched_at", "")),
+            key=lambda c: (c[0].get("_rank", 0), str(c[0].get("fetched_at", "")), not c[1]),
             reverse=True,
         )
         return candidates[0]
