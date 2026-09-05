@@ -98,6 +98,7 @@ class FxRateRepository:
         if tenant_id:
             trows = self.db.query(
                 "SELECT * FROM fx_rates WHERE base_ccy=? AND quote_ccy=? AND tenant_id=? "
+                "AND active=1 "
                 "AND valid_from<=? AND (valid_to IS NULL OR valid_to>?) "
                 "ORDER BY fetched_at DESC",
                 (base, quote, tenant_id, at_iso, at_iso),
@@ -120,7 +121,7 @@ class FxRateRepository:
                 "SELECT * FROM fx_rates WHERE base_ccy=? AND quote_ccy=? AND region=? "
                 "AND tenant_id IS NULL "
                 "AND valid_from<=? AND (valid_to IS NULL OR valid_to>?) "
-                "ORDER BY fetched_at DESC",
+                "ORDER BY active DESC, fetched_at DESC",
                 (base, quote, reg, at_iso, at_iso),
             )
             if rows:
@@ -133,6 +134,17 @@ class FxRateRepository:
         out = dict(best)
         out["_rank"] = _rank(out["source"])
         return out
+
+    def set_active(self, rate_id: str, active: bool) -> dict | None:
+        """Enable/disable a rate row in place (flag only — the row and every
+        historical snapshot referencing it stay intact)."""
+        self.db.execute("UPDATE fx_rates SET active=? WHERE rate_id=?",
+                        (1 if active else 0, rate_id))
+        return self.get(rate_id)
+
+    def end(self, rate_id: str, at_iso: str) -> dict | None:
+        self.db.execute("UPDATE fx_rates SET valid_to=? WHERE rate_id=?", (at_iso, rate_id))
+        return self.get(rate_id)
 
     def list_active(self, region: str | None = None) -> list[dict]:
         if region:

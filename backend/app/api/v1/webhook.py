@@ -161,6 +161,12 @@ def _apply_fx(registry, tx: Transaction, body: dict) -> Transaction:
     src = body.get("transaction", body)
     ctx = body.get("context", {})
     ccy = (tx.currency or "USD").upper()
+    # §18: a currency that EXISTS in the registry but is DISABLED rejects NEW
+    # transactions (historical rows untouched). An UNKNOWN currency (not in the
+    # registry at all) is NOT rejected here — it flows to the FX resolver which
+    # marks it FX_MISSING and policy forces REVIEW (never silent ALLOW/BLOCK).
+    if registry.currencies.exists(ccy) and not registry.currencies.is_active(ccy):
+        raise HTTPException(422, f"CURRENCY_DISABLED:{ccy}")
     region = src.get("region") or ctx.get("region") or settings.FX_DEFAULT_REGION
     institution_rate = src.get("institution_rate") or ctx.get("institution_rate")
     institution_rate = float(institution_rate) if institution_rate else None

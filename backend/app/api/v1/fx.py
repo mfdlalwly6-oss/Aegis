@@ -17,7 +17,17 @@ class CurrencyIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     minor_unit: int = Field(default=2, ge=0, le=4)
     round_unit: float = Field(default=1000, gt=0)
+    symbol: str | None = Field(default=None, max_length=10)
+    decimal_places: int | None = Field(default=None, ge=0, le=6)
     active: bool = True
+
+
+class CurrencyUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    minor_unit: int | None = Field(default=None, ge=0, le=4)
+    round_unit: float | None = Field(default=None, gt=0)
+    symbol: str | None = Field(default=None, max_length=10)
+    decimal_places: int | None = Field(default=None, ge=0, le=6)
 
 
 class FxRateIn(BaseModel):
@@ -36,20 +46,29 @@ class FxRateIn(BaseModel):
 
 
 @router.get("/admin/fx/currencies")
-def list_currencies(owner=Depends(require_owner), registry=Depends(get_registry)):
-    # include inactive too for management view
-    all_rows = registry.db.query("SELECT * FROM currencies ORDER BY code")
-    return {"total": len(all_rows), "currencies": all_rows}
+def list_currencies(status: str | None = None, owner=Depends(require_owner), registry=Depends(get_registry)):
+    # status: all | active | disabled (server-side filter, §20)
+    if status == "active":
+        rows = registry.db.query("SELECT * FROM currencies WHERE active=1 ORDER BY code")
+    elif status == "disabled":
+        rows = registry.db.query("SELECT * FROM currencies WHERE active=0 ORDER BY code")
+    else:
+        rows = registry.db.query("SELECT * FROM currencies ORDER BY code")
+    return {"total": len(rows), "currencies": rows}
 
 
 @router.post("/admin/fx/currencies", status_code=201)
 def add_currency(body: CurrencyIn, owner=Depends(require_owner), registry=Depends(get_registry)):
     existing = registry.currencies.get(body.code)
+    if existing:
+        raise HTTPException(409, f"currency_exists:{body.code.upper()}")
     row = registry.currencies.add(
         body.code,
         body.name,
         minor_unit=body.minor_unit,
         round_unit=body.round_unit,
+        symbol=body.symbol,
+        decimal_places=body.decimal_places,
         active=body.active,
     )
     registry.audit.log(
@@ -106,6 +125,14 @@ def add_rate(body: FxRateIn, owner=Depends(require_owner), registry=Depends(get_
         valid_to=body.valid_to,
         tenant_id=body.tenant_id,
     )
+    # §13: one ACTIVE general rate per pair+region — the new one wins, the
+    # previous active ones are deactivated (history preserved, never deleted).
+    if not body.tenant_id:
+        registry.db.execute(
+            "UPDATE fx_rates SET active=0 WHERE base_ccy=? AND quote_ccy=? AND region=? "
+            "AND tenant_id IS NULL AND active=1 AND rate_id<>?",
+            (body.base_ccy.upper(), body.quote_ccy.upper(), body.region or "global", row["rate_id"]),
+        )
     scope = "tenant_override" if body.tenant_id else "platform"
     registry.audit.log(
         "platform",
@@ -265,4 +292,115 @@ def general_rate_users(owner=Depends(require_owner), registry=Depends(get_regist
         if not manual and not refset:
             users.append({"tenant_id": tid, "name": t.get("name"), "status": t.get("status")})
     return {"total": len(users), "tenants": users}
+
+
+# ── Currency lifecycle (§14-§22) ─────────────────────────────────────────────
+@router.put("/admin/fx/currencies/{code}")
+def update_currency(code: str, body: CurrencyUpdate, owner=Depends(require_owner), registry=Depends(get_registry)):
+    cur = registry.currencies.get(code)
+    if not cur:
+        raise HTTPException(404, "currency_not_found")
+    row = registry.currencies.update(
+        code, name=body.name, minor_unit=body.minor_unit,
+        round_unit=body.round_unit, symbol=body.symbol, decimal_places=body.decimal_places,
+    )
+    registry.audit.log("platform", "owner", "currency.updated", "currency", code.upper(), None,
+                       {"changed": {k: v for k, v in body.model_dump().items() if v is not None}})
+    return row
+
+
+@router.post("/admin/fx/currencies/{code}/disable")
+def disable_currency(code: str, owner=Depends(require_owner), registry=Depends(get_registry)):
+    cur = registry.currencies.get(code)
+    if not cur:
+        raise HTTPException(404, "currency_not_found")
+    row = registry.currencies.set_active(code, False)
+    registry.audit.log("platform", "owner", "currency.disabled", "currency", code.upper(), None,
+                       {"name": cur.get("name")})
+    return row
+
+
+@router.post("/admin/fx/currencies/{code}/enable")
+def enable_currency(code: str, owner=Depends(require_owner), registry=Depends(get_registry)):
+    cur = registry.currencies.get(code)
+    if not cur:
+        raise HTTPException(404, "currency_not_found")
+    row = registry.currencies.set_active(code, True)
+    registry.audit.log("platform", "owner", "currency.enabled", "currency", code.upper(), None,
+                       {"name": cur.get("name")})
+    return row
+
+
+@router.get("/admin/fx/currencies/{code}/usage")
+def currency_usage(code: str, owner=Depends(require_owner), registry=Depends(get_registry)):
+    """Real usage counts for the disable warning dialog (§19)."""
+    cur = registry.currencies.get(code)
+    if not cur:
+        raise HTTPException(404, "currency_not_found")
+    usage = registry.currencies.usage_count(code)
+    return {"code": code.upper(), **usage}
+
+
+# ── Rate lifecycle: disable/enable + versioned edit (§4/§11/§26) ────────────
+@router.post("/admin/fx/rates/{rate_id}/status")
+def set_rate_status(rate_id: str, body: dict, owner=Depends(require_owner), registry=Depends(get_registry)):
+    """Disable/enable a rate without touching history. Disabled general rates are
+    skipped by the resolver (which falls back per precedence); a disabled tenant
+    override makes the tenant fall back to reference/general automatically."""
+    row = registry.fx_rates.get(rate_id)
+    if not row:
+        raise HTTPException(404, "rate_not_found")
+    active = bool(body.get("active"))
+    updated = registry.fx_rates.set_active(rate_id, active)
+    scope = "tenant_fx_override" if row.get("tenant_id") else "general_fx_rate"
+    registry.audit.log(
+        "platform", "owner",
+        f"{scope}.{'enabled' if active else 'disabled'}",
+        "fx_rate", rate_id, None,
+        {"pair": f"{row['base_ccy']}/{row['quote_ccy']}", "tenant_id": row.get("tenant_id"),
+         "rate": float(row["rate"])},
+    )
+    return updated
+
+
+@router.put("/admin/fx/rates/{rate_id}")
+def edit_rate(rate_id: str, body: dict, owner=Depends(require_owner), registry=Depends(get_registry)):
+    """Versioned edit (§11/§26): close the old row (valid_to=now) and insert a new
+    row with the new rate. Historical decisions keep the old rate via their own
+    immutable snapshots; new transactions use the new rate from now on."""
+    from datetime import UTC, datetime
+    row = registry.fx_rates.get(rate_id)
+    if not row:
+        raise HTTPException(404, "rate_not_found")
+    new_rate = body.get("rate")
+    if new_rate is None:
+        raise HTTPException(400, "rate_required")
+    try:
+        new_rate = float(new_rate)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "rate_invalid")
+    if new_rate <= 0:
+        raise HTTPException(400, "rate_must_be_positive")
+    old_rate = float(row["rate"])
+    now = datetime.now(UTC).isoformat()
+    # close old
+    registry.fx_rates.end(rate_id, now)
+    # insert new version, same pair/source/region/tenant scope
+    new_row = registry.fx_rates.add(
+        row["base_ccy"], row["quote_ccy"], new_rate,
+        rate_type=row.get("rate_type") or "mid",
+        source=row.get("source") or "aegis_reference",
+        region=row.get("region") or "global",
+        spread_pct=row.get("spread_pct"),
+        valid_from=now, valid_to=None,
+        tenant_id=row.get("tenant_id"),
+    )
+    scope = "tenant_fx_override" if row.get("tenant_id") else "general_fx_rate"
+    registry.audit.log(
+        "platform", "owner", f"{scope}.updated",
+        "fx_rate", new_row["rate_id"], None,
+        {"pair": f"{row['base_ccy']}/{row['quote_ccy']}", "tenant_id": row.get("tenant_id"),
+         "old_rate": old_rate, "new_rate": new_rate, "previous_rate_id": rate_id},
+    )
+    return new_row
 
