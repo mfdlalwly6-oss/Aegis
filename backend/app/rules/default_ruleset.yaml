@@ -12,6 +12,7 @@ rules:
     score: 0.30
     tags: [velocity]
     description: "إجمالي مرتفع خلال خمس دقائق"
+    currency: USD
     when: {">": [{"var": "features.velocity.amount_5min_account"}, 5000]}
   - id: R-VEL-003
     name: Merchant diversity anomaly
@@ -40,10 +41,11 @@ rules:
     score: 0.35
     tags: [device]
     description: "جهاز جديد مع مبلغ مرتفع"
+    currency: USD
     when:
       "and":
         - {"==": [{"var": "features.device.first_seen_today"}, true]}
-        - {">": [{"var": "tx.amount"}, 1000]}
+        - {">": [{"var": "features.amount_usd"}, 1000]}
   - id: R-DEV-002
     name: Emulator or rooted device
     severity: critical
@@ -67,10 +69,11 @@ rules:
     score: 0.35
     tags: [device]
     description: "VPN مع مبلغ مرتفع ومستفيد جديد"
+    currency: USD
     when:
       "and":
         - {"==": [{"var": "tx.device.vpn"}, true]}
-        - {">": [{"var": "tx.amount"}, 500]}
+        - {">": [{"var": "features.amount_usd"}, 500]}
         - {"==": [{"var": "features.beneficiary.new"}, true]}
   - id: R-DEV-005
     name: Shared device across accounts
@@ -106,10 +109,11 @@ rules:
     score: 0.55
     tags: [ato]
     description: "تغيير كلمة المرور قبل التحويل مباشرة"
+    currency: USD
     when:
       "and":
         - {"<": [{"var": "features.account.seconds_since_password_change"}, 600]}
-        - {">": [{"var": "tx.amount"}, 1000]}
+        - {">": [{"var": "features.amount_usd"}, 1000]}
   - id: R-ATO-002
     name: MFA disabled + new beneficiary
     severity: critical
@@ -126,10 +130,11 @@ rules:
     score: 0.35
     tags: [aml]
     description: "نمط تجزئة مبالغ تحت العتبة"
+    currency: USD
     when:
       "and":
-        - {">=": [{"var": "tx.amount"}, 9000]}
-        - {"<": [{"var": "tx.amount"}, 10000]}
+        - {">=": [{"var": "features.amount_usd"}, 9000]}
+        - {"<": [{"var": "features.amount_usd"}, 10000]}
         - {">": [{"var": "features.velocity.count_9k_10k_30d"}, 2]}
   - id: R-AML-002
     name: Rapid pass-through
@@ -137,6 +142,7 @@ rules:
     score: 0.40
     tags: [aml]
     description: "حركة أموال سريعة (دخول وخروج)"
+    currency: USD
     when:
       "and":
         - {">=": [{"var": "features.velocity.tx_count_1h"}, 8]}
@@ -157,10 +163,11 @@ rules:
     score: 0.35
     tags: [card]
     description: "اختبار بطاقات بمبالغ صغيرة مرفوضة"
+    currency: USD
     when:
       "and":
         - {">": [{"var": "features.velocity.card_declines_1h"}, 5]}
-        - {"<": [{"var": "tx.amount"}, 5]}
+        - {"<": [{"var": "features.amount_usd"}, 5]}
   - id: R-SE-001
     name: Coached call pattern
     severity: high
@@ -174,7 +181,8 @@ rules:
     score: 0.40
     tags: [account]
     description: "حساب جديد مع معاملة أولى كبيرة"
+    currency: USD
     when:
       "and":
         - {"<": [{"var": "features.account.account_age_days"}, 7]}
-        - {">": [{"var": "tx.amount"}, 5000]}
+        - {">": [{"var": "features.amount_usd"}, 5000]}

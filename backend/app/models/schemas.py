@@ -158,6 +158,14 @@ class RuleHit(BaseModel):
     severity: str
     score_contribution: float
     reason: str
+    # Currency-aware financial audit (§5/§17) — populated for money-threshold rules.
+    original_amount: float | None = None
+    original_currency: str | None = None
+    evaluation_amount: float | None = None
+    evaluation_currency: str | None = None
+    rule_currency: str | None = None
+    fx_source: str | None = None
+    fx_rate: float | None = None
 
 
 class ModelScore(BaseModel):

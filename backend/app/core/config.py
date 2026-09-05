@@ -87,6 +87,8 @@ class Settings(BaseSettings):
     FX_STALE_HOURS: int = 24  # rate older than this => FX_STALE
     FX_DIVERGENCE_PCT: float = 3.0  # institution rate deviation => FX_DIVERGENT flag
     FX_MISSING_DECISION: str = "review"  # unknown currency => never silent ALLOW, never blind BLOCK
+    FX_INSTITUTION_TRUST_PCT: float = 6.0  # institution rate trusted if within this % of platform reference
+
 
     # Observability
     OTEL_ENDPOINT: str = ""

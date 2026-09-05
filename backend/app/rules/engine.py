@@ -125,6 +125,11 @@ class Rule:
         # None => platform rule (applies to every tenant). Otherwise this rule
         # is a tenant-specific override that only fires for that tenant.
         self.tenant_id: str | None = spec.get("tenant_id")
+        # §5: currency of the financial thresholds in  (e.g. "USD").
+        # Financial rules read features.amount_usd (already normalized by the FX
+        # resolver via the same precedence chain), so a USD threshold evaluates
+        # USD transactions directly and converts YER/SAR through the resolved rate.
+        self.currency: str | None = spec.get("currency")
 
     def evaluate(self, ctx: dict[str, Any]) -> RuleHit | None:
         try:
@@ -134,12 +139,28 @@ class Rule:
             return None
         if not fired:
             return None
+        audit: dict[str, Any] = {}
+        if self.currency:
+            txd = ctx.get("tx") or {}
+            fxs = txd.get("fx") or {}
+            audit = {
+                "original_amount": txd.get("amount"),
+                "original_currency": txd.get("currency"),
+                # evaluation happens in the rule currency; amount_usd is the
+                # resolver-normalized value when rule currency == reference (USD).
+                "evaluation_amount": (ctx.get("features") or {}).get("amount_usd"),
+                "evaluation_currency": self.currency,
+                "rule_currency": self.currency,
+                "fx_source": fxs.get("source"),
+                "fx_rate": fxs.get("rate"),
+            }
         return RuleHit(
             rule_id=self.id,
             name=self.name,
             severity=self.severity,
             score_contribution=self.score,
             reason=self.description or self.name,
+            **audit,
         )
 
 

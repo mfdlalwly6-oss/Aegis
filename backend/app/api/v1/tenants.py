@@ -127,6 +127,49 @@ def create_tenant(
     return tenant
 
 
+
+@router.get("/admin/tenants/{tenant_id}/fx-status")
+def tenant_fx_status(tenant_id: str, owner=Depends(require_owner), registry=Depends(get_registry)):
+    """Report which FX source the resolver would use for this tenant RIGHT NOW,
+    with the actual USD/YER and SAR/YER rates (§16). Source precedence:
+    institution -> manual override -> reference set -> general."""
+    if not registry.tenants.get(tenant_id):
+        raise HTTPException(404, "tenant_not_found")
+    now = datetime.now(UTC).isoformat()
+
+    def _rate(base, quote):
+        row, inv = registry.fx._lookup(base, quote, region=None, at=None, tenant_id=tenant_id)
+        if row is None:
+            return None
+        r = float(row["rate"])
+        if inv:
+            r = 1.0 / r
+        return {"rate": r, "source": row["source"], "rate_id": row.get("rate_id")}
+
+    # Detect the winning tier explicitly for a human-readable label.
+    manual = registry.fx.fx_repo.latest_valid("USD", "YER", at=None, tenant_id=tenant_id, tenant_only=True)
+    refset = registry.fx.reference_repo.set_for_tenant(tenant_id) if registry.fx.reference_repo else None
+    if manual:
+        layer = "manual"
+    elif refset:
+        layer = "reference"
+    else:
+        layer = "general"
+
+    usd = _rate("USD", "YER")
+    sar = _rate("SAR", "YER")
+    return {
+        "tenant_id": tenant_id,
+        "source_layer": layer,
+        "reference_set": ({"set_id": refset["set_id"], "name": refset.get("name")} if refset else None),
+        "usd_yer": (usd["rate"] if usd else None),
+        "sar_yer": (sar["rate"] if sar else None),
+        "usd_yer_source": (usd["source"] if usd else None),
+        "sar_yer_source": (sar["source"] if sar else None),
+        "at": now,
+    }
+
+
 @router.get("/admin/tenants/{tenant_id}")
 def get_tenant(tenant_id: str, owner=Depends(require_owner), registry=Depends(get_registry)):
     tenant = registry.tenants.get(tenant_id, reveal=True)

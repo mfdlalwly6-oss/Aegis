@@ -227,3 +227,42 @@ def unassign_reference(tenant_id: str, owner=Depends(require_owner), registry=De
                        tenant_id, None, {"removed": removed})
     return {"tenant_id": tenant_id, "removed": removed}
 
+
+# ── General rate management (§13) ────────────────────────────────────────────
+@router.post("/admin/fx/general/activate")
+def activate_general(body: dict, owner=Depends(require_owner), registry=Depends(get_registry)):
+    """Make one general (tenant_id IS NULL) rate the active one for its pair+region;
+    all other general rates for the same pair+region become inactive (§13)."""
+    rid = body.get("rate_id")
+    if not rid:
+        raise HTTPException(400, "rate_id_required")
+    row = registry.fx_rates.get(rid)
+    if not row:
+        raise HTTPException(404, "rate_not_found")
+    if row.get("tenant_id"):
+        raise HTTPException(422, "not_a_general_rate")
+    # deactivate siblings (same pair+region, platform-wide), keep history intact
+    registry.db.execute(
+        "UPDATE fx_rates SET active=0 WHERE base_ccy=? AND quote_ccy=? AND region=? AND tenant_id IS NULL",
+        (row["base_ccy"], row["quote_ccy"], row["region"]),
+    )
+    registry.db.execute("UPDATE fx_rates SET active=1 WHERE rate_id=?", (rid,))
+    registry.audit.log("platform", "owner", "fx.general_activated", "fx_rate", rid, None,
+                       {"pair": f"{row['base_ccy']}/{row['quote_ccy']}", "region": row["region"]})
+    return registry.fx_rates.get(rid)
+
+
+@router.get("/admin/fx/general/users")
+def general_rate_users(owner=Depends(require_owner), registry=Depends(get_registry)):
+    """§14: tenants that would currently resolve to the GENERAL tier (no manual
+    override and no active reference-set assignment)."""
+    tenants = registry.db.query("SELECT tenant_id, name, status FROM tenants WHERE status != 'deleted'")
+    users = []
+    for t in tenants:
+        tid = t["tenant_id"]
+        manual = registry.fx.fx_repo.latest_valid("USD", "YER", at=None, tenant_id=tid, tenant_only=True)
+        refset = registry.fx.reference_repo.set_for_tenant(tid) if registry.fx.reference_repo else None
+        if not manual and not refset:
+            users.append({"tenant_id": tid, "name": t.get("name"), "status": t.get("status")})
+    return {"total": len(users), "tenants": users}
+

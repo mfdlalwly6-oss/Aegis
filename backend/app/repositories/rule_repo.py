@@ -17,11 +17,11 @@ class RuleRepository:
     def upsert(self, rule: dict, tenant_id: str | None = None) -> dict:
         self.db.execute(
             "INSERT INTO rules (rule_id,tenant_id,name,severity,score,enabled,"
-            "tags_json,description,when_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?) "
+            "tags_json,description,when_json,currency,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(rule_id) DO UPDATE SET name=excluded.name,"
             "severity=excluded.severity,score=excluded.score,enabled=excluded.enabled,"
             "tags_json=excluded.tags_json,description=excluded.description,"
-            "when_json=excluded.when_json",
+            "when_json=excluded.when_json,currency=excluded.currency",
             (
                 rule["id"],
                 tenant_id,
@@ -32,6 +32,7 @@ class RuleRepository:
                 json.dumps(rule.get("tags", [])),
                 rule.get("description", ""),
                 json.dumps(rule["when"]),
+                rule.get("currency"),
                 utcnow(),
             ),
         )
@@ -47,6 +48,7 @@ class RuleRepository:
             "tags": json.loads(r["tags_json"]),
             "description": r["description"],
             "when": json.loads(r["when_json"]),
+            "currency": r.get("currency"),
         }
 
     def list_all(self, tenant_id: str | None = None) -> list[dict]:
@@ -197,6 +199,7 @@ class RuleRepository:
                     "tags": ov.get("tags") or [],
                     "description": ov.get("description") or "",
                     "when": ov.get("when") or {"==": [1, 0]},  # never fires unless defined
+                    "currency": ov.get("currency"),
                     "customized": True,
                 }
             )

@@ -311,6 +311,7 @@ function renderOverview() {
           el("tbody", {}, ...rows)
         )
   ));
+  if (state.tenantFxStatusFor) box.appendChild(renderTenantFxPanel());
 
   return box;
 }
@@ -330,6 +331,29 @@ function _tenantPanelRow(t) {
       el("div", { style: "padding:2px 10px 12px" }, content)));
 }
 
+async function loadTenantFxStatus(tid) {
+  state.tenantFxStatusFor = tid;
+  state.tenantFxStatus = await api("/tenants/" + encodeURIComponent(tid) + "/fx-status");
+}
+function renderTenantFxPanel() {
+  const fx = state.tenantFxStatus;
+  if (!fx) return el("div", { style: "color:var(--muted)" }, "…");
+  const srcLabel = { manual: "🛠️ سعر يدوي (Manual Override)", reference: "📋 مجموعة مرجعية",
+                     general: "🌐 السعر العام (General)", institution: "🏦 سعر المؤسسة" }[fx.source_layer] || fx.source_layer;
+  return el("div", { class: "card", style: "border:1px solid var(--brand);margin:8px 0" },
+    el("h3", { style: "margin-bottom:10px" }, "💱 حالة العملات وFX — " + (fx.tenant_id || "")),
+    el("div", { style: "font-size:13px;line-height:2" },
+      el("div", {}, el("strong", {}, "المصدر الحالي: "), srcLabel),
+      fx.reference_set ? el("div", {}, el("strong", {}, "المجموعة المرجعية: "), (fx.reference_set.name || fx.reference_set.set_id),
+        " ", el("button", { class: "btn sm", style: "padding:2px 8px;font-size:11px", onclick: () => { state.view = "fx"; render(); } }, "📋 فتح إدارة FX")) : null,
+      el("div", {}, el("strong", {}, "USD/YER: "), fx.usd_yer != null ? String(fx.usd_yer) : "—",
+        el("span", { style: "color:var(--muted);font-size:11px" }, " (" + (fx.usd_yer_source || "") + ")")),
+      el("div", {}, el("strong", {}, "SAR/YER: "), fx.sar_yer != null ? String(fx.sar_yer) : "—",
+        el("span", { style: "color:var(--muted);font-size:11px" }, " (" + (fx.sar_yer_source || "") + ")")),
+      el("div", { style: "color:var(--muted);font-size:11px;margin-top:4px" }, "آخر تحديث: " + (fx.at || "")),
+    ),
+  );
+}
 function renderTenants() {
   const box = el("div", {});
   const header = el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px" },
@@ -378,6 +402,12 @@ function renderTenants() {
           el("button", { class: "btn", style: "padding:5px 8px;font-size:11px",
             onclick: async () => { state.selectedTenant = null; state.selectedTenantId = null; state.tenantInvs = null; state.tenantInvsFor = null; try { await loadTenantRules(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } }
           }, "⚙️ قواعد"),
+          el("button", { class: "btn", style: "padding:5px 8px;font-size:11px",
+            onclick: async () => {
+              if (state.tenantFxStatusFor === t.tenant_id) { state.tenantFxStatusFor = null; state.tenantFxStatus = null; render(); return; }
+              try { await loadTenantFxStatus(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); }
+            }
+          }, "💱 العملات وFX"),
           el("button", { class: "btn danger", style: "padding:5px 8px;font-size:11px",
             onclick: () => deleteTenant(t.tenant_id)
           }, "🗑️"))),
@@ -1317,7 +1347,9 @@ async function loadFxCurrencies() {
   try { const r = await api("/fx/currencies"); state.fxCurrencies = r.currencies || []; } catch { state.fxCurrencies = []; }
 }
 async function loadFxRates() {
-  try { const r = await api("/fx/rates"); state.fxRates = r.rates || []; } catch { state.fxRates = []; }
+  try { const r = await api("/fx/rates"); state.tenantFxStatus = state.tenantFxStatus || null;
+state.tenantFxStatusFor = state.tenantFxStatusFor || null;
+state.fxRates = r.rates || []; } catch { state.fxRates = []; }
 }
 async function loadFxRefSets() {
   try { const r = await api("/fx/reference-sets"); state.fxRefSets = r.sets || []; } catch { state.fxRefSets = []; }
