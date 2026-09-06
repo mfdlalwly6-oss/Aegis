@@ -16,6 +16,17 @@ code{font-family:Menlo,Consolas,monospace}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;margin-bottom:16px}
 .form-control{width:100%;padding:12px 14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:14px}
 .form-control:focus{outline:0;border-color:var(--brand)}
+
+/* Root-cause fix for invisible dropdown options (dark theme): a native <select>
+   paints its <option> list with the control background, but option text inherits
+   the OS default (near-black) unless explicitly themed -> dark-on-dark, readable
+   only on hover. Theme the option list once here so EVERY select (FX institution
+   picker, Policy Studio picker, currency selects, etc.) inherits it. */
+.form-control option{background:var(--surface);color:var(--text)}
+.form-control option:hover,.form-control option:focus{background:var(--brand);color:#fff}
+.form-control option:checked,.form-control option[selected]{background:var(--brand2);color:#fff}
+.form-control option:disabled{color:var(--muted)}
+select.form-control{color-scheme:dark}/* hint the native dropdown arrow/popup to dark mode */
 table{width:100%;border-collapse:collapse;font-size:13.5px}
 th,td{padding:10px 12px;text-align:right;border-bottom:1px solid var(--border)}
 th{color:var(--muted);font-weight:700;font-size:11.5px;text-transform:uppercase}
