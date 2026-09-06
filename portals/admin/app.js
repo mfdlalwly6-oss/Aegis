@@ -1753,6 +1753,71 @@ function renderFxTenantBanner() {
         onclick: () => { state.fxTenantId = null; state.tenantFxStatus = null; render(); } }, "✕ عرض عام")));
 }
 
+/* ── shared custom select (fxSel) — replaces native <select> popups that render
+   outside the page DOM (OS-level) and appear black/invisible on dark themes.
+   Renders the option list INSIDE the page -> fully themeable + searchable. ── */
+
+let _fxSelUid = 0;
+function fxSel(options, cfg = {}) {
+  const myId = "fxsel-" + (++_fxSelUid);
+  const wrap = el("div", { class: "fxsel", style: "position:relative;min-width:" + (cfg.minWidth || "220px") });
+  const cur = options.find(o => o.value === (cfg.value ?? "")) || null;
+  const btn = el("button", { type: "button", class: "form-control fxsel-btn",
+    style: "display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:right" },
+    el("span", { style: "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" }, cur ? cur.label : (cfg.placeholder || "— اختر —")),
+    el("span", { style: "font-size:10px;color:var(--muted)" }, "▼"));
+  const panel = el("div", { class: "fxsel-panel", style: "display:none;position:absolute;top:calc(100% + 5px);inset-inline:0;z-index:3000;background:var(--bg2);border:1px solid var(--brand);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.55);max-height:280px;overflow:auto" });
+  const search = el("input", { class: "form-control", placeholder: "🔍 ابحث…",
+    style: "margin:8px;width:calc(100% - 16px);padding:7px 10px;font-size:12.5px" });
+  const listBox = el("div", {});
+  panel.appendChild(search); panel.appendChild(listBox);
+  wrap.appendChild(btn); wrap.appendChild(panel);
+
+  let value = cfg.value ?? "";
+  const labelSpan = btn.firstChild;
+
+  function closeAll(except) {
+    document.querySelectorAll(".fxsel-panel").forEach(p => { if (p !== except) p.style.display = "none"; });
+  }
+  function renderList(q) {
+    const ql = (q || "").trim().toLowerCase();
+    const items = options.filter(o => !ql || (o.label || "").toLowerCase().includes(ql));
+    listBox.replaceChildren(...(items.length ? items.map(o => {
+      const sel = o.value === value;
+      const it = el("div", { class: "fxsel-item", role: "option", "aria-selected": sel ? "true" : "false",
+        style: "padding:9px 12px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:8px;color:var(--text);" +
+               (sel ? "background:var(--brand2);color:#fff;font-weight:700;" : "") }, o.label);
+      it.onmouseenter = () => { if (!sel) it.style.background = "var(--brand)"; };
+      it.onmouseleave = () => { if (!sel) it.style.background = "transparent"; };
+      it.onclick = () => {
+        value = o.value;
+        labelSpan.textContent = o.label;
+        panel.style.display = "none";
+        if (cfg.onChange) cfg.onChange(o.value, o);
+      };
+      return it;
+    }) : [el("div", { style: "padding:14px;color:var(--muted);text-align:center;font-size:12.5px" }, "لا نتائج")]));
+  }
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    const opening = panel.style.display === "none";
+    closeAll(panel);
+    panel.style.display = opening ? "block" : "none";
+    if (opening) { search.value = ""; renderList(""); search.focus(); }
+  };
+  search.oninput = () => renderList(search.value);
+  search.onclick = e => e.stopPropagation();
+  document.addEventListener("click", () => { panel.style.display = "none"; });
+
+  wrap.getValue = () => value;
+  wrap.setValue = (v) => {
+    value = v;
+    const f = options.find(o => o.value === v);
+    labelSpan.textContent = f ? f.label : (cfg.placeholder || "— اختر —");
+  };
+  return wrap;
+}
+
 function renderFx() {
   const cur = state.fxCurrencies || [];
   const rates = state.fxRates || [];
@@ -1822,10 +1887,14 @@ function renderFxOverrides() {
   const tenants = (state.tenants || []).filter(t => t.status !== "deleted");
 
   // Create form — institution + from/to currency + rate (real dropdowns).
-  const tSel = el("select", { class: "form-control", style: "min-width:200px" },
-    el("option", { value: "" }, "— اختر المؤسسة —"),
-    ...tenants.map(t => el("option", { value: t.tenant_id }, "🏢 " + (t.name || t.tenant_id))));
-  if (state.fxTenantId) tSel.value = state.fxTenantId;  // preselect when opened from a tenant
+  const _fxTenantOpts = [{ value: "", label: "— اختر المؤسسة —" },
+    ...tenants.map(t => ({ value: t.tenant_id, label: "🏢 " + (t.name || t.tenant_id) }))];
+  const tSel = fxSel(_fxTenantOpts, {
+    value: state.fxTenantId || "",
+    placeholder: "— اختر المؤسسة —",
+    minWidth: "230px",
+    onChange: () => {},  // value read at save time via tSel.getValue()
+  });
   const fromSel = el("select", { class: "form-control", style: "width:110px" }, ...activesCcy.map(c => el("option", { value: c.code }, c.code)));
   const toSel = el("select", { class: "form-control", style: "width:110px" }, ...activesCcy.map(c => el("option", { value: c.code }, c.code)));
   if (activesCcy.some(c => c.code === "USD")) fromSel.value = "USD";
@@ -1839,11 +1908,11 @@ function renderFxOverrides() {
   const saveBtn = el("button", { class: "btn success" }, "➕ إضافة استثناء");
   saveBtn.onclick = async () => {
     omsg.textContent = ""; omsg.style.color = "var(--muted)";
-    if (!tSel.value) { omsg.textContent = "اختر المؤسسة"; omsg.style.color = "#FCA5A5"; return; }
+    if (!tSel.getValue()) { omsg.textContent = "اختر المؤسسة"; omsg.style.color = "#FCA5A5"; return; }
     if (!fromSel.value || !toSel.value || !rateIn.value) { omsg.textContent = "أدخل الزوج والسعر"; omsg.style.color = "#FCA5A5"; return; }
     if (fromSel.value === toSel.value) { omsg.textContent = "العملتان يجب أن تختلفا"; omsg.style.color = "#FCA5A5"; return; }
     try {
-      await api("/fx/rates", { method: "POST", body: { base_ccy: fromSel.value, quote_ccy: toSel.value, rate: Number(rateIn.value), source: "manual", tenant_id: tSel.value } });
+      await api("/fx/rates", { method: "POST", body: { base_ccy: fromSel.value, quote_ccy: toSel.value, rate: Number(rateIn.value), source: "manual", tenant_id: tSel.getValue() } });
       toast("أُضيف الاستثناء — أصبح إجباريًا لهذه المؤسسة", "success");
       rateIn.value = ""; hint.textContent = "";
       await loadFxRates(); render();
@@ -1894,18 +1963,20 @@ function renderPolicyStudio() {
   const tenants = state.policyTenants || [];
   const sel = state.policySelected;
   const pmsg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
-  const picker = el("select", { class: "form-control", style: "min-width:240px" },
-    el("option", { value: "" }, "— اختر مؤسسة لتحرير سياستها —"),
-    ...tenants.map(t => el("option", { value: t.tenant_id }, (t.name || t.tenant_id))));
-  picker.value = sel ? sel.tenant_id : "";
-  picker.addEventListener("change", async () => {
-    const tid = picker.value;
-    if (!tid) { state.policySelected = null; state.policyVersions = []; render(); return; }
-    try {
-      state.policySelected = await api("/tenants/" + tid);
-      state.policyVersions = await api("/tenants/" + tid + "/policy/versions");
-    } catch (e) { state.policySelected = null; state.policyVersions = []; toast(e.message, "error"); }
-    render();
+  const _polOpts = [{ value: "", label: "— اختر مؤسسة لتحرير سياستها —" },
+    ...tenants.map(t => ({ value: t.tenant_id, label: (t.name || t.tenant_id) }))];
+  const picker = fxSel(_polOpts, {
+    value: sel ? sel.tenant_id : "",
+    placeholder: "— اختر مؤسسة لتحرير سياستها —",
+    minWidth: "240px",
+    onChange: async (tid) => {
+      if (!tid) { state.policySelected = null; state.policyVersions = []; render(); return; }
+      try {
+        state.policySelected = await api("/tenants/" + tid);
+        state.policyVersions = await api("/tenants/" + tid + "/policy/versions");
+      } catch (e) { state.policySelected = null; state.policyVersions = []; toast(e.message, "error"); }
+      render();
+    },
   });
 
   let editor = el("div", { style: "color:var(--muted);padding:20px;text-align:center" }, "اختر مؤسسة لعرض سياستها وتحريرها.");
