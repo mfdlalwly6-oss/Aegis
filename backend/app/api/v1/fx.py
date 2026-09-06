@@ -247,6 +247,20 @@ def assign_reference_set(set_id: str, body: FxRefAssignIn,
     return {"set_id": set_id, "moves": moves}
 
 
+@router.delete("/admin/fx/reference-sets/{set_id}")
+def delete_reference_set(set_id: str, owner=Depends(require_owner), registry=Depends(get_registry)):
+    """Soft-delete a reference set: unassign all tenants, mark inactive.
+    Historical versions in fx_reference_versions are preserved untouched (append-only).
+    Tenants fall back to the next resolver tier automatically (§11/§12)."""
+    row = registry.fx_reference_repo.delete_set(set_id)
+    if not row:
+        raise HTTPException(404, "reference_set_not_found")
+    registry.audit.log("platform", "owner", "fx_reference_set.deleted", "fx_reference_set",
+                       set_id, None, {"name": row.get("name"), "unassigned": row.get("unassigned_tenants", [])})
+    return {"set_id": set_id, "name": row.get("name"), "deleted": True,
+            "unassigned_tenants": row.get("unassigned_tenants", [])}
+
+
 @router.post("/admin/fx/reference-sets/unassign/{tenant_id}")
 def unassign_reference(tenant_id: str, owner=Depends(require_owner), registry=Depends(get_registry)):
     removed = registry.fx_reference_repo.unassign(tenant_id)

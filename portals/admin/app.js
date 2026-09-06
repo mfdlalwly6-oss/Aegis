@@ -344,8 +344,11 @@ function renderTenantFxPanel() {
     el("h3", { style: "margin-bottom:10px" }, "💱 حالة العملات وFX — " + (fx.tenant_id || "")),
     el("div", { style: "font-size:13px;line-height:2" },
       el("div", {}, el("strong", {}, "المصدر الحالي: "), srcLabel),
-      fx.reference_set ? el("div", {}, el("strong", {}, "المجموعة المرجعية: "), (fx.reference_set.name || fx.reference_set.set_id),
-        " ", el("button", { class: "btn sm", style: "padding:2px 8px;font-size:11px", onclick: () => { state.fxTenantId = state.tenantFxStatusFor || null; state.page = "fx"; render(); } }, "📋 فتح إدارة FX")) : null,
+      el("div", {}, el("strong", {}, "مجموعة FX: "),
+        fx.reference_set
+          ? el("span", {}, el("span", { style: "color:var(--brand2);font-weight:700" }, (fx.reference_set.name || fx.reference_set.set_id)),
+              " ", el("button", { class: "btn sm", style: "padding:2px 8px;font-size:11px", onclick: () => { state.fxTenantId = state.tenantFxStatusFor || null; state.page = "fx"; render(); } }, "📋 فتح إدارة FX"))
+          : el("span", { style: "color:var(--muted)" }, "لا توجد مجموعة مرتبطة")),
       el("div", {}, el("strong", {}, "USD/YER: "), fx.usd_yer != null ? String(fx.usd_yer) : "—",
         el("span", { style: "color:var(--muted);font-size:11px" }, " (" + (fx.usd_yer_source || "") + ")")),
       el("div", {}, el("strong", {}, "SAR/YER: "), fx.sar_yer != null ? String(fx.sar_yer) : "—",
@@ -1479,6 +1482,17 @@ function renderFxReferenceSets() {
       membersBox.style.display = "none";
     } }, "➕ إضافة");
 
+    const delBtn = el("button", { class: "btn sm danger", style: "padding:3px 8px;font-size:10.5px", onclick: async () => {
+      const n = (st.members || []).length;
+      if (!confirm("حذف المجموعة «" + st.name + "»؟\nستُفصل " + n + " مؤسسة وتعود تلقائيًا إلى سعر المؤسسة/العام.\nالسجل التاريخي للأسعار يُحفظ كما هو (لا يُمسح).")) return;
+      delBtn.disabled = true; delBtn.textContent = "…";
+      try {
+        await api("/fx/reference-sets/" + encodeURIComponent(st.set_id), { method: "DELETE" });
+        toast("✅ حُذفت المجموعة «" + st.name + "» — المؤسسات عادت للمصدر التالي", "success");
+        await loadFxRefSets(); render();
+      } catch (e) { delBtn.disabled = false; delBtn.textContent = "🗑 حذف"; toast(e.message, "error"); }
+    } }, "🗑 حذف");
+
     const saveEditBtn = el("button", { class: "btn sm primary", style: "padding:3px 8px;font-size:10.5px", onclick: async () => {
       const usd = parseFloat(eUsd.value), sar = parseFloat(eSar.value);
       if (isNaN(usd) || usd <= 0 || isNaN(sar) || sar <= 0) { toast("أدخل قيمًا موجبة", "error"); return; }
@@ -1499,7 +1513,7 @@ function renderFxReferenceSets() {
             "عدد المؤسسات: " + (st.member_count || 0) + " · أُنشئت: " + fmtTs(st.created_at) + " · آخر تعديل: " + fmtTs(st.updated_at))),
         el("div", { style: "display:flex;gap:5px;flex-wrap:wrap;align-items:center" },
           el("span", { class: "badge " + (st.active ? "allow" : "block") }, st.active ? "فعّالة" : "معطّلة"),
-          membersBtn, addBtn, statusBtn)),
+          membersBtn, addBtn, statusBtn, delBtn)),
       el("div", { style: "display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap" },
         el("span", { style: "font-size:12px" }, "✏️ تعديل: 1 USD ="), eUsd,
         el("span", { style: "font-size:12px" }, "· 1 SAR ="), eSar,
@@ -1989,9 +2003,12 @@ function renderPolicyStudio() {
     const tc = el("input", { class: "form-control", type: "number", step: "any", value: th.challenge != null ? th.challenge : "", style: "width:110px" });
     const tr = el("input", { class: "form-control", type: "number", step: "any", value: th.review != null ? th.review : "", style: "width:110px" });
     const tb = el("input", { class: "form-control", type: "number", step: "any", value: th.block != null ? th.block : "", style: "width:110px" });
-    const fx = el("select", { class: "form-control", style: "width:160px" },
-      ...["", "review", "block", "allow"].map(o => el("option", { value: o }, o === "" ? "افتراضي" : o)));
-    fx.value = pol.fx_missing_action || "";
+    const fx = fxSel([
+      { value: "", label: "افتراضي" },
+      { value: "review", label: "review" },
+      { value: "block", label: "block" },
+      { value: "allow", label: "allow" },
+    ], { value: pol.fx_missing_action || "", placeholder: "افتراضي", minWidth: "160px" });
     const note = el("input", { class: "form-control", placeholder: "سبب التغيير (يُحفظ مع الإصدار)", style: "width:220px" });
     editor = el("div", {},
       el("div", { class: "card" },
@@ -2011,7 +2028,7 @@ function renderPolicyStudio() {
             if (tr.value !== "") ths.review = Number(tr.value);
             if (tb.value !== "") ths.block = Number(tb.value);
             if (Object.keys(ths).length) body.thresholds = ths;
-            if (fx.value) body.fx_missing_action = fx.value;
+            if (fx.getValue()) body.fx_missing_action = fx.getValue();
             if (note.value.trim()) body.note = note.value.trim();
             try {
               const saved = await api("/tenants/" + sel.tenant_id + "/policy", { method: "PUT", body });

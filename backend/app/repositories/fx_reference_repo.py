@@ -124,6 +124,21 @@ class FxReferenceRepository:
         rows = self.db.query("SELECT tenant_id FROM fx_reference_members WHERE set_id=?", (set_id,))
         return [r["tenant_id"] for r in rows]
 
+    def delete_set(self, set_id: str) -> dict | None:
+        """Soft-delete a reference set: unassign all tenants, mark inactive, preserve history.
+        Idempotent-safe: a set that is already inactive returns None (caller -> 404),
+        so a second delete never re-audits or pretends to re-delete."""
+        row = self.get_set(set_id)
+        if not row or not row.get("active"):
+            return None
+        members = self.members(set_id)
+        for tenant_id in members:
+            self.db.execute("DELETE FROM fx_reference_members WHERE set_id=? AND tenant_id=?", (set_id, tenant_id))
+        self.db.execute("UPDATE fx_reference_sets SET active=0, updated_at=? WHERE set_id=?", (utcnow(), set_id))
+        out = self.get_set(set_id)
+        out["unassigned_tenants"] = members
+        return out
+
     def set_for_tenant(self, tenant_id: str) -> dict | None:
         """The active reference set governing this tenant, if any."""
         row = self.db.query_one(
