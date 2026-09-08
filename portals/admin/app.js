@@ -325,6 +325,7 @@ function _tenantPanelRow(t) {
   if (state.tenantRules && state.tenantRulesFor === tid) content = renderTenantRules();
   else if (state.selectedTenant && state.selectedTenantId === tid) content = renderTenantDetail();
   else if (state.tenantInvs && state.tenantInvsFor === tid) content = renderTenantInvestigators();
+  else if (state.tenantWeightsFor === tid) content = renderTenantWeightPanel(t.tenant_id, t.name);
   if (!content) return null;
   return el("tr", { class: "inline-detail-row" },
     el("td", { colspan: "7", style: "padding:0 0 4px;background:rgba(59,130,246,.04)" },
@@ -1264,7 +1265,7 @@ async function renderPage() {
       await loadWatchlists();
       c.replaceChildren(renderWatchlists());
     } else if (state.page === "policy") {
-      await loadPolicyTenants();
+      await Promise.all([loadPolicyTenants(), loadWeightsData()]);
       c.replaceChildren(renderPolicyStudio());
     } else if (state.page === "audit") {
       await loadAudit();
@@ -1973,6 +1974,182 @@ function renderFxOverrides() {
 
 
 
+/* ⚖️ إدارة أوزان المخاطر — الافتراضي + تخصيص المؤسسات */
+const W_KEYS = [["rules","القواعد Rules"],["ml","تعلم الآلة ML"],["graph","الرسم البياني Graph"],["aml","مكافحة غسل الأموال AML"],["behavior","السلوك Behavior"]];
+const _wpct = v => (Math.round(Number(v) * 1000) / 10) + "%";
+
+async function loadWeightsData() {
+  try { state.weightDefault = await api("/weights/default"); } catch (e) { state.weightDefault = null; }
+  try { const r = await api("/weights/overrides"); state.weightOverrides = r.overrides || []; }
+  catch (e) { state.weightOverrides = []; }
+}
+
+/* صف إدخال وزن واحد: label + input رقمي */
+function _wInput(key, label, val) {
+  const inp = el("input", { class: "form-control", type: "number", step: "0.01", min: "0", max: "1",
+    value: val != null ? String(val) : "", dir: "ltr", style: "width:90px;text-align:center" });
+  inp.dataset.wkey = key;
+  return el("div", {},
+    el("label", { style: "font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px" }, label),
+    inp);
+}
+
+/* يجمع قيم الحقول ويعيد {weights, total, valid} */
+function _collectWeights(form) {
+  const w = {}; let total = 0;
+  form.querySelectorAll("input[data-wkey]").forEach(i => {
+    const v = Number(i.value); w[i.dataset.wkey] = v; total += v;
+  });
+  total = Math.round(total * 10000) / 10000;
+  return { weights: w, total: total, valid: Math.abs(total - 1.0) < 0.0001 };
+}
+
+/* نموذج تحرير 5 أوزان + خانة مجموع حية + زر حفظ */
+function _weightsForm(base, btnLabel, onSave, msg) {
+  const inputs = W_KEYS.map(([k, label]) => _wInput(k, label, base[k]));
+  const sumEl = el("span", { style: "font-weight:700" }, "—");
+  const saveBtn = el("button", { class: "btn success", onclick: async () => {
+    msg.textContent = ""; msg.style.color = "var(--muted)";
+    const c = _collectWeights(form);
+    if (!c.valid) {
+      msg.textContent = "⚠️ المجموع يجب أن يساوي 100% بالضبط (الحالي: " + _wpct(c.total) + ") — لم يُحفظ شيء.";
+      msg.style.color = "#FCA5A5"; return;
+    }
+    await onSave(c.weights);
+  } }, btnLabel);
+  const sumCell = el("div", {},
+    el("label", { style: "font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px" }, "المجموع"),
+    el("div", { style: "padding:11px 14px;border:1px dashed var(--border);border-radius:10px;min-width:70px;text-align:center" }, sumEl));
+  const form = el("div", { style: "display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end" },
+    ...inputs, sumCell, saveBtn);
+  const _upd = () => {
+    const c = _collectWeights(form);
+    sumEl.textContent = _wpct(c.total);
+    sumEl.style.color = c.valid ? "var(--brand2)" : "#FCA5A5";
+  };
+  form.querySelectorAll("input[data-wkey]").forEach(i => i.addEventListener("input", _upd));
+  setTimeout(_upd, 0);
+  return form;
+}
+
+/* بطاقة الأوزان الافتراضية للمنصة (Policy Studio) */
+function renderDefaultWeightsCard() {
+  const d = state.weightDefault;
+  if (!d) return el("div", { class: "card" }, el("div", { style: "color:var(--muted)" }, "تعذر تحميل الأوزان الافتراضية."));
+  const msg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
+  const form = _weightsForm(d, "💾 حفظ الافتراضي", async (weights) => {
+    try {
+      state.weightDefault = await api("/weights/default", { method: "PUT", body: weights });
+      toast("حُفظت الأوزان الافتراضية — تسري فورًا على كل مؤسسة بلا تخصيص", "success");
+      await loadWeightsData(); render();
+    } catch (e) { msg.textContent = e.message; msg.style.color = "#FCA5A5"; }
+  }, msg);
+  return el("div", { class: "card" },
+    el("h3", { style: "margin-bottom:6px" }, "⚖️ أوزان محرك المخاطر — الافتراضي"),
+    el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:12px" },
+      "المزج بين محركات التقييم الخمسة. يجب أن يكون المجموع 100% بالضبط. تُطبَّق على كل مؤسسة لا تملك تخصيصًا نشطًا، والتغيير يسري على القرارات القادمة فقط."),
+    form, msg);
+}
+
+/* أزرار إجراءات سطر تخصيص واحد */
+function _overrideRowActions(o, reload) {
+  const editBtn = el("button", { class: "btn", style: "padding:4px 8px;font-size:11px", onclick: () => {
+    state.tenantWeightsFor = null; state.tenantWeights = null;
+    api("/tenants/" + o.tenant_id).then(t => {
+      state.policySelected = t;
+      state.tenantWeightsFor = o.tenant_id;
+      return api("/tenants/" + o.tenant_id + "/weights");
+    }).then(w => { state.tenantWeights = w; render(); }).catch(e => toast(e.message, "error"));
+  } }, "✏️ تعديل");
+  const toggleBtn = o.active
+    ? el("button", { class: "btn", style: "padding:4px 8px;font-size:11px", onclick: async () => {
+        try { await api("/tenants/" + o.tenant_id + "/weights/disable", { method: "POST", body: {} }); toast("عُطّل التخصيص — عادت للافتراضي", "success"); await reload(); } catch (e) { toast(e.message, "error"); }
+      } }, "⏸ تعطيل")
+    : el("button", { class: "btn success", style: "padding:4px 8px;font-size:11px", onclick: async () => {
+        try { await api("/tenants/" + o.tenant_id + "/weights/enable", { method: "POST", body: {} }); toast("فُعّل التخصيص", "success"); await reload(); } catch (e) { toast(e.message, "error"); }
+      } }, "▶ تفعيل");
+  const delBtn = el("button", { class: "btn danger", style: "padding:4px 8px;font-size:11px", onclick: async () => {
+    if (!confirm("حذف تخصيص " + (o.tenant_name || o.tenant_id) + "؟ ستعود المؤسسة فورًا إلى الأوزان الافتراضية.")) return;
+    try { await api("/tenants/" + o.tenant_id + "/weights", { method: "DELETE" }); toast("حُذف التخصيص — عادت للافتراضي", "success"); await reload(); } catch (e) { toast(e.message, "error"); }
+  } }, "🗑️ حذف");
+  return el("div", { style: "display:flex;gap:5px;flex-wrap:wrap" }, editBtn, toggleBtn, delBtn);
+}
+
+/* بطاقة قائمة المؤسسات ذات التخصيص (Policy Studio) */
+function renderWeightOverridesCard() {
+  const rows = state.weightOverrides || [];
+  const reload = async () => { await loadWeightsData(); render(); };
+  const headCells = [el("th", {}, "المؤسسة"), el("th", {}, "الحالة")]
+    .concat(W_KEYS.map(([, l]) => el("th", {}, l)))
+    .concat([el("th", {}, "المجموع"), el("th", {}, "آخر تحديث"), el("th", {}, "إجراءات")]);
+  const bodyRows = rows.map(o => {
+    const wCells = W_KEYS.map(([k]) => el("td", { style: "text-align:center" }, _wpct(o[k])));
+    const cells = [
+      el("td", { style: "font-weight:700" }, o.tenant_name || o.tenant_id),
+      el("td", {}, el("span", { class: "badge " + (o.active ? "allow" : "block") }, o.active ? "نشط" : "معطّل")),
+    ].concat(wCells).concat([
+      el("td", { style: "text-align:center;font-weight:700" }, _wpct(o.total)),
+      el("td", { style: "font-size:11px" }, fmtTs(o.updated_at)),
+      el("td", {}, _overrideRowActions(o, reload)),
+    ]);
+    return el("tr", { style: o.active ? "" : "opacity:.55" }, ...cells);
+  });
+  const table = rows.length === 0
+    ? el("div", { style: "color:var(--muted)" }, "لا توجد تخصيصات — كل المؤسسات تعمل بالأوزان الافتراضية.")
+    : el("table", {}, el("thead", {}, el("tr", {}, ...headCells)), el("tbody", {}, ...bodyRows));
+  return el("div", { class: "card" },
+    el("h3", { style: "margin-bottom:6px" }, "🏢 مؤسسات بأوزان مخصّصة (" + rows.length + ")"),
+    el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:12px" }, "التخصيص النشط يتجاوز الافتراضي لهذه المؤسسة فقط. التعطيل أو الحذف يعيدها للافتراضي فورًا."),
+    table);
+}
+
+/* لوحة أوزان مؤسسة واحدة — تُعرض داخل صف جدول العملاء وفي Policy Studio */
+function renderTenantWeightPanel(tenantId, tenantName) {
+  const data = (state.tenantWeightsFor === tenantId) ? state.tenantWeights : null;
+  const msg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
+  if (!data) return el("div", { style: "color:var(--muted);padding:10px" }, "… جارٍ تحميل الأوزان");
+  const ov = data.override, eff = data.effective;
+  const isCustom = !!(ov && ov.active === 1);
+  const isDisabled = !!(ov && ov.active === 0);
+  const srcBadge = isCustom
+    ? el("span", { class: "badge review" }, "⚖️ أوزان مخصّصة")
+    : el("span", { class: "badge info" }, "🌐 الأوزان الافتراضية" + (isDisabled ? " (التخصيص معطّل)" : ""));
+  const reloadPanel = async () => { state.tenantWeights = await api("/tenants/" + tenantId + "/weights"); render(); };
+  const form = _weightsForm(ov || eff, isCustom || isDisabled ? "💾 حفظ التعديل" : "⚖️ تخصيص أوزان هذه المؤسسة", async (weights) => {
+    try {
+      await api("/tenants/" + tenantId + "/weights", { method: "PUT", body: weights });
+      toast("حُفظ تخصيص الأوزان — يسري على قرارات هذه المؤسسة القادمة", "success");
+      await reloadPanel();
+    } catch (e) { msg.textContent = e.message; msg.style.color = "#FCA5A5"; }
+  }, msg);
+  const effLine = "السارية الآن: " + W_KEYS.map(([k, l]) => l.split(" ")[0] + " " + _wpct(eff[k])).join(" · ");
+  let actionsRow;
+  if (ov) {
+    const disBtn = isCustom ? el("button", { class: "btn", onclick: async () => {
+      try { await api("/tenants/" + tenantId + "/weights/disable", { method: "POST", body: {} }); toast("عُطّل التخصيص — عادت للافتراضي", "success"); await reloadPanel(); } catch (e) { toast(e.message, "error"); }
+    } }, "⏸ تعطيل التخصيص") : null;
+    const enBtn = isDisabled ? el("button", { class: "btn success", onclick: async () => {
+      try { await api("/tenants/" + tenantId + "/weights/enable", { method: "POST", body: {} }); toast("فُعّل التخصيص", "success"); await reloadPanel(); } catch (e) { toast(e.message, "error"); }
+    } }, "▶ إعادة التفعيل") : null;
+    const revertBtn = el("button", { class: "btn danger", onclick: async () => {
+      if (!confirm("العودة إلى الأوزان الافتراضية وحذف التخصيص نهائيًا؟ (السجل يبقى في التدقيق)")) return;
+      try { await api("/tenants/" + tenantId + "/weights", { method: "DELETE" }); toast("حُذف التخصيص — عادت للافتراضي", "success"); await reloadPanel(); } catch (e) { toast(e.message, "error"); }
+    } }, "↩ العودة للافتراضي / حذف");
+    actionsRow = el("div", { style: "display:flex;gap:6px;margin-top:10px;flex-wrap:wrap" },
+      disBtn, enBtn, revertBtn,
+      el("span", { style: "font-size:11px;color:var(--muted);align-self:center" }, "آخر تحديث: " + fmtTs(ov.updated_at)));
+  } else {
+    actionsRow = el("div", { style: "font-size:11.5px;color:var(--muted);margin-top:8px" },
+      "هذه المؤسسة تعمل بالأوزان الافتراضية للمنصة — عدّل القيم أعلاه واضغط «تخصيص» لإنشاء أوزان خاصة بها.");
+  }
+  return el("div", { class: "card", style: "border:1px solid var(--brand);margin:8px 0" },
+    el("h3", { style: "margin-bottom:8px" }, "⚖️ أوزان المخاطر — " + (tenantName || tenantId)),
+    el("div", { style: "display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px" },
+      el("div", { style: "font-size:13px" }, el("strong", {}, "المصدر الحالي: "), srcBadge),
+      el("div", { style: "font-size:12px;color:var(--muted)" }, effLine)),
+    form, msg, actionsRow);
+}
+
 function renderPolicyStudio() {
   const tenants = state.policyTenants || [];
   const sel = state.policySelected;
@@ -2049,6 +2226,9 @@ function renderPolicyStudio() {
     el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "🎛️ استوديو السياسات (Policy Studio)"),
     el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" }, "تحرير سياسة القرار لكل مؤسسة — التغييرات تُسجَّل في سجل التدقيق"),
     el("div", { class: "card" }, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:6px" }, "المؤسسة"), picker),
+    renderDefaultWeightsCard(),
+    renderWeightOverridesCard(),
+    sel ? renderTenantWeightPanel(sel.tenant_id, sel.name) : null,
     editor,
   );
 }

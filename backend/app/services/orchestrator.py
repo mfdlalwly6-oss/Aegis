@@ -33,6 +33,7 @@ class DecisionOrchestrator:
         notifications,
         tenants=None,
         policy_repo=None,
+        weight_repo=None,
     ):
         self.rules = rules
         self.ml = ml
@@ -48,6 +49,7 @@ class DecisionOrchestrator:
         self.notifications = notifications
         self.tenants = tenants
         self.policy_repo = policy_repo
+        self.weight_repo = weight_repo
         # Single source of truth for policy resolution (bounds, profiles,
         # protected rules). The old inline _resolve_policy duplicate is gone.
         self.policy_engine = PolicyEngine()
@@ -218,6 +220,18 @@ class DecisionOrchestrator:
         # score to 0 or silently inflates the others.
         policy = self._resolve_policy(tx.tenant_id)
         weights = policy["weights"]
+        # Per-tenant weight overrides: an ACTIVE tenant override row outranks
+        # the resolved policy weights; otherwise the platform default row
+        # (weight_profiles) is used. Falls back to policy weights when no
+        # weight repository is wired (tests / lightweight harnesses).
+        weights_source = "policy"
+        if getattr(self, "weight_repo", None) is not None:
+            try:
+                ew = self.weight_repo.effective_weights(tx.tenant_id)
+                weights = {k: ew[k] for k in ("rules", "ml", "graph", "aml", "behavior")}
+                weights_source = ew.get("source", "default")
+            except Exception as _we:  # never let weight lookup kill a decision
+                logger.warning("weights.resolve_failed", error=str(_we), tenant_id=tx.tenant_id)
         comp_scores: dict[str, float | None] = {
             "rules": rule_score if health["rules"]["status"] == "healthy" else None,
             "ml": ml_prob if health["ml"]["status"] == "healthy" else None,
