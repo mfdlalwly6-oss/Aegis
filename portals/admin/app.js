@@ -326,6 +326,7 @@ function _tenantPanelRow(t) {
   else if (state.selectedTenant && state.selectedTenantId === tid) content = renderTenantDetail();
   else if (state.tenantInvs && state.tenantInvsFor === tid) content = renderTenantInvestigators();
   else if (state.tenantWeightsFor === tid) content = renderTenantWeightPanel(t.tenant_id, t.name);
+  else if (state.tenantThresholdsFor === tid) content = renderTenantThresholdPanel(t.tenant_id, t.name);
   if (!content) return null;
   return el("tr", { class: "inline-detail-row" },
     el("td", { colspan: "7", style: "padding:0 0 4px;background:rgba(59,130,246,.04)" },
@@ -414,6 +415,26 @@ function renderTenants() {
               render();
             }
           }, "💱 العملات وFX"),
+          el("button", { class: "btn", style: "padding:5px 8px;font-size:11px",
+            onclick: async () => {
+              // toggle the inline weight panel for THIS institution
+              if (state.tenantWeightsFor === t.tenant_id) { state.tenantWeightsFor = null; state.tenantWeights = null; render(); return; }
+              state.tenantWeights = null;
+              state.tenantWeightsFor = t.tenant_id;
+              try { state.tenantWeights = await api("/tenants/" + t.tenant_id + "/weights"); } catch (e) { toast(e.message, "error"); state.tenantWeightsFor = null; }
+              render();
+            }
+          }, "🎛️ الأوزان"),
+          el("button", { class: "btn", style: "padding:5px 8px;font-size:11px",
+            onclick: async () => {
+              // toggle the inline threshold panel for THIS institution
+              if (state.tenantThresholdsFor === t.tenant_id) { state.tenantThresholdsFor = null; state.tenantThresholds = null; render(); return; }
+              state.tenantThresholds = null;
+              state.tenantThresholdsFor = t.tenant_id;
+              try { state.tenantThresholds = await api("/tenants/" + t.tenant_id + "/thresholds"); } catch (e) { toast(e.message, "error"); state.tenantThresholdsFor = null; }
+              render();
+            }
+          }, "🎯 العتبات"),
           el("button", { class: "btn danger", style: "padding:5px 8px;font-size:11px",
             onclick: () => deleteTenant(t.tenant_id)
           }, "🗑️"))),
@@ -1265,7 +1286,7 @@ async function renderPage() {
       await loadWatchlists();
       c.replaceChildren(renderWatchlists());
     } else if (state.page === "policy") {
-      await Promise.all([loadPolicyTenants(), loadWeightsData()]);
+      await Promise.all([loadPolicyTenants(), loadWeightsData(), loadThresholdsData()]);
       c.replaceChildren(renderPolicyStudio());
     } else if (state.page === "audit") {
       await loadAudit();
@@ -2075,8 +2096,8 @@ function _overrideRowActions(o, reload) {
   return el("div", { style: "display:flex;gap:5px;flex-wrap:wrap" }, editBtn, toggleBtn, delBtn);
 }
 
-/* بطاقة قائمة المؤسسات ذات التخصيص (Policy Studio) */
-function renderWeightOverridesCard() {
+/* جسم قائمة المؤسسات ذات تخصيص الأوزان — يُعرض داخل قسم قابل للطي (Policy Studio) */
+function renderWeightOverridesBody() {
   const rows = state.weightOverrides || [];
   const reload = async () => { await loadWeightsData(); render(); };
   const headCells = [el("th", {}, "المؤسسة"), el("th", {}, "الحالة")]
@@ -2097,9 +2118,8 @@ function renderWeightOverridesCard() {
   const table = rows.length === 0
     ? el("div", { style: "color:var(--muted)" }, "لا توجد تخصيصات — كل المؤسسات تعمل بالأوزان الافتراضية.")
     : el("table", {}, el("thead", {}, el("tr", {}, ...headCells)), el("tbody", {}, ...bodyRows));
-  return el("div", { class: "card" },
-    el("h3", { style: "margin-bottom:6px" }, "🏢 مؤسسات بأوزان مخصّصة (" + rows.length + ")"),
-    el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:12px" }, "التخصيص النشط يتجاوز الافتراضي لهذه المؤسسة فقط. التعطيل أو الحذف يعيدها للافتراضي فورًا."),
+  return el("div", {},
+    el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:12px" }, "التخصيص النشط يتجاوز الافتراضي لهذه المؤسسة فقط. التعطيل أو الحذف يعيدها للافتراضي فورًا. إدارة/إنشاء تخصيص مؤسسة يتم من 🏢 العملاء → 🎛️ الأوزان."),
     table);
 }
 
@@ -2144,6 +2164,183 @@ function renderTenantWeightPanel(tenantId, tenantName) {
   }
   return el("div", { class: "card", style: "border:1px solid var(--brand);margin:8px 0" },
     el("h3", { style: "margin-bottom:8px" }, "⚖️ أوزان المخاطر — " + (tenantName || tenantId)),
+    el("div", { style: "display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px" },
+      el("div", { style: "font-size:13px" }, el("strong", {}, "المصدر الحالي: "), srcBadge),
+      el("div", { style: "font-size:12px;color:var(--muted)" }, effLine)),
+    form, msg, actionsRow);
+}
+
+/* ═══════════════ 🎯 إدارة عتبات القرار — الافتراضي + تخصيص المؤسسات ═══════════════ */
+const TH_KEYS = [["challenge","عتبة Challenge"],["review","عتبة Review"],["block","عتبة Block"]];
+const TH_BOUNDS = { challenge: [0.20, 0.50], review: [0.40, 0.75], block: [0.60, 0.95] };
+const FX_MISSING_OPTS = [
+  { value: "review", label: "Review — مراجعة" },
+  { value: "block",  label: "Block — حظر" },
+];
+
+async function loadThresholdsData() {
+  try { state.thresholdDefault = await api("/thresholds/default"); } catch (e) { state.thresholdDefault = null; }
+  try { const r = await api("/thresholds/overrides"); state.thresholdOverrides = r.overrides || []; }
+  catch (e) { state.thresholdOverrides = []; }
+}
+
+/* صف إدخال عتبة واحدة مع توضيح الحدود المسموحة */
+function _thInput(key, label, val) {
+  const [lo, hi] = TH_BOUNDS[key];
+  const inp = el("input", { class: "form-control", type: "number", step: "0.01", min: String(lo), max: String(hi),
+    value: val != null ? String(val) : "", dir: "ltr", style: "width:90px;text-align:center" });
+  inp.dataset.thkey = key;
+  return el("div", {},
+    el("label", { style: "font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px" }, label),
+    inp,
+    el("div", { style: "font-size:10px;color:var(--muted);margin-top:2px" }, `[${lo} – ${hi}]`));
+}
+
+/* يجمع قيم العتبات ويتحقق من الحدود والترتيب */
+function _collectThresholds(form) {
+  const w = {};
+  form.querySelectorAll("input[data-thkey]").forEach(i => { w[i.dataset.thkey] = Number(i.value); });
+  const msgs = [];
+  for (const k of ["challenge", "review", "block"]) {
+    const [lo, hi] = TH_BOUNDS[k];
+    if (!(w[k] >= lo && w[k] <= hi)) msgs.push(k + " خارج النطاق [" + lo + "–" + hi + "]");
+  }
+  if (!(w.challenge <= w.review && w.review <= w.block)) msgs.push("يجب: Challenge ≤ Review ≤ Block");
+  return { thresholds: w, valid: msgs.length === 0, problems: msgs };
+}
+
+/* نموذج تحرير العتبات الثلاث + اختيار سلوك غياب FX + زر حفظ */
+function _thresholdsForm(base, btnLabel, onSave, msg) {
+  const inputs = TH_KEYS.map(([k, label]) => _thInput(k, label, base[k]));
+  const fxSelEl = fxSel(FX_MISSING_OPTS, {
+    value: base.fx_missing_action || "review",
+    placeholder: "عند غياب FX", minWidth: "170px",
+  });
+  const fxCell = el("div", {},
+    el("label", { style: "font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px" }, "عند غياب FX"),
+    fxSelEl);
+  const saveBtn = el("button", { class: "btn success", onclick: async () => {
+    msg.textContent = ""; msg.style.color = "var(--muted)";
+    const c = _collectThresholds(form);
+    if (!c.valid) { msg.textContent = "⚠️ " + c.problems.join(" · ") + " — لم يُحفظ شيء."; msg.style.color = "#FCA5A5"; return; }
+    const body = { ...c.thresholds, fx_missing_action: fxSelEl.getValue() || "review" };
+    await onSave(body);
+  } }, btnLabel);
+  const form = el("div", { style: "display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end" },
+    ...inputs, fxCell, saveBtn);
+  return form;
+}
+
+/* بطاقة العتبات الافتراضية للمنصة (Policy Studio) */
+function renderDefaultThresholdsCard() {
+  const d = state.thresholdDefault;
+  if (!d) return el("div", { class: "card" }, el("div", { style: "color:var(--muted)" }, "تعذر تحميل العتبات الافتراضية."));
+  const msg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
+  const form = _thresholdsForm(d, "💾 حفظ العتبات الافتراضية", async (body) => {
+    try {
+      state.thresholdDefault = await api("/thresholds/default", { method: "PUT", body });
+      toast("حُفظت العتبات الافتراضية — تسري فورًا على كل مؤسسة بلا تخصيص", "success");
+      await loadThresholdsData(); render();
+    } catch (e) { msg.textContent = e.message; msg.style.color = "#FCA5A5"; }
+  }, msg);
+  return el("div", {},
+    el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:12px" },
+      "عتبات قرار محرك المخاطر الافتراضية. تُطبَّق على كل مؤسسة لا تملك تخصيصًا نشطًا، والتغيير يسري على القرارات القادمة فقط. الحدود الآمنة مفعّلة دائمًا."),
+    form, msg,
+    el("div", { style: "font-size:11px;color:var(--muted);margin-top:8px" }, "آخر تحديث: " + fmtTs(d.updated_at)));
+}
+
+/* أزرار إجراءات سطر تخصيص عتبات واحد */
+function _thOverrideRowActions(o, reload) {
+  const editBtn = el("button", { class: "btn", style: "padding:4px 8px;font-size:11px", onclick: () => {
+    state.page = "clients";
+    state.tenantThresholdsFor = null; state.tenantThresholds = null;
+    api("/tenants/" + o.tenant_id + "/thresholds").then(w => {
+      state.tenantThresholdsFor = o.tenant_id; state.tenantThresholds = w; render();
+    }).catch(e => toast(e.message, "error"));
+  } }, "✏️ تعديل");
+  const toggleBtn = o.active
+    ? el("button", { class: "btn", style: "padding:4px 8px;font-size:11px", onclick: async () => {
+        try { await api("/tenants/" + o.tenant_id + "/thresholds/disable", { method: "POST", body: {} }); toast("عُطّل التخصيص — عادت للافتراضي", "success"); await reload(); } catch (e) { toast(e.message, "error"); }
+      } }, "⏸ تعطيل")
+    : el("button", { class: "btn success", style: "padding:4px 8px;font-size:11px", onclick: async () => {
+        try { await api("/tenants/" + o.tenant_id + "/thresholds/enable", { method: "POST", body: {} }); toast("فُعّل التخصيص", "success"); await reload(); } catch (e) { toast(e.message, "error"); }
+      } }, "▶ تفعيل");
+  const delBtn = el("button", { class: "btn danger", style: "padding:4px 8px;font-size:11px", onclick: async () => {
+    if (!confirm("حذف تخصيص عتبات " + (o.tenant_name || o.tenant_id) + "؟ ستعود المؤسسة فورًا إلى العتبات الافتراضية.")) return;
+    try { await api("/tenants/" + o.tenant_id + "/thresholds", { method: "DELETE" }); toast("حُذف التخصيص — عادت للافتراضي", "success"); await reload(); } catch (e) { toast(e.message, "error"); }
+  } }, "🗑️ حذف");
+  return el("div", { style: "display:flex;gap:5px;flex-wrap:wrap" }, editBtn, toggleBtn, delBtn);
+}
+
+/* جسم قائمة المؤسسات ذات تخصيص العتبات (يُعرض داخل قسم قابل للطي) */
+function renderThresholdOverridesBody() {
+  const rows = state.thresholdOverrides || [];
+  const reload = async () => { await loadThresholdsData(); render(); };
+  const headCells = [el("th", {}, "المؤسسة"), el("th", {}, "الحالة")]
+    .concat(TH_KEYS.map(([, l]) => el("th", {}, l)))
+    .concat([el("th", {}, "عند غياب FX"), el("th", {}, "آخر تحديث"), el("th", {}, "إجراءات")]);
+  const bodyRows = rows.map(o => {
+    const thCells = TH_KEYS.map(([k]) => el("td", { style: "text-align:center" }, String(o[k])));
+    const cells = [
+      el("td", { style: "font-weight:700" }, o.tenant_name || o.tenant_id),
+      el("td", {}, el("span", { class: "badge " + (o.active ? "allow" : "block") }, o.active ? "نشط" : "معطّل")),
+    ].concat(thCells).concat([
+      el("td", { style: "text-align:center" }, el("span", { class: "badge info" }, o.fx_missing_action || "review")),
+      el("td", { style: "font-size:11px" }, fmtTs(o.updated_at)),
+      el("td", {}, _thOverrideRowActions(o, reload)),
+    ]);
+    return el("tr", { style: o.active ? "" : "opacity:.55" }, ...cells);
+  });
+  const table = rows.length === 0
+    ? el("div", { style: "color:var(--muted)" }, "لا توجد تخصيصات عتبات — كل المؤسسات تعمل بالعتبات الافتراضية.")
+    : el("table", {}, el("thead", {}, el("tr", {}, ...headCells)), el("tbody", {}, ...bodyRows));
+  return el("div", {},
+    el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:12px" }, "التخصيص النشط يتجاوز الافتراضي لهذه المؤسسة فقط. التعطيل أو الحذف يعيدها للافتراضي فورًا."),
+    table);
+}
+
+/* لوحة عتبات مؤسسة واحدة — تُعرض inline داخل صف جدول العملاء */
+function renderTenantThresholdPanel(tenantId, tenantName) {
+  const data = (state.tenantThresholdsFor === tenantId) ? state.tenantThresholds : null;
+  const msg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
+  if (!data) return el("div", { style: "color:var(--muted);padding:10px" }, "… جارٍ تحميل العتبات");
+  const ov = data.override, eff = data.effective;
+  const isCustom = !!(ov && ov.active === 1);
+  const isDisabled = !!(ov && ov.active === 0);
+  const srcBadge = isCustom
+    ? el("span", { class: "badge review" }, "🎯 عتبات مخصّصة")
+    : el("span", { class: "badge info" }, "🌐 العتبات الافتراضية" + (isDisabled ? " (التخصيص معطّل)" : ""));
+  const reloadPanel = async () => { state.tenantThresholds = await api("/tenants/" + tenantId + "/thresholds"); render(); };
+  const form = _thresholdsForm(ov || eff, isCustom || isDisabled ? "💾 حفظ التعديل" : "🎯 تخصيص عتبات هذه المؤسسة", async (body) => {
+    try {
+      await api("/tenants/" + tenantId + "/thresholds", { method: "PUT", body });
+      toast("حُفظ تخصيص العتبات — يسري على قرارات هذه المؤسسة القادمة", "success");
+      await reloadPanel();
+    } catch (e) { msg.textContent = e.message; msg.style.color = "#FCA5A5"; }
+  }, msg);
+  const effLine = "السارية الآن: Challenge " + eff.challenge + " · Review " + eff.review + " · Block " + eff.block + " · FX: " + (eff.fx_missing_action || "review");
+  let actionsRow;
+  if (ov) {
+    const disBtn = isCustom ? el("button", { class: "btn", onclick: async () => {
+      try { await api("/tenants/" + tenantId + "/thresholds/disable", { method: "POST", body: {} }); toast("عُطّل التخصيص — عادت للافتراضي", "success"); await reloadPanel(); } catch (e) { toast(e.message, "error"); }
+    } }, "⏸ تعطيل التخصيص") : null;
+    const enBtn = isDisabled ? el("button", { class: "btn success", onclick: async () => {
+      try { await api("/tenants/" + tenantId + "/thresholds/enable", { method: "POST", body: {} }); toast("فُعّل التخصيص", "success"); await reloadPanel(); } catch (e) { toast(e.message, "error"); }
+    } }, "▶ إعادة التفعيل") : null;
+    const revertBtn = el("button", { class: "btn danger", onclick: async () => {
+      if (!confirm("العودة إلى العتبات الافتراضية وحذف التخصيص نهائيًا؟ (السجل يبقى في التدقيق)")) return;
+      try { await api("/tenants/" + tenantId + "/thresholds", { method: "DELETE" }); toast("حُذف التخصيص — عادت للافتراضي", "success"); await reloadPanel(); } catch (e) { toast(e.message, "error"); }
+    } }, "↩ العودة للافتراضي / حذف");
+    actionsRow = el("div", { style: "display:flex;gap:6px;margin-top:10px;flex-wrap:wrap" },
+      disBtn, enBtn, revertBtn,
+      el("span", { style: "font-size:11px;color:var(--muted);align-self:center" }, "آخر تحديث: " + fmtTs(ov.updated_at)));
+  } else {
+    actionsRow = el("div", { style: "font-size:11.5px;color:var(--muted);margin-top:8px" },
+      "هذه المؤسسة تعمل بالعتبات الافتراضية للمنصة — عدّل القيم أعلاه واضغط «تخصيص» لإنشاء عتبات خاصة بها.");
+  }
+  return el("div", { class: "card", style: "border:1px solid var(--brand);margin:8px 0" },
+    el("h3", { style: "margin-bottom:8px" }, "🎯 عتبات القرار — " + (tenantName || tenantId)),
     el("div", { style: "display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px" },
       el("div", { style: "font-size:13px" }, el("strong", {}, "المصدر الحالي: "), srcBadge),
       el("div", { style: "font-size:12px;color:var(--muted)" }, effLine)),
@@ -2224,12 +2421,15 @@ function renderPolicyStudio() {
   }
   return el("div", {},
     el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "🎛️ استوديو السياسات (Policy Studio)"),
-    el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" }, "تحرير سياسة القرار لكل مؤسسة — التغييرات تُسجَّل في سجل التدقيق"),
-    el("div", { class: "card" }, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:6px" }, "المؤسسة"), picker),
+    el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" }, "الإدارة المركزية للأوزان والعتبات — الافتراضي يُطبَّق على كل مؤسسة بلا تخصيص نشط، والتغييرات تُسجَّل في سجل التدقيق وتسري على القرارات القادمة فقط"),
     renderDefaultWeightsCard(),
-    renderWeightOverridesCard(),
-    sel ? renderTenantWeightPanel(sel.tenant_id, sel.name) : null,
-    editor,
+    _fxSection("wOv", "🏢 مؤسسات بأوزان مخصّصة (" + ((state.weightOverrides || []).length) + ")", () => renderWeightOverridesBody(), false),
+    _fxSection("thDef", "🎯 عتبات قرار محرك المخاطر — الافتراضي", () => renderDefaultThresholdsCard(), true),
+    _fxSection("thOv", "🏢 مؤسسات بعتبات مخصّصة (" + ((state.thresholdOverrides || []).length) + ")", () => renderThresholdOverridesBody(), false),
+    _fxSection("polEditor", "🎛️ محرر سياسة مؤسسة محددة", () => el("div", {},
+      el("div", { class: "card", style: "margin-bottom:12px" }, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:6px" }, "المؤسسة"), picker),
+      sel ? renderTenantWeightPanel(sel.tenant_id, sel.name) : null,
+      editor), false),
   );
 }
 

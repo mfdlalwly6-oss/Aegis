@@ -34,6 +34,7 @@ from app.repositories.currency_repo import CurrencyRepository
 from app.repositories.fx_rate_repo import FxRateRepository
 from app.repositories.fx_reference_repo import FxReferenceRepository
 from app.repositories.weight_repo import WeightRepository
+from app.repositories.threshold_repo import ThresholdRepository
 from app.rules.engine import RuleEngine
 from app.services.fx_service import FxService
 from app.services.notifications import NotificationService, provider_from_settings
@@ -154,6 +155,7 @@ class ServiceRegistry:
         self.currency_repo.seed_defaults()
         self.fx_reference_repo = FxReferenceRepository(self.db)
         self.weights = WeightRepository(self.db)
+        self.thresholds = ThresholdRepository(self.db)
         self.fx = FxService(
             self.fx_rate_repo, currency_checker=lambda c: self.currency_repo.is_known(c),
             reference_repo=self.fx_reference_repo,
@@ -253,6 +255,7 @@ class ServiceRegistry:
             tenants=self.tenants,
             policy_repo=self.policy_versions,
             weight_repo=self.weights,
+            threshold_repo=self.thresholds,
         )
         logger.info("aegis.initialized", version=settings.VERSION)
 

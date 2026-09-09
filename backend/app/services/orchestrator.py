@@ -32,8 +32,9 @@ class DecisionOrchestrator:
         events,
         notifications,
         tenants=None,
-        policy_repo=None,
+            policy_repo=None,
         weight_repo=None,
+        threshold_repo=None,
     ):
         self.rules = rules
         self.ml = ml
@@ -50,9 +51,12 @@ class DecisionOrchestrator:
         self.tenants = tenants
         self.policy_repo = policy_repo
         self.weight_repo = weight_repo
+        self.threshold_repo = threshold_repo
         # Single source of truth for policy resolution (bounds, profiles,
         # protected rules). The old inline _resolve_policy duplicate is gone.
-        self.policy_engine = PolicyEngine()
+        # threshold_repo feeds DB-backed default+override thresholds into the
+        # resolver; when absent the engine falls back to settings constants.
+        self.policy_engine = PolicyEngine(threshold_repo=threshold_repo)
 
     def _resolve_policy(self, tenant_id: str) -> dict:
         """Resolve the effective policy via PolicyEngine (the single resolver).

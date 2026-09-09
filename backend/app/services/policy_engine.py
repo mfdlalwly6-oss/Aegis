@@ -65,6 +65,13 @@ def _clamp(v: float, lo: float, hi: float) -> float:
 
 
 class PolicyEngine:
+    def __init__(self, threshold_repo=None):
+        # Optional DB-backed threshold source. When wired, the platform default
+        # row + active tenant overrides drive thresholds/fx_missing_action
+        # (Policy Studio). When absent (tests / lightweight harnesses) the
+        # engine falls back to the settings constants — identical behavior.
+        self.threshold_repo = threshold_repo
+
     def version(self) -> str:
         return POLICY_SCHEMA_VERSION
 
@@ -81,11 +88,29 @@ class PolicyEngine:
         profile = PROFILES.get(profile_name) or PROFILES.get(ptype) or {}
 
         # --- thresholds ---
+        # Base: settings constants OR (when a threshold repo is wired) the
+        # effective DB-backed profile: active tenant override wins, else the
+        # platform default row (Policy Studio). Never let a lookup failure kill
+        # a decision — fall back to the safe settings constants.
         th = {
             "challenge": settings.DECISION_THRESHOLD_CHALLENGE,
             "review": settings.DECISION_THRESHOLD_REVIEW,
             "block": settings.DECISION_THRESHOLD_BLOCK,
         }
+        db_fx_action: str | None = None
+        if self.threshold_repo is not None:
+            try:
+                eff = self.threshold_repo.effective_thresholds(tenant.get("tenant_id"))
+                for k in th:
+                    if isinstance(eff.get(k), (int, float)):
+                        lo, hi = THRESHOLD_BOUNDS[k]
+                        th[k] = _clamp(float(eff[k]), lo, hi)
+                db_fx_action = eff.get("fx_missing_action")
+            except Exception as _te:  # noqa: BLE001 — defaults keep decision alive
+                logger.warning("policy.threshold_resolve_failed", error=str(_te),
+                               tenant=tenant.get("tenant_id"))
+        # institution profile may still refine the base (bounded), then the
+        # tenant's own policy_json (legacy path) may refine further.
         for source in (profile.get("thresholds"), raw_policy.get("thresholds")):
             if isinstance(source, dict):
                 for k in th:
@@ -135,8 +160,12 @@ class PolicyEngine:
         disabled -= PROTECTED_RULES
 
         # --- FX missing action (can never be a silent allow) ---
+        # Precedence: tenant policy_json > DB-backed threshold profile
+        # (override/default) > settings constant.
         fx_missing_action = str(
-            raw_policy.get("fx_missing_action") or settings.FX_MISSING_DECISION
+            raw_policy.get("fx_missing_action")
+            or db_fx_action
+            or settings.FX_MISSING_DECISION
         ).lower()
         if fx_missing_action not in ("review", "block"):
             fx_missing_action = "review"
