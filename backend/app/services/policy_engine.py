@@ -88,10 +88,11 @@ class PolicyEngine:
         profile = PROFILES.get(profile_name) or PROFILES.get(ptype) or {}
 
         # --- thresholds ---
-        # Base: settings constants OR (when a threshold repo is wired) the
-        # effective DB-backed profile: active tenant override wins, else the
-        # platform default row (Policy Studio). Never let a lookup failure kill
-        # a decision — fall back to the safe settings constants.
+        # Single source of truth: threshold_profiles (DB). When a threshold repo
+        # is wired, the effective profile (active tenant override, else platform
+        # default) IS the threshold set — the legacy policy_json.thresholds path
+        # is no longer consulted (legacy values were migrated in Migration 028).
+        # Institution-type profiles only apply when no repo is wired (tests).
         th = {
             "challenge": settings.DECISION_THRESHOLD_CHALLENGE,
             "review": settings.DECISION_THRESHOLD_REVIEW,
@@ -109,15 +110,15 @@ class PolicyEngine:
             except Exception as _te:  # noqa: BLE001 — defaults keep decision alive
                 logger.warning("policy.threshold_resolve_failed", error=str(_te),
                                tenant=tenant.get("tenant_id"))
-        # institution profile may still refine the base (bounded), then the
-        # tenant's own policy_json (legacy path) may refine further.
-        for source in (profile.get("thresholds"), raw_policy.get("thresholds")):
-            if isinstance(source, dict):
-                for k in th:
-                    if isinstance(source.get(k), (int, float)):
-                        lo, hi = THRESHOLD_BOUNDS[k]
-                        th[k] = _clamp(float(source[k]), lo, hi)
-        # enforce ordering challenge < review < block
+        else:
+            # No repo (lightweight/test harness): legacy layering stays.
+            for source in (profile.get("thresholds"), raw_policy.get("thresholds")):
+                if isinstance(source, dict):
+                    for k in th:
+                        if isinstance(source.get(k), (int, float)):
+                            lo, hi = THRESHOLD_BOUNDS[k]
+                            th[k] = _clamp(float(source[k]), lo, hi)
+        # enforce ordering challenge < review < block (always, regardless of source)
         th["review"] = max(th["review"], th["challenge"] + 0.05)
         th["block"] = max(th["block"], th["review"] + 0.05)
         th["block"] = min(th["block"], THRESHOLD_BOUNDS["block"][1])

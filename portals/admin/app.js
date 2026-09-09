@@ -2243,10 +2243,17 @@ function renderDefaultThresholdsCard() {
       await loadThresholdsData(); render();
     } catch (e) { msg.textContent = e.message; msg.style.color = "#FCA5A5"; }
   }, msg);
-  return el("div", {},
+  return el("div", { class: "card" },
+    el("h3", { style: "margin-bottom:6px" }, "🎯 عتبات قرار محرك المخاطر — الافتراضي"),
     el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:12px" },
       "عتبات قرار محرك المخاطر الافتراضية. تُطبَّق على كل مؤسسة لا تملك تخصيصًا نشطًا، والتغيير يسري على القرارات القادمة فقط. الحدود الآمنة مفعّلة دائمًا."),
+    el("div", { style: "font-size:11.5px;color:var(--muted);background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 12px;margin-bottom:12px;line-height:1.9" },
+      el("strong", { style: "color:var(--text)" }, "كيف يعمل سلّم العتبات: "),
+      "درجة أقل من Challenge → ✅ مسموح · من Challenge حتى Review → ⚠️ تحقق إضافي (OTP/مراجعة خفيفة) · من Review حتى Block → 🔍 تدخل ومراجعة المؤسسة · أعلى من Block → ⛔ محظور."),
     form, msg,
+    el("div", { style: "font-size:11.5px;color:var(--muted);background:var(--bg);border:1px dashed var(--border);border-radius:8px;padding:9px 12px;margin-top:10px;line-height:1.9" },
+      el("strong", { style: "color:var(--text)" }, "«عند غياب FX» = القرار عندما لا يتوفر سعر صرف للعملة: "),
+      "Review — مراجعة (افتراضي آمن) أو Block — حظر. يستحيل أن يكون «سماح صامت» لأسباب أمنية."),
     el("div", { style: "font-size:11px;color:var(--muted);margin-top:8px" }, "آخر تحديث: " + fmtTs(d.updated_at)));
 }
 
@@ -2347,89 +2354,48 @@ function renderTenantThresholdPanel(tenantId, tenantName) {
     form, msg, actionsRow);
 }
 
-function renderPolicyStudio() {
-  const tenants = state.policyTenants || [];
-  const sel = state.policySelected;
-  const pmsg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
-  const _polOpts = [{ value: "", label: "— اختر مؤسسة لتحرير سياستها —" },
-    ...tenants.map(t => ({ value: t.tenant_id, label: (t.name || t.tenant_id) }))];
-  const picker = fxSel(_polOpts, {
-    value: sel ? sel.tenant_id : "",
-    placeholder: "— اختر مؤسسة لتحرير سياستها —",
-    minWidth: "240px",
-    onChange: async (tid) => {
-      if (!tid) { state.policySelected = null; state.policyVersions = []; render(); return; }
-      try {
-        state.policySelected = await api("/tenants/" + tid);
-        state.policyVersions = await api("/tenants/" + tid + "/policy/versions");
-      } catch (e) { state.policySelected = null; state.policyVersions = []; toast(e.message, "error"); }
-      render();
-    },
-  });
-
-  let editor = el("div", { style: "color:var(--muted);padding:20px;text-align:center" }, "اختر مؤسسة لعرض سياستها وتحريرها.");
-  if (sel) {
-    let pol = {};
-    // Backend _sanitize returns the policy under "policy" (policy_json is popped);
-    // accept both shapes so the editor never renders an empty policy by mistake.
-    try { const raw = sel.policy !== undefined ? sel.policy : sel.policy_json; pol = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : {}; } catch { pol = {}; }
-    const th = pol.thresholds || {};
-    const tc = el("input", { class: "form-control", type: "number", step: "any", value: th.challenge != null ? th.challenge : "", style: "width:110px" });
-    const tr = el("input", { class: "form-control", type: "number", step: "any", value: th.review != null ? th.review : "", style: "width:110px" });
-    const tb = el("input", { class: "form-control", type: "number", step: "any", value: th.block != null ? th.block : "", style: "width:110px" });
-    const fx = fxSel([
-      { value: "", label: "افتراضي" },
-      { value: "review", label: "review" },
-      { value: "block", label: "block" },
-      { value: "allow", label: "allow" },
-    ], { value: pol.fx_missing_action || "", placeholder: "افتراضي", minWidth: "160px" });
-    const note = el("input", { class: "form-control", placeholder: "سبب التغيير (يُحفظ مع الإصدار)", style: "width:220px" });
-    editor = el("div", {},
-      el("div", { class: "card" },
-        el("h3", { style: "margin-bottom:10px" }, "🎛️ سياسة: " + (sel.name || sel.tenant_id)),
-        el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:12px" }, "عتبات القرار ومعالجة غياب سعر الصرف — تُحفظ فورًا وتُستخدم في القرارات القادمة"),
-        el("div", { style: "display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end" },
-          el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "عتبة Challenge"), tc),
-          el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "عتبة Review"), tr),
-          el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "عتبة Block"), tb),
-          el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "عند غياب FX"), fx),
-          el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "ملاحظة الإصدار"), note),
-          el("button", { class: "btn success", onclick: async () => {
-            pmsg.textContent = ""; pmsg.style.color = "var(--muted)";
-            const body = {};
-            const ths = {};
-            if (tc.value !== "") ths.challenge = Number(tc.value);
-            if (tr.value !== "") ths.review = Number(tr.value);
-            if (tb.value !== "") ths.block = Number(tb.value);
-            if (Object.keys(ths).length) body.thresholds = ths;
-            if (fx.getValue()) body.fx_missing_action = fx.getValue();
-            if (note.value.trim()) body.note = note.value.trim();
-            try {
-              const saved = await api("/tenants/" + sel.tenant_id + "/policy", { method: "PUT", body });
-              toast("حُفظت السياسة — إصدار v" + (saved.policy_version || "?"), "success");
-              state.policySelected = await api("/tenants/" + sel.tenant_id);
-              state.policyVersions = await api("/tenants/" + sel.tenant_id + "/policy/versions");
-              render();
-            } catch (e) { pmsg.textContent = e.message; pmsg.style.color = "#FCA5A5"; }
-          } }, "💾 حفظ السياسة")),
-        pmsg),
-      el("div", { class: "card" },
-        el("h3", { style: "margin-bottom:10px" }, "🔍 السياسة الحالية (JSON)"),
-        el("pre", { class: "code-block" }, JSON.stringify(pol, null, 2))),
-      renderPolicyVersionsCard(sel),
-    );
+/* يفتح لوحة الأوزان/العتبات لمؤسسة معيّنة داخل صفحة العملاء */
+async function _openTenantPanelInClients(tenantId, kind) {
+  // The clients page id is "tenants" (nav definition), not "clients".
+  state.page = "tenants";
+  state.tenantWeightsFor = null; state.tenantWeights = null;
+  state.tenantThresholdsFor = null; state.tenantThresholds = null;
+  if (kind === "weights") {
+    state.tenantWeightsFor = tenantId;
+    try { state.tenantWeights = await api("/tenants/" + tenantId + "/weights"); } catch (e) { toast(e.message, "error"); state.tenantWeightsFor = null; }
+  } else {
+    state.tenantThresholdsFor = tenantId;
+    try { state.tenantThresholds = await api("/tenants/" + tenantId + "/thresholds"); } catch (e) { toast(e.message, "error"); state.tenantThresholdsFor = null; }
   }
+  render();
+}
+
+/* منتقي «إضافة مؤسسة» لتخصيص أوزانها/عتباتها — يُعرض داخل أقسام التخصيص */
+function _addInstitutionPicker(kind) {
+  const all = state.policyTenants || state.tenants || [];
+  const existing = new Set(((kind === "weights" ? state.weightOverrides : state.thresholdOverrides) || []).map(o => o.tenant_id));
+  const available = all.filter(t => t.status !== "deleted" && !existing.has(t.tenant_id));
+  const label = kind === "weights" ? "➕ إضافة مؤسسة لتخصيص الأوزان…" : "➕ إضافة مؤسسة لتخصيص العتبات…";
+  const picker = fxSel(
+    [{ value: "", label }, ...available.map(t => ({ value: t.tenant_id, label: (t.name || t.tenant_id) }))],
+    { value: "", placeholder: label, minWidth: "280px",
+      onChange: (tid) => { if (tid) _openTenantPanelInClients(tid, kind); } });
+  return el("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:10px;border:1px dashed var(--border);border-radius:10px" },
+    el("span", { style: "font-size:12px;color:var(--muted)" }, kind === "weights" ? "لتخصيص أوزان مؤسسة جديدة:" : "لتخصيص عتبات مؤسسة جديدة:"),
+    picker,
+    available.length === 0 ? el("span", { style: "font-size:11px;color:var(--muted)" }, "(كل المؤسسات لديها تخصيص بالفعل)") : null);
+}
+
+function renderPolicyStudio() {
   return el("div", {},
     el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:6px" }, "🎛️ استوديو السياسات (Policy Studio)"),
     el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:16px" }, "الإدارة المركزية للأوزان والعتبات — الافتراضي يُطبَّق على كل مؤسسة بلا تخصيص نشط، والتغييرات تُسجَّل في سجل التدقيق وتسري على القرارات القادمة فقط"),
     renderDefaultWeightsCard(),
-    _fxSection("wOv", "🏢 مؤسسات بأوزان مخصّصة (" + ((state.weightOverrides || []).length) + ")", () => renderWeightOverridesBody(), false),
-    _fxSection("thDef", "🎯 عتبات قرار محرك المخاطر — الافتراضي", () => renderDefaultThresholdsCard(), true),
-    _fxSection("thOv", "🏢 مؤسسات بعتبات مخصّصة (" + ((state.thresholdOverrides || []).length) + ")", () => renderThresholdOverridesBody(), false),
-    _fxSection("polEditor", "🎛️ محرر سياسة مؤسسة محددة", () => el("div", {},
-      el("div", { class: "card", style: "margin-bottom:12px" }, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:6px" }, "المؤسسة"), picker),
-      sel ? renderTenantWeightPanel(sel.tenant_id, sel.name) : null,
-      editor), false),
+    _fxSection("wOv", "🏢 مؤسسات بأوزان مخصّصة (" + ((state.weightOverrides || []).length) + ")",
+      () => el("div", {}, _addInstitutionPicker("weights"), renderWeightOverridesBody()), false),
+    renderDefaultThresholdsCard(),
+    _fxSection("thOv", "🏢 مؤسسات بعتبات مخصّصة (" + ((state.thresholdOverrides || []).length) + ")",
+      () => el("div", {}, _addInstitutionPicker("thresholds"), renderThresholdOverridesBody()), false),
   );
 }
 
