@@ -305,11 +305,19 @@ class DecisionOrchestrator:
                 degraded_reason = "AML_UNAVAILABLE_FAIL_CLOSED"
         fx_missing = getattr(tx, "fx_status", None) == "missing"
         if fx_missing:
+            # policy["fx_missing_action"] is already resolved by PolicyEngine:
+            # one of review / block / allow ('default' was resolved to the
+            # global behavior at resolution time — real inheritance).
             fx_missing_action = policy["fx_missing_action"]
             if fx_missing_action == "block":
                 decision = Decision.BLOCK
                 final = max(final, policy["thresholds"]["block"])
-            else:
+            elif fx_missing_action == "allow":
+                # Explicit policy-maker choice: tolerate missing FX and let the
+                # normal threshold ladder decide. (Sanctions floor below still
+                # applies — a hard AML hit can never be allowed.)
+                decision = self._decide(final, aml_sig.sanctions_hit, policy)
+            else:  # "review" (incl. resolved default)
                 decision = Decision.REVIEW
                 final = max(final, policy["thresholds"]["review"])
         else:

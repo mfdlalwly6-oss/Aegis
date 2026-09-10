@@ -38,10 +38,10 @@ class ThresholdsIn(BaseModel):
                     f"(got {self.challenge}/{self.review}/{self.block})"
                 ),
             )
-        if self.fx_missing_action is not None and self.fx_missing_action not in ("review", "block"):
+        if self.fx_missing_action is not None and self.fx_missing_action not in ("default", "review", "block", "allow"):
             raise HTTPException(
                 status_code=422,
-                detail="fx_missing_action must be 'review' or 'block' (never a silent allow)",
+                detail="fx_missing_action must be one of: default | review | block | allow",
             )
 
     def as_dict(self) -> dict:

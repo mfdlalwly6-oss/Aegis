@@ -86,7 +86,10 @@ class Settings(BaseSettings):
     FX_DEFAULT_REGION: str = "global"  # data-driven; Yemen regions live in fx_rates rows
     FX_STALE_HOURS: int = 24  # rate older than this => FX_STALE
     FX_DIVERGENCE_PCT: float = 3.0  # institution rate deviation => FX_DIVERGENT flag
-    FX_MISSING_DECISION: str = "review"  # unknown currency => never silent ALLOW, never blind BLOCK
+    # Global behavior when an FX rate is missing. This is what the 'default'
+    # threshold-profile option resolves to at decision time. Institutions may
+    # explicitly override with review | block | allow via threshold_profiles.
+    FX_MISSING_DECISION: str = "review"
     FX_INSTITUTION_TRUST_PCT: float = 6.0  # institution rate trusted if within this % of platform reference
 
 

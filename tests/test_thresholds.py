@@ -18,15 +18,21 @@ def _th(client, tid):
 
 class TestDefaultThresholds:
     def test_01_default_thresholds_seeded(self, client):
-        """1. Institution without override → platform default (0.35/0.60/0.80, review)."""
+        """1. Institution without override → platform default (0.35/0.60/0.80, fx=default).
+
+        The stored profile fx value is 'default' (follows the global behavior);
+        the actual resolution to the global action (currently review) happens
+        at decision time inside PolicyEngine — verified by test_fx_missing_options.
+        """
         t = create_tenant(client, name="TH-Default-T")
         eff = _th(client, t["tenant_id"])["effective"]
         assert eff["source"] == "default"
         for k in D:
             assert abs(eff[k] - D[k]) < 1e-9
-        assert eff["fx_missing_action"] == "review"
+        assert eff["fx_missing_action"] == "default"
         r = client.get("/api/v1/admin/thresholds/default", headers=OWNER_HEADERS)
         assert abs(r.json()["challenge"] - 0.35) < 1e-9
+        assert r.json()["fx_missing_action"] == "default"
 
     def test_02_default_edit_propagates_to_non_override_tenants(self, client):
         """2. Editing default thresholds → tenants without override inherit instantly."""
@@ -72,13 +78,20 @@ class TestDefaultThresholds:
         r = client.put(f"/api/v1/admin/tenants/{tid}/thresholds", json=bad, headers=OWNER_HEADERS)
         assert r.status_code == 422
 
-    def test_06_fx_missing_action_never_allow(self, client):
-        """6. fx_missing_action can never be 'allow' (silent allow forbidden)."""
+    def test_06_fx_missing_action_four_options(self, client):
+        """6. fx_missing_action accepts the four official options (incl. explicit allow)."""
         t = create_tenant(client, name="TH-FX")
         tid = t["tenant_id"]
-        bad = {**D, "fx_missing_action": "allow"}
-        r = client.put(f"/api/v1/admin/tenants/{tid}/thresholds", json=bad, headers=OWNER_HEADERS)
+        for fx in ("default", "review", "block", "allow"):
+            r = client.put(f"/api/v1/admin/tenants/{tid}/thresholds",
+                           json={**D, "fx_missing_action": fx}, headers=OWNER_HEADERS)
+            assert r.status_code == 200, (fx, r.text)
+            assert r.json()["fx_missing_action"] == fx
+        # an invalid value is still rejected
+        r = client.put(f"/api/v1/admin/tenants/{tid}/thresholds",
+                       json={**D, "fx_missing_action": "xyz"}, headers=OWNER_HEADERS)
         assert r.status_code == 422
+        client.delete(f"/api/v1/admin/tenants/{tid}/thresholds", headers=OWNER_HEADERS)
 
 
 class TestThresholdOverrides:

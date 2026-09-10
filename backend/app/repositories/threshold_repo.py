@@ -21,7 +21,8 @@ from app.db import Database
 
 KEYS = ("challenge", "review", "block")
 DEFAULT_THRESHOLDS = {"challenge": 0.35, "review": 0.60, "block": 0.80}
-DEFAULT_FX_ACTION = "review"
+# The platform default profile stores 'default' => follows the global behavior.
+DEFAULT_FX_ACTION = "default"
 
 # Same safe windows as policy_engine.THRESHOLD_BOUNDS (kept in sync).
 BOUNDS = {
@@ -29,7 +30,9 @@ BOUNDS = {
     "review": (0.40, 0.75),
     "block": (0.60, 0.95),
 }
-FX_ACTIONS = ("review", "block")
+# The four official missing-FX options. 'default' means: follow the global
+# system behavior (resolved at decision time, currently REVIEW).
+FX_ACTIONS = ("default", "review", "block", "allow")
 
 
 def utcnow() -> str:
@@ -182,4 +185,4 @@ class ThresholdRepository:
                 f"(got {th['challenge']}/{th['review']}/{th['block']})"
             )
         if fx_action not in FX_ACTIONS:
-            raise ValueError(f"fx_missing_action must be one of {FX_ACTIONS} (never a silent allow)")
+            raise ValueError(f"fx_missing_action must be one of {FX_ACTIONS}")

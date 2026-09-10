@@ -2173,10 +2173,17 @@ function renderTenantWeightPanel(tenantId, tenantName) {
 /* ═══════════════ 🎯 إدارة عتبات القرار — الافتراضي + تخصيص المؤسسات ═══════════════ */
 const TH_KEYS = [["challenge","عتبة Challenge"],["review","عتبة Review"],["block","عتبة Block"]];
 const TH_BOUNDS = { challenge: [0.20, 0.50], review: [0.40, 0.75], block: [0.60, 0.95] };
+/* خيارات «عند غياب FX» الأربعة الرسمية. default = يتبع السلوك العام للنظام. */
 const FX_MISSING_OPTS = [
-  { value: "review", label: "Review — مراجعة" },
-  { value: "block",  label: "Block — حظر" },
+  { value: "default", label: "افتراضي — يتبع السلوك العام للنظام" },
+  { value: "review",  label: "Review — مراجعة" },
+  { value: "block",   label: "Block — حظر" },
+  { value: "allow",   label: "Allow — سماح (اختيار صريح)" },
 ];
+/* ترجمة عربية لقيمة FX المخزنة */
+function _fxActionLabel(v) {
+  return { default: "افتراضي", review: "Review — مراجعة", block: "Block — حظر", allow: "Allow — سماح" }[v] || (v || "افتراضي");
+}
 
 async function loadThresholdsData() {
   try { state.thresholdDefault = await api("/thresholds/default"); } catch (e) { state.thresholdDefault = null; }
@@ -2213,8 +2220,8 @@ function _collectThresholds(form) {
 function _thresholdsForm(base, btnLabel, onSave, msg) {
   const inputs = TH_KEYS.map(([k, label]) => _thInput(k, label, base[k]));
   const fxSelEl = fxSel(FX_MISSING_OPTS, {
-    value: base.fx_missing_action || "review",
-    placeholder: "عند غياب FX", minWidth: "170px",
+    value: base.fx_missing_action || "default",
+    placeholder: "عند غياب FX", minWidth: "200px",
   });
   const fxCell = el("div", {},
     el("label", { style: "font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px" }, "عند غياب FX"),
@@ -2223,7 +2230,7 @@ function _thresholdsForm(base, btnLabel, onSave, msg) {
     msg.textContent = ""; msg.style.color = "var(--muted)";
     const c = _collectThresholds(form);
     if (!c.valid) { msg.textContent = "⚠️ " + c.problems.join(" · ") + " — لم يُحفظ شيء."; msg.style.color = "#FCA5A5"; return; }
-    const body = { ...c.thresholds, fx_missing_action: fxSelEl.getValue() || "review" };
+    const body = { ...c.thresholds, fx_missing_action: fxSelEl.getValue() || "default" };
     await onSave(body);
   } }, btnLabel);
   const form = el("div", { style: "display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end" },
@@ -2253,7 +2260,7 @@ function renderDefaultThresholdsCard() {
     form, msg,
     el("div", { style: "font-size:11.5px;color:var(--muted);background:var(--bg);border:1px dashed var(--border);border-radius:8px;padding:9px 12px;margin-top:10px;line-height:1.9" },
       el("strong", { style: "color:var(--text)" }, "«عند غياب FX» = القرار عندما لا يتوفر سعر صرف للعملة: "),
-      "Review — مراجعة (افتراضي آمن) أو Block — حظر. يستحيل أن يكون «سماح صامت» لأسباب أمنية."),
+      "افتراضي — يتبع السلوك العام للنظام (حاليًا: Review — مراجعة) · Review — مراجعة · Block — حظر · Allow — سماح (اختيار صريح لمسؤول السياسة). إذا تغيّر السلوك العام مستقبلًا، تتبعه تلقائيًا كل مؤسسة على «افتراضي»."),
     el("div", { style: "font-size:11px;color:var(--muted);margin-top:8px" }, "آخر تحديث: " + fmtTs(d.updated_at)));
 }
 
@@ -2293,7 +2300,7 @@ function renderThresholdOverridesBody() {
       el("td", { style: "font-weight:700" }, o.tenant_name || o.tenant_id),
       el("td", {}, el("span", { class: "badge " + (o.active ? "allow" : "block") }, o.active ? "نشط" : "معطّل")),
     ].concat(thCells).concat([
-      el("td", { style: "text-align:center" }, el("span", { class: "badge info" }, o.fx_missing_action || "review")),
+      el("td", { style: "text-align:center" }, el("span", { class: "badge info" }, _fxActionLabel(o.fx_missing_action))),
       el("td", { style: "font-size:11px" }, fmtTs(o.updated_at)),
       el("td", {}, _thOverrideRowActions(o, reload)),
     ]);
@@ -2326,7 +2333,7 @@ function renderTenantThresholdPanel(tenantId, tenantName) {
       await reloadPanel();
     } catch (e) { msg.textContent = e.message; msg.style.color = "#FCA5A5"; }
   }, msg);
-  const effLine = "السارية الآن: Challenge " + eff.challenge + " · Review " + eff.review + " · Block " + eff.block + " · FX: " + (eff.fx_missing_action || "review");
+  const effLine = "السارية الآن: Challenge " + eff.challenge + " · Review " + eff.review + " · Block " + eff.block + " · FX: " + _fxActionLabel(eff.fx_missing_action);
   let actionsRow;
   if (ov) {
     const disBtn = isCustom ? el("button", { class: "btn", onclick: async () => {

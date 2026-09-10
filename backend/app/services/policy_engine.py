@@ -160,21 +160,31 @@ class PolicyEngine:
             )
         disabled -= PROTECTED_RULES
 
-        # --- FX missing action (can never be a silent allow) ---
-        # Precedence: tenant policy_json > DB-backed threshold profile
-        # (override/default) > settings constant.
+        # --- FX missing action ---
+        # Four official options: default | review | block | allow.
+        # Precedence: tenant policy_json (legacy explicit) > DB-backed threshold
+        # profile (override/default) > settings constant.
+        # 'default' = follow the GLOBAL system behavior, resolved HERE at
+        # decision time from settings.FX_MISSING_DECISION — a real inheritance,
+        # not a copied value. 'allow' is an explicit policy-maker choice (the
+        # missing FX is tolerated and the normal threshold ladder runs).
         fx_missing_action = str(
             raw_policy.get("fx_missing_action")
             or db_fx_action
             or settings.FX_MISSING_DECISION
         ).lower()
-        if fx_missing_action not in ("review", "block"):
-            fx_missing_action = "review"
+        if fx_missing_action not in ("default", "review", "block", "allow"):
+            fx_missing_action = "default"
+        if fx_missing_action == "default":
+            fx_missing_action = str(settings.FX_MISSING_DECISION).lower()
+            if fx_missing_action not in ("review", "block", "allow"):
+                fx_missing_action = "review"  # global safe fallback
 
         return {
             "thresholds": th,
             "risk_sensitivity": rs,
             "weights": weights,
+            "fx_missing_action_global": str(settings.FX_MISSING_DECISION).lower(),
             "disabled_rules": sorted(disabled),
             "expected_currencies": raw_policy.get("expected_currencies")
             or profile.get("expected_currencies")
