@@ -47,6 +47,8 @@ const state = {
   decisions: [], alerts: [], cases: [],
   feed: null, feedFilter: "all", feedDetail: null,
   invs: null, manual: null, report: null, rperiod: "daily",
+  view: (() => { try { return new URLSearchParams(location.search).get("view"); } catch { return null; } })(),
+  viewToken: (() => { try { return new URLSearchParams(location.search).get("token") || ""; } catch { return ""; } })(),
 };
 const $ = s => document.querySelector(s);
 const el = (t, a = {}, ...kids) => {
@@ -135,13 +137,105 @@ function renderLogin() {
       toast("مرحبًا " + (t.name || ""), "success"); render();
     } catch (ex) { err.textContent = ex.message; }
   }
+  const forgot = el("a", { href: "?view=forgot-password", style: "display:block;text-align:center;margin-top:10px;font-size:12.5px;color:var(--accent);text-decoration:none", onclick: (e) => { e.preventDefault(); state.view = "forgot-password"; render(); } }, "نسيت كلمة المرور؟");
   return el("div", { class: "login-wrap" },
     el("div", { class: "login-card" },
       el("div", { style: "font-size:4rem;text-align:center" }, "🏦"),
       el("h1", { style: "text-align:center;font-size:1.7rem;font-weight:900" }, "AEGIS Merchant"),
       el("p", { style: "text-align:center;color:var(--muted);font-size:13px;margin:8px 0 20px" }, "بوابة البنك / المحفظة / المؤسسة — رؤية مؤسستك فقط"),
       tabsRow, ownerBox, apiBox, err,
-      el("button", { class: "btn primary", style: "width:100%;padding:13px;margin-top:6px", onclick: doLogin }, "🔓 دخول")));
+      el("button", { class: "btn primary", style: "width:100%;padding:13px;margin-top:6px", onclick: doLogin }, "🔓 دخول"), forgot));
+}
+
+/* ── INVITATION ACCEPT / PASSWORD RESET (public, token from email link) ── */
+function _portalCard(title, sub, ...children) {
+  return el("div", { class: "login-wrap" },
+    el("div", { class: "login-card" },
+      el("div", { style: "font-size:4rem;text-align:center" }, "🏦"),
+      el("h1", { style: "text-align:center;font-size:1.5rem;font-weight:900" }, title),
+      sub ? el("p", { style: "text-align:center;color:var(--muted);font-size:13px;margin:8px 0 16px" }, sub) : null,
+      ...children));
+}
+function _goLoginLink() {
+  return el("a", { href: "/merchant/", style: "display:block;text-align:center;margin-top:12px;font-size:13px;color:var(--accent);text-decoration:none", onclick: (e) => { e.preventDefault(); state.view = null; render(); } }, "→ تسجيل الدخول");
+}
+
+function renderAcceptInvitation(token) {
+  const err = el("div", { style: "color:#FCA5A5;font-size:13px;margin-top:8px;min-height:16px" });
+  const info = el("div", { style: "color:var(--muted);font-size:13px;margin-bottom:12px;text-align:center" }, "⏳ جارٍ التحقق من الدعوة…");
+  const pw = el("input", { class: "form-control", type: "password", placeholder: "كلمة المرور (8+ أحرف)" });
+  const pw2 = el("input", { class: "form-control", type: "password", placeholder: "تأكيد كلمة المرور" });
+  const form = el("div", { style: "display:none" },
+    el("label", { style: "font-size:13px;color:var(--muted);margin-bottom:6px;display:block" }, "🔑 كلمة المرور"), pw,
+    el("label", { style: "font-size:13px;color:var(--muted);margin:10px 0 6px;display:block" }, "🔑 تأكيد كلمة المرور"), pw2, err,
+    el("button", { class: "btn primary", style: "width:100%;padding:13px;margin-top:6px", onclick: async () => {
+      err.textContent = "";
+      if (pw.value.length < 8) { err.textContent = "كلمة المرور يجب ألا تقل عن 8 أحرف"; return; }
+      if (pw.value !== pw2.value) { err.textContent = "تأكيد كلمة المرور غير مطابق"; return; }
+      try {
+        const r = await fetch(ROOT + "/auth/institution/accept-invitation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, password: pw.value }) });
+        const j = await r.json(); if (!r.ok) throw new Error(j.detail || "تعذّر التفعيل");
+        state.view = null; render();
+        toast(j.message || "تم تفعيل حسابك بنجاح", "success");
+      } catch (ex) { err.textContent = ex.message; }
+    } }, "✅ تفعيل حسابي"));
+  fetch(ROOT + "/auth/institution/invitation?token=" + encodeURIComponent(token))
+    .then(r => r.json())
+    .then(j => {
+      if (j.status === "valid") {
+        info.textContent = "المؤسسة: " + (j.tenant_name || "") + " — البريد: " + (j.email || "");
+        form.style.display = "block";
+      } else {
+        const msg = { invalid: "رابط الدعوة غير صالح.", expired: "انتهت صلاحية الدعوة — اطلب من مدير المنظومة إعادة إرسالها.", revoked: "أُبطلت هذه الدعوة — اطلب دعوة جديدة.", used: "هذه الدعوة استُخدمت مسبقًا." };
+        info.textContent = msg[j.status] || "رابط الدعوة غير صالح.";
+        info.style.color = "#FCA5A5";
+        info.appendChild(_goLoginLink());
+      }
+    })
+    .catch(() => { info.textContent = "تعذّر التحقق من الدعوة — حاول لاحقًا."; info.style.color = "#FCA5A5"; });
+  return _portalCard("تفعيل حساب AEGIS", null, info, form);
+}
+
+function renderForgotPassword() {
+  const em = el("input", { class: "form-control", type: "email", dir: "ltr", placeholder: "owner@bank.com" });
+  const msg = el("div", { style: "font-size:13px;margin-top:10px;min-height:16px" });
+  const done = el("div", { style: "display:none;color:#86EFAC;font-size:13.5px;text-align:center;margin-top:10px;line-height:1.9" });
+  const btn = el("button", { class: "btn primary", style: "width:100%;padding:13px;margin-top:6px", onclick: async () => {
+    msg.textContent = ""; msg.style.color = "#FCA5A5";
+    const email = em.value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { msg.textContent = "أدخل بريدًا صالحًا"; return; }
+    btn.disabled = true; btn.textContent = "جارٍ الإرسال…";
+    try {
+      const r = await fetch(ROOT + "/auth/institution/forgot-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.detail || "تعذّر الإرسال");
+      btn.style.display = "none";
+      done.textContent = j.message || "إذا كان البريد مسجلًا، ستصلك رسالة إعادة التعيين.";
+      done.style.display = "block";
+    } catch (ex) { msg.textContent = ex.message; btn.disabled = false; btn.textContent = "📧 إرسال رابط إعادة التعيين"; }
+  } }, "📧 إرسال رابط إعادة التعيين");
+  return _portalCard("استعادة كلمة المرور", "أدخل بريد المالك وسنرسل رابط إعادة التعيين.",
+    el("label", { style: "font-size:13px;color:var(--muted);margin-bottom:6px;display:block" }, "📧 البريد"), em, btn, msg, done, _goLoginLink());
+}
+
+function renderResetPassword(token) {
+  const err = el("div", { style: "color:#FCA5A5;font-size:13px;margin-top:8px;min-height:16px" });
+  const pw = el("input", { class: "form-control", type: "password", placeholder: "كلمة المرور الجديدة (8+ أحرف)" });
+  const pw2 = el("input", { class: "form-control", type: "password", placeholder: "تأكيد كلمة المرور" });
+  const btn = el("button", { class: "btn primary", style: "width:100%;padding:13px;margin-top:6px", onclick: async () => {
+    err.textContent = "";
+    if (pw.value.length < 8) { err.textContent = "كلمة المرور يجب ألا تقل عن 8 أحرف"; return; }
+    if (pw.value !== pw2.value) { err.textContent = "تأكيد كلمة المرور غير مطابق"; return; }
+    btn.disabled = true;
+    try {
+      const r = await fetch(ROOT + "/auth/institution/reset-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, password: pw.value }) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.detail || "تعذّر التعيين");
+      state.view = null; render();
+      toast(j.message || "تم تغيير كلمة المرور", "success");
+    } catch (ex) { err.textContent = ex.message; btn.disabled = false; }
+  } }, "✅ تعيين كلمة المرور");
+  return _portalCard("إعادة تعيين كلمة المرور", null,
+    el("label", { style: "font-size:13px;color:var(--muted);margin-bottom:6px;display:block" }, "🔑 كلمة المرور الجديدة"), pw,
+    el("label", { style: "font-size:13px;color:var(--muted);margin:10px 0 6px;display:block" }, "🔑 تأكيد كلمة المرور"), pw2, err, btn, _goLoginLink());
 }
 
 /* ── LOADERS ── */
@@ -483,6 +577,9 @@ async function renderPage() {
 /* ── MAIN RENDER ── */
 function render() {
   const root = $("#app"); root.innerHTML = "";
+  if (state.view === "accept-invitation") { root.appendChild(renderAcceptInvitation(state.viewToken)); return; }
+  if (state.view === "reset-password") { root.appendChild(renderResetPassword(state.viewToken)); return; }
+  if (state.view === "forgot-password") { root.appendChild(renderForgotPassword()); return; }
   if (!state.token) { root.appendChild(renderLogin()); return; }
   if (!state.tenant) { try { state.tenant = JSON.parse(localStorage.getItem(TT) || "null"); } catch {} }
   const pages = [

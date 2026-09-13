@@ -475,6 +475,9 @@ function renderAddTenantForm() {
   );
   const emailI = el("input", { class: "form-control", type: "email", placeholder: "api@bank.example (اختياري)" });
   const phoneI = el("input", { class: "form-control", placeholder: "+967 77 123 4567 (اختياري)" });
+  /* ── Institution-owner fields: email+name trigger the invitation flow (no password here — the owner sets it from the emailed link) ── */
+  const oNameI = el("input", { class: "form-control", placeholder: "مثال: أحمد الحميري" });
+  const oEmailI = el("input", { class: "form-control", type: "email", dir: "ltr", placeholder: "owner@bank.example" });
   const limitI = el("input", { class: "form-control", type: "number", value: "5", min: "0", max: "500" });
   const ARAB_TZ = [
     ["Asia/Aden", "اليمن — عدن (UTC+3)"],
@@ -510,6 +513,9 @@ function renderAddTenantForm() {
     onsubmit: async e => {
       e.preventDefault();
       if (!nameI.value.trim()) { err.textContent = "الاسم مطلوب"; return; }
+      const oEmail = oEmailI.value.trim(), oName = oNameI.value.trim();
+      if (oEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(oEmail)) { err.textContent = "بريد المالك غير صالح"; return; }
+      if (!oEmail && oName) { err.textContent = "أدخل بريد المالك لإرسال الدعوة"; return; }
       btn.disabled = true; btn.textContent = "جارٍ الإنشاء…";
       try {
         const r = await api("/tenants", { method: "POST", body: {
@@ -521,11 +527,13 @@ function renderAddTenantForm() {
           contact_phone: phoneI.value.trim() || null,
           investigator_limit: Math.max(0, parseInt(limitI.value, 10) || 5),
           timezone: tzI.value.trim() || "Asia/Aden",
+          owner_email: oEmail || null,
+          owner_name: oName || null,
         }});
         state.lastCreated = r;
         state.showAddForm = false;
         await loadTenants();
-        toast("✅ تم إنشاء العميل — انسخ المفاتيح الآن!", "success");
+        toast(oEmail ? "✅ تم إنشاء العميل وأُرسلت دعوة المالك إلى بريده" : "✅ تم إنشاء العميل — انسخ المفاتيح الآن!", "success");
         render();
       } catch (ex) {
         err.textContent = ex.message;
@@ -542,6 +550,14 @@ function renderAddTenantForm() {
       el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "📱 هاتف التواصل"), phoneI),
       el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "👥 حد المحققين (الافتراضي 5)"), limitI),
       el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "🌐 المنطقة الزمنية"), tzI),
+    ),
+    el("div", { style: "margin-top:14px;padding:12px;border:1px dashed var(--brand);border-radius:10px" },
+      el("div", { style: "font-size:13px;font-weight:600;margin-bottom:8px" }, "👤 مالك المؤسسة (اختياري — دعوة عبر البريد)"),
+      el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:10px" }, "أدخل بريد المالك وسيصله رابط آمن لتعيين كلمة مروره بنفسه — لا تُنشئ كلمة مرور نيابة عنه."),
+      el("div", { style: "display:grid;grid-template-columns:1fr 1fr;gap:12px" },
+        el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "👤 اسم المالك"), oNameI),
+        el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "📧 بريد المالك"), oEmailI),
+      ),
     ),
     err,
     el("div", { style: "margin-top:14px;display:flex;gap:8px" }, btn),
@@ -613,6 +629,7 @@ function renderTenantDetail() {
         }
       }, "🔄 تدوير HMAC Secret"),
     ),
+    renderOwnerCard(t),
     el("div", { style: "margin-top:16px" },
       el("h4", { style: "margin-bottom:10px;color:var(--accent)" }, "📖 مثال ربط جاهز (Node.js)"),
       el("pre", { class: "code-block" },
@@ -636,6 +653,49 @@ const { decision, risk_score, reasoning_ar } = await r.json();`
       ),
     ),
   );
+}
+
+/* ── Institution Owner management card (inside tenant detail) ── */
+const OWNER_STATUS_LABEL = { invited: ["📩 مدعو", "badge assigned"], active: ["✅ نشط", "badge assigned"], disabled: ["⛔ معطّل", "badge assigned"] };
+async function loadTenantOwner(tid) {
+  try { const r = await api("/tenants/" + tid + "/owner"); state.tenantOwner = r.owner; }
+  catch (e) { state.tenantOwner = { __error: e.message }; }
+}
+function renderOwnerCard(t) {
+  const o = state.tenantOwner;
+  if (!o || state.tenantOwnerFor !== t.tenant_id) { loadTenantOwner(t.tenant_id).then(() => render()); state.tenantOwnerFor = t.tenant_id; }
+  const cur = state.tenantOwner;
+  let body;
+  if (!cur) {
+    body = el("div", { style: "color:var(--muted);font-size:13px;padding:8px 0" }, "⏳ جارٍ تحميل بيانات المالك…");
+  } else if (cur.__error) {
+    body = el("div", { style: "color:#FCA5A5;font-size:13px;padding:8px 0" }, "تعذّر تحميل بيانات المالك: " + cur.__error);
+  } else if (!cur.user_id && !cur.email) {
+    body = el("div", { style: "color:var(--muted);font-size:13px;padding:8px 0" }, "لا يوجد مالك مؤسسة بعد — يمكنك دعوته من نموذج إنشاء مؤسسة جديدة.");
+  } else {
+    const st = OWNER_STATUS_LABEL[cur.status] || [cur.status, "badge assigned"];
+    const acts = [];
+    if (cur.status === "invited") {
+      acts.push(el("button", { class: "btn sm", onclick: async () => { try { const r = await api("/tenants/" + t.tenant_id + "/owner/resend-invitation", { method: "POST", body: {} }); toast("أُرسلت دعوة جديدة (صالحة " + r.expires_in_hours + " ساعة)", "success"); await loadTenantOwner(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } } }, "✉️ إعادة إرسال الدعوة"));
+      acts.push(el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("تعطيل حساب المالك؟ سيُلغى أي دعوة معلّقة.")) return; try { await api("/tenants/" + t.tenant_id + "/owner/disable", { method: "POST", body: {} }); toast("عُطّل حساب المالك", "success"); await loadTenantOwner(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } } }, "⛔ تعطيل"));
+    } else if (cur.status === "active") {
+      acts.push(el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("تعطيل حساب المالك؟ لن يستطيع تسجيل الدخول.")) return; try { await api("/tenants/" + t.tenant_id + "/owner/disable", { method: "POST", body: {} }); toast("عُطّل حساب المالك", "success"); await loadTenantOwner(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } } }, "⛔ تعطيل"));
+    } else if (cur.status === "disabled") {
+      acts.push(el("button", { class: "btn sm success", onclick: async () => { try { await api("/tenants/" + t.tenant_id + "/owner/enable", { method: "POST", body: {} }); toast("فُعّل حساب المالك", "success"); await loadTenantOwner(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } } }, "▶ تفعيل"));
+    }
+    body = el("div", {},
+      el("div", { class: "creds-box" },
+        credRow("👤 الاسم", cur.name || "—"),
+        credRow("📧 البريد", cur.email || "—"),
+        el("div", { style: "display:flex;gap:8px;align-items:center;font-size:13px;padding:4px 0" },
+          el("span", { style: "color:var(--muted)" }, "📊 الحالة:"), el("span", { class: st[1] }, st[0])),
+      ),
+      el("div", { style: "margin-top:10px;display:flex;gap:8px;flex-wrap:wrap" }, ...acts),
+    );
+  }
+  return el("div", { style: "margin-top:16px;padding:14px;border:1px solid var(--brand);border-radius:10px" },
+    el("h4", { style: "margin-bottom:10px;color:var(--brand)" }, "👤 مالك المؤسسة"),
+    body);
 }
 
 function renderTenantRules() {
