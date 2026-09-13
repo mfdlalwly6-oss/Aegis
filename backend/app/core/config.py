@@ -121,6 +121,20 @@ class Settings(BaseSettings):
     NOTIFICATION_SMTP_TO: str = ""
     NOTIFICATION_SMTP_USE_TLS: bool = True
 
+    # ── Institution-owner onboarding / transactional email ──────────────
+    # EMAIL_PROVIDER: 'console' (dev/test — no external mail, captured in the
+    # EmailService outbox) or 'brevo' (production transactional email).
+    EMAIL_PROVIDER: str = "console"
+    BREVO_API_KEY: str = ""
+    BREVO_SENDER_EMAIL: str = ""
+    BREVO_SENDER_NAME: str = "AEGIS"
+    # Base URL used to build invitation / password-reset links (the merchant portal).
+    FRONTEND_BASE_URL: str = "http://localhost:8000"
+    # Invitation lifetime (single-use, revocable, expiring).
+    INVITATION_TTL_HOURS: int = 72
+    # Password-reset token lifetime.
+    RESET_TOKEN_TTL_HOURS: int = 1
+
     @property
     def db_path(self) -> str:
         return self.DB_PATH or f"{self.DATA_DIR}/aegis.db"

@@ -95,26 +95,44 @@ def create_tenant(
 ):
     data = body.model_dump(exclude_none=True)
     tenant = registry.tenants.create(data)
-    # Create institution owner account if requested
-    if body.owner_email and body.owner_password:
-        existing = registry.user_repo.get_by_email(tenant["tenant_id"], body.owner_email)
+    # Create the first institution owner. Two modes:
+    #  - invitation (preferred): owner_email WITHOUT a password → the account is
+    #    created as 'invited' (cannot log in) and a secure single-use expiring
+    #    invitation is emailed; the owner sets their own password on acceptance.
+    #  - legacy: owner_email WITH owner_password → direct active account
+    #    (kept for backward compatibility with existing admin flows/tests).
+    if body.owner_email:
+        existing = registry.user_repo.find_by_email_any_status(tenant["tenant_id"], body.owner_email)
         if not existing:
-            registry.user_repo.create(
+            invited = not body.owner_password
+            user = registry.user_repo.create(
                 tenant["tenant_id"],
                 body.owner_email,
                 body.owner_name or body.name,
                 role="institution_owner",
-                password=body.owner_password,
+                password=(body.owner_password or None),
+                status=("invited" if invited else "active"),
             )
-            registry.audit.log(
-                tenant["tenant_id"],
-                "owner",
-                "tenant.owner_created",
-                "user",
-                None,
-                getattr(request.state, "request_id", None),
-                {"email": body.owner_email},
-            )
+            if invited:
+                _row, raw = registry.invitations.create_invitation(
+                    tenant["tenant_id"], user["user_id"], user["email"],
+                    invited_by="owner", ttl_hours=settings.INVITATION_TTL_HOURS,
+                )
+                registry.email.send_invitation(
+                    to=user["email"], tenant_name=tenant["name"],
+                    owner_name=user["name"], token=raw,
+                )
+                registry.audit.log(
+                    tenant["tenant_id"], "owner", "owner.invited", "user",
+                    user["user_id"], getattr(request.state, "request_id", None),
+                    {"email": user["email"]},
+                )
+            else:
+                registry.audit.log(
+                    tenant["tenant_id"], "owner", "tenant.owner_created", "user",
+                    user["user_id"], getattr(request.state, "request_id", None),
+                    {"email": user["email"]},
+                )
     registry.audit.log(
         tenant["tenant_id"],
         "owner",
@@ -125,6 +143,91 @@ def create_tenant(
         {"name": tenant["name"], "plan": tenant["plan"]},
     )
     return tenant
+
+
+# ═══════════════════ INSTITUTION OWNER MANAGEMENT (admin) ═══════════════════
+
+def _owner_summary(registry, tenant_id: str) -> dict | None:
+    """The current owner row + its latest invitation state (never secrets)."""
+    owners = [u for u in registry.user_repo.list_by_tenant(tenant_id)
+              if u.get("role") in ("institution_owner", "tenant_admin")]
+    if not owners:
+        # include non-active owners too (invited/disabled)
+        rows = registry.db.query(
+            "SELECT user_id,tenant_id,email,name,role,status,created_at FROM users "
+            "WHERE tenant_id=? AND role IN ('institution_owner','tenant_admin') ORDER BY created_at DESC",
+            (tenant_id,))
+        owners = [dict(r) for r in rows]
+    if not owners:
+        return None
+    u = owners[0]
+    inv = registry.invitations.latest_for_user(u["user_id"])
+    return {
+        "user_id": u["user_id"], "email": u["email"], "name": u["name"],
+        "status": u["status"],
+        "invitation_status": (inv or {}).get("status"),
+        "invitation_expires_at": (inv or {}).get("expires_at"),
+    }
+
+
+@router.get("/admin/tenants/{tenant_id}/owner")
+def get_tenant_owner(tenant_id: str, owner=Depends(require_owner), registry=Depends(get_registry)):
+    if not registry.tenants.get(tenant_id):
+        raise HTTPException(404, "tenant_not_found")
+    return {"tenant_id": tenant_id, "owner": _owner_summary(registry, tenant_id)}
+
+
+@router.post("/admin/tenants/{tenant_id}/owner/resend-invitation")
+def resend_invitation(tenant_id: str, request: Request, owner=Depends(require_owner), registry=Depends(get_registry)):
+    """Revoke any pending invitation and issue a fresh one (single-use, 72h)."""
+    tenant = registry.tenants.get(tenant_id)
+    if not tenant:
+        raise HTTPException(404, "tenant_not_found")
+    summ = _owner_summary(registry, tenant_id)
+    if not summ:
+        raise HTTPException(404, "owner_not_found")
+    if summ["status"] == "active":
+        raise HTTPException(409, "owner_already_active")
+    registry.invitations.revoke_user_pending(summ["user_id"])
+    _row, raw = registry.invitations.create_invitation(
+        tenant_id, summ["user_id"], summ["email"],
+        invited_by="owner", ttl_hours=settings.INVITATION_TTL_HOURS,
+    )
+    registry.email.send_invitation(to=summ["email"], tenant_name=tenant["name"],
+                                   owner_name=summ["name"], token=raw)
+    registry.audit.log(tenant_id, "owner", "owner.invitation_resent", "user",
+                       summ["user_id"], getattr(request.state, "request_id", None),
+                       {"email": summ["email"]})
+    return {"resent": True, "email": summ["email"], "expires_in_hours": settings.INVITATION_TTL_HOURS}
+
+
+@router.post("/admin/tenants/{tenant_id}/owner/disable")
+def disable_owner(tenant_id: str, request: Request, owner=Depends(require_owner), registry=Depends(get_registry)):
+    if not registry.tenants.get(tenant_id):
+        raise HTTPException(404, "tenant_not_found")
+    summ = _owner_summary(registry, tenant_id)
+    if not summ:
+        raise HTTPException(404, "owner_not_found")
+    registry.user_repo.set_status(summ["user_id"], "disabled")
+    registry.invitations.revoke_user_pending(summ["user_id"])
+    registry.audit.log(tenant_id, "owner", "owner.disabled", "user",
+                       summ["user_id"], getattr(request.state, "request_id", None), {})
+    return {"status": "disabled"}
+
+
+@router.post("/admin/tenants/{tenant_id}/owner/enable")
+def enable_owner(tenant_id: str, request: Request, owner=Depends(require_owner), registry=Depends(get_registry)):
+    if not registry.tenants.get(tenant_id):
+        raise HTTPException(404, "tenant_not_found")
+    summ = _owner_summary(registry, tenant_id)
+    if not summ:
+        raise HTTPException(404, "owner_not_found")
+    if not registry.user_repo.get(summ["user_id"]).get("password_hash"):
+        raise HTTPException(409, "owner_no_password_yet")
+    registry.user_repo.set_status(summ["user_id"], "active")
+    registry.audit.log(tenant_id, "owner", "owner.enabled", "user",
+                       summ["user_id"], getattr(request.state, "request_id", None), {})
+    return {"status": "active"}
 
 
 

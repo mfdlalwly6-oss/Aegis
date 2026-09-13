@@ -29,15 +29,42 @@ class UserRepository:
         name: str,
         role: str = "viewer",
         password: str | None = None,
+        status: str = "active",
     ) -> dict:
         uid = generate_id("usr")
         pw_hash = _hash_pw(password) if password else None
         self.db.execute(
             "INSERT INTO users (user_id,tenant_id,email,name,role,password_hash,"
             "status,created_at) VALUES (?,?,?,?,?,?,?,?)",
-            (uid, tenant_id, email, name, role, pw_hash, "active", utcnow()),
+            (uid, tenant_id, email.strip().lower(), name, role, pw_hash, status, utcnow()),
         )
         return self.get(uid)
+
+    def find_by_email_any_status(self, tenant_id: str, email: str) -> dict | None:
+        """Lookup regardless of status (needed to detect invited/disabled owners)."""
+        return self.db.query_one(
+            "SELECT * FROM users WHERE tenant_id=? AND email=? ORDER BY created_at DESC LIMIT 1",
+            (tenant_id, email.strip().lower()),
+        )
+
+    def find_global_by_email_any_status(self, email: str) -> dict | None:
+        return self.db.query_one(
+            "SELECT * FROM users WHERE email=? ORDER BY created_at DESC LIMIT 1",
+            (email.strip().lower(),),
+        )
+
+    def set_password(self, user_id: str, password: str) -> bool:
+        """Set a new password hash. Never logs or returns the raw password."""
+        self.db.execute(
+            "UPDATE users SET password_hash=? WHERE user_id=?",
+            (_hash_pw(password), user_id),
+        )
+        return True
+
+    def set_status(self, user_id: str, status: str) -> bool:
+        """Activate / disable / mark-invited a user account."""
+        self.db.execute("UPDATE users SET status=? WHERE user_id=?", (status, user_id))
+        return True
 
     def get(self, user_id: str) -> dict | None:
         return self.db.query_one("SELECT * FROM users WHERE user_id=?", (user_id,))

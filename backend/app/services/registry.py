@@ -35,9 +35,11 @@ from app.repositories.fx_rate_repo import FxRateRepository
 from app.repositories.fx_reference_repo import FxReferenceRepository
 from app.repositories.weight_repo import WeightRepository
 from app.repositories.threshold_repo import ThresholdRepository
+from app.repositories.invitation_repo import InvitationRepository
 from app.rules.engine import RuleEngine
 from app.services.fx_service import FxService
 from app.services.notifications import NotificationService, provider_from_settings
+from app.services.email_service import EmailService
 from app.services.orchestrator import DecisionOrchestrator
 from app.streaming import EventBus
 
@@ -155,6 +157,7 @@ class ServiceRegistry:
         self.currency_repo.seed_defaults()
         self.fx_reference_repo = FxReferenceRepository(self.db)
         self.weights = WeightRepository(self.db)
+        self.invitations = InvitationRepository(self.db)
         self.thresholds = ThresholdRepository(self.db)
         self.fx = FxService(
             self.fx_rate_repo, currency_checker=lambda c: self.currency_repo.is_known(c),
@@ -237,6 +240,9 @@ class ServiceRegistry:
         self.audit = AuditService(self.audit_repo)
         self.events = EventBus()
         self.notifications = NotificationService(provider_from_settings(settings), self.audit)
+        # Transactional email (invitations / password resets). Provider is
+        # config-driven: console in dev/test, Brevo in production.
+        self.email = EmailService()
 
         # 11. Orchestrator (unified pipeline)
         self.orchestrator = DecisionOrchestrator(
