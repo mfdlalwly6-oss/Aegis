@@ -20,6 +20,7 @@ from app.api.v1 import router as v1_router
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.core.middleware import (
+    AuthRateLimitMiddleware,
     RateLimitMiddleware,
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
@@ -55,6 +56,7 @@ app = FastAPI(
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.add_middleware(AuthRateLimitMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestContextMiddleware)

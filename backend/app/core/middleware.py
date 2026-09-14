@@ -53,6 +53,70 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class AuthRateLimitMiddleware(BaseHTTPMiddleware):
+    """Dedicated throttle for credential/attack-sensitive auth endpoints.
+
+    Distinct from the global per-IP limiter: auth endpoints get a much tighter
+    window to blunt brute-force / credential-stuffing, keyed by IP+email where
+    an email is present (so a distributed botnet can't hammer one account, and
+    one NAT'd office can't lock out a whole tenant). Responses stay generic —
+    429 reveals nothing about account existence.
+
+    Policy (per sliding 60s window):
+      - institution login ......... 10 attempts / IP+email, 30 / IP
+      - forgot-password ...........  5 requests / IP+email, 15 / IP (abuse-safe)
+      - reset / accept-invitation . 10 / IP (token-gated already)
+    """
+
+    # path-substring -> (per_identity_limit, per_ip_limit, identity_extractor)
+    RULES: tuple = (
+        ("/auth/institution/login", 10, 30),
+        ("/auth/institution/forgot-password", 5, 15),
+        ("/auth/institution/reset-password", 10, 30),
+        ("/auth/institution/accept-invitation", 10, 30),
+        ("/auth/login", 10, 30),
+    )
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.buckets: dict[str, deque] = defaultdict(deque)
+
+    def _hit(self, key: str, limit: int, now: float) -> bool:
+        """Sliding-window; returns True when the request is OVER the limit."""
+        b = self.buckets[key]
+        while b and now - b[0] > 60:
+            b.popleft()
+        if len(b) >= limit:
+            return True
+        b.append(now)
+        return False
+
+    async def dispatch(self, request, call_next):
+        path = request.url.path
+        rule = next((r for r in self.RULES if r[0] in path), None)
+        if rule and request.method == "POST":
+            _, ident_limit, ip_limit = rule
+            ip = request.client.host if request.client else "anon"
+            now = time.time()
+            # Best-effort identity key (email) — read without consuming the body
+            # for downstream handlers: Starlette caches request.body().
+            email = ""
+            try:
+                body = await request.body()
+                if body:
+                    import json as _json
+                    email = str(_json.loads(body).get("email", "")).strip().lower()[:64]
+            except Exception:
+                email = ""
+            if self._hit(f"ip:{ip}:{path}", ip_limit, now):
+                logger.warning("auth.rate_limited", path=path, scope="ip")
+                return JSONResponse({"error": "rate_limited"}, status_code=429)
+            if email and self._hit(f"id:{email}:{path}", ident_limit, now):
+                logger.warning("auth.rate_limited", path=path, scope="identity")
+                return JSONResponse({"error": "rate_limited"}, status_code=429)
+        return await call_next(request)
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Baseline security headers on every response."""
 

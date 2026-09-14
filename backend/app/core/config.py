@@ -123,11 +123,26 @@ class Settings(BaseSettings):
 
     # ── Institution-owner onboarding / transactional email ──────────────
     # EMAIL_PROVIDER: 'console' (dev/test — no external mail, captured in the
-    # EmailService outbox) or 'brevo' (production transactional email).
+    # EmailService outbox), 'brevo' (production transactional API), or 'smtp'
+    # (any real SMTP relay, e.g. Gmail — see GMAIL_SMTP_* below).
     EMAIL_PROVIDER: str = "console"
     BREVO_API_KEY: str = ""
     BREVO_SENDER_EMAIL: str = ""
     BREVO_SENDER_NAME: str = "AEGIS"
+    # ── SMTP relay (real integration / production). Gmail is the configured
+    # sender via an App Password. Credentials come ONLY from the environment
+    # (GMAIL_SMTP_PASSWORD) — never hard-coded, committed, logged, or shown in
+    # reports. These names are intentionally UNPREFIXED (read straight from
+    # os.environ via default_factory, bypassing the AEGIS_ prefix) so the
+    # provided secret mechanism (GMAIL_SMTP_*) works unchanged inside Docker.
+    GMAIL_SMTP_HOST: str = Field(default_factory=lambda: os.environ.get("GMAIL_SMTP_HOST", "smtp.gmail.com"))
+    GMAIL_SMTP_PORT: int = Field(default_factory=lambda: int(os.environ.get("GMAIL_SMTP_PORT", "587")))
+    GMAIL_SMTP_USERNAME: str = Field(default_factory=lambda: os.environ.get("GMAIL_SMTP_USERNAME", ""))
+    GMAIL_SMTP_PASSWORD: str = Field(default_factory=lambda: os.environ.get("GMAIL_SMTP_PASSWORD", ""))  # env-only App Password
+    GMAIL_SMTP_USE_TLS: bool = Field(default_factory=lambda: os.environ.get("GMAIL_SMTP_USE_TLS", "true").lower() in ("1", "true", "yes"))
+    GMAIL_SMTP_SENDER_EMAIL: str = Field(default_factory=lambda: os.environ.get("GMAIL_SMTP_SENDER_EMAIL", ""))
+    GMAIL_SMTP_SENDER_NAME: str = Field(default_factory=lambda: os.environ.get("GMAIL_SMTP_SENDER_NAME", "AEGIS"))
+    SMTP_TIMEOUT_SEC: float = 15.0
     # Base URL used to build invitation / password-reset links (the merchant portal).
     FRONTEND_BASE_URL: str = "http://localhost:8000"
     # Invitation lifetime (single-use, revocable, expiring).
