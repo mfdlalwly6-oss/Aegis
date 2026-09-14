@@ -53,9 +53,16 @@ class UpdatePolicy(BaseModel):
     note: str | None = None  # free-text rationale, stored on the policy version
 
 
-class MerchantLogin(BaseModel):
-    api_key: str
-    api_secret: str
+class OwnerPasswordConfirm(BaseModel):
+    """Step-up re-authentication for sensitive institution-owner actions
+    (reveal / rotate integration credentials). Verified server-side against the
+    owner's salted password hash."""
+    password: str = Field(min_length=1, max_length=200)
+
+
+class ChangeOwnerPassword(BaseModel):
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=8, max_length=200)
 
 
 class CreateInvestigator(BaseModel):
@@ -728,48 +735,11 @@ def list_all_investigators(owner=Depends(require_owner), registry=Depends(get_re
 
 
 # ═══════════════════ MERCHANT / INSTITUTION ENDPOINTS ═══════════════════
-
-
-@router.post("/admin/merchant/login")
-def merchant_login(body: MerchantLogin, request: Request, registry=Depends(get_registry)):
-    tenant = registry.tenants.authenticate_merchant(body.api_key, body.api_secret)
-    if not tenant:
-        registry.audit.log(
-            None,
-            body.api_key[:12],
-            "authentication.failure",
-            "merchant_login",
-            None,
-            getattr(request.state, "request_id", None),
-            {},
-        )
-        raise HTTPException(401, "invalid_credentials")
-    token = issue_jwt(
-        tenant["tenant_id"],
-        "merchant",
-        settings.MERCHANT_JWT_TTL_SEC,
-        {"tenant_id": tenant["tenant_id"], "tenant_name": tenant["name"]},
-    )
-    registry.audit.log(
-        tenant["tenant_id"],
-        tenant["name"],
-        "authentication.success",
-        "merchant_login",
-        tenant["tenant_id"],
-        getattr(request.state, "request_id", None),
-        {},
-    )
-    return {
-        "merchant_token": token,
-        "token_type": "Bearer",
-        "tenant": {
-            "tenant_id": tenant["tenant_id"],
-            "name": tenant["name"],
-            "type": tenant["type"],
-            "country": tenant["country"],
-            "plan": tenant["plan"],
-        },
-    }
+# NOTE: the legacy human "API key + secret" login (POST /admin/merchant/login)
+# was REMOVED. The ONLY human sign-in to the Merchant Portal is owner
+# email+password at POST /auth/institution/login. API Key / HMAC Secret remain
+# strictly as INTEGRATION credentials (webhook signature verification) and are
+# managed under 🔌 إعدادات الربط below — they never authenticate a person.
 
 
 @router.get("/admin/merchant/me")
@@ -864,21 +834,40 @@ def _top_reasons(registry, tenant_id: str, limit: int = 8) -> list[dict]:
     return [{"reason": k, "count": v} for k, v in counts.most_common(limit)]
 
 
+def _mask(secret: str | None) -> str:
+    """Never reveal a stored credential in a default GET — mask it."""
+    return "••••••••••••••••" if secret else ""
+
+
+def _verify_owner_password(registry, merchant: dict, password: str) -> None:
+    """Step-up check: the JWT subject (user_id) must exist and the supplied
+    password must verify against its salted hash. 401 otherwise."""
+    from app.repositories.user_repo import _verify_pw  # salted+legacy verify
+    user = registry.user_repo.get(merchant.get("sub", ""))
+    if not user or user.get("status") != "active":
+        raise HTTPException(401, "reauth_required")
+    if not _verify_pw(password, user):
+        raise HTTPException(401, "invalid_credentials")
+
+
 @router.get("/admin/merchant/integration")
 def merchant_integration(merchant=Depends(require_merchant), registry=Depends(get_registry)):
+    """Integration settings — secrets are MASKED by default. Use
+    POST /admin/merchant/integration/reveal (password step-up) to view them."""
     tenant = registry.tenants.get(merchant["tenant_id"], reveal=True)
     endpoint = f"{settings.PUBLIC_URL}/api/v1/wallet/webhook"
     return {
         "tenant_id": tenant["tenant_id"],
         "endpoint": endpoint,
-        "api_key": tenant["api_key"],
-        "hmac_secret": tenant["hmac_secret"],
+        "api_key": _mask(tenant["api_key"]),
+        "hmac_secret": _mask(tenant["hmac_secret"]),
+        "credentials_masked": True,
         "headers": {
-            "X-API-Key": tenant["api_key"],
+            "X-API-Key": "<API_KEY>",
             "X-Wallet-Signature": "HMAC_SHA256(body, hmac_secret)",
         },
         "curl": f"curl -X POST '{endpoint}' -H 'Content-Type: application/json' "
-        f"-H 'X-API-Key: {tenant['api_key']}' "
+        f"-H 'X-API-Key: <API_KEY>' "
         f"-H 'X-Wallet-Signature: <signature>' "
         f'-d \'{{"transaction":{{"amount":100,"sender_account_id":"acct_1","beneficiary_account_id":"acct_2"}}}}\'',
         "python": "import hmac,hashlib; sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()",
@@ -890,7 +879,7 @@ def merchant_integration(merchant=Depends(require_merchant), registry=Depends(ge
                 f"SIG=$(printf '%s' \"$BODY\" | openssl dgst -sha256 -hmac \"<HMAC_SECRET>\" | awk '{{print $2}}')\n"
                 f"curl -X POST '{endpoint}' \\\n"
                 "  -H 'Content-Type: application/json' \\\n"
-                f"  -H 'X-API-Key: {tenant['api_key']}' \\\n"
+                "  -H 'X-API-Key: <API_KEY>' \\\n"
                 '  -H "x-wallet-signature: $SIG" \\\n'
                 '  -d "$BODY"'
             ),
@@ -903,7 +892,7 @@ def merchant_integration(merchant=Depends(require_merchant), registry=Depends(ge
                 f"const r = await fetch('{endpoint}', {{\n"
                 "  method: 'POST',\n"
                 "  headers: { 'Content-Type': 'application/json',\n"
-                f"    'X-API-Key': '{tenant['api_key']}', 'x-wallet-signature': sig }},\n"
+                "    'X-API-Key': '<API_KEY>', 'x-wallet-signature': sig },\n"
                 "  body\n"
                 "});\n"
                 "const { decision, risk_score, reasoning_ar } = await r.json();"
@@ -914,12 +903,72 @@ def merchant_integration(merchant=Depends(require_merchant), registry=Depends(ge
                 '  "sender_account_id": "acct_1", "beneficiary_account_id": "acct_2"}}, separators=(",", ":"))\n'
                 "sig = hmac.new(b'<HMAC_SECRET>', body.encode(), hashlib.sha256).hexdigest()\n"
                 f"r = requests.post('{endpoint}', data=body, headers={{\n"
-                f"  'Content-Type': 'application/json', 'X-API-Key': '{tenant['api_key']}',\n"
+                "  'Content-Type': 'application/json', 'X-API-Key': '<API_KEY>',\n"
                 "  'x-wallet-signature': sig})\n"
                 "print(r.json())"
             ),
         },
     }
+
+
+@router.post("/admin/merchant/integration/reveal")
+def merchant_reveal_credentials(
+    body: OwnerPasswordConfirm, request: Request,
+    merchant=Depends(require_merchant), registry=Depends(get_registry),
+):
+    """Step-up: reveal this tenant's integration credentials after verifying
+    the owner's password server-side. Audit logs the VIEW event only — never
+    the credential values."""
+    _verify_owner_password(registry, merchant, body.password)
+    tenant = registry.tenants.get(merchant["tenant_id"], reveal=True)
+    registry.audit.log(
+        merchant["tenant_id"], merchant.get("sub", ""),
+        "owner.integration_credentials.viewed", "tenant", merchant["tenant_id"],
+        getattr(request.state, "request_id", None), {},
+    )
+    return {"tenant_id": tenant["tenant_id"], "api_key": tenant["api_key"],
+            "hmac_secret": tenant["hmac_secret"], "credentials_masked": False}
+
+
+@router.post("/admin/merchant/integration/rotate")
+def merchant_rotate_credentials(
+    body: OwnerPasswordConfirm, request: Request,
+    merchant=Depends(require_merchant), registry=Depends(get_registry),
+):
+    """Step-up: rotate BOTH the API key and HMAC secret for this tenant after
+    verifying the owner's password. The old pair stops working immediately
+    (single authoritative UPDATE). Returns the new pair ONCE for the owner to
+    copy. Audit logs the ROTATE event only — never the new values."""
+    _verify_owner_password(registry, merchant, body.password)
+    tenant = registry.tenants.rotate_integration_credentials(merchant["tenant_id"])
+    if not tenant:
+        raise HTTPException(404, "tenant_not_found")
+    registry.audit.log(
+        merchant["tenant_id"], merchant.get("sub", ""),
+        "owner.integration_credentials.rotated", "tenant", merchant["tenant_id"],
+        getattr(request.state, "request_id", None), {},
+    )
+    return {"tenant_id": tenant["tenant_id"], "api_key": tenant["api_key"],
+            "hmac_secret": tenant["hmac_secret"], "rotated": True}
+
+
+@router.post("/admin/merchant/change-password")
+def merchant_change_password(
+    body: ChangeOwnerPassword, request: Request,
+    merchant=Depends(require_merchant), registry=Depends(get_registry),
+):
+    """Change the institution owner's password. Verifies the CURRENT password
+    server-side, sets a fresh per-user salt + hash, and bumps
+    tokens_valid_after so every OTHER session is revoked (this one stays alive
+    until its natural expiry — the standard post-rotation behavior)."""
+    _verify_owner_password(registry, merchant, body.current_password)
+    registry.user_repo.set_password(merchant["sub"], body.new_password)
+    registry.audit.log(
+        merchant["tenant_id"], merchant.get("sub", ""),
+        "owner.password_changed", "user", merchant["sub"],
+        getattr(request.state, "request_id", None), {},
+    )
+    return {"changed": True, "message": "تم تغيير كلمة المرور. سجّل الدخول مجددًا على أجهزتك الأخرى."}
 
 
 @router.get("/admin/merchant/connection-status")

@@ -5,7 +5,6 @@ Secrets (api_key / hmac_secret) are only returned when reveal=True.
 
 from __future__ import annotations
 
-import hmac as hmac_mod
 import json
 import secrets
 from datetime import UTC, datetime
@@ -188,17 +187,26 @@ class TenantRepository:
         )
         return cur.rowcount > 0
 
-    def authenticate_merchant(self, api_key: str, api_secret: str) -> dict | None:
-        row = self.db.query_one(
-            "SELECT * FROM tenants WHERE api_key=? AND deleted_at IS NULL", (api_key,)
+    def rotate_integration_credentials(self, tenant_id: str) -> dict | None:
+        """Rotate BOTH the API key and the HMAC secret atomically. The old pair
+        stops working immediately (single authoritative UPDATE); the returned
+        row reveals the new plaintext pair ONCE so the owner can copy it.
+
+        Used by the institution owner from 🔌 إعدادات الربط after a password
+        step-up. (The platform-owner rotate_secret() above rotates only the
+        HMAC secret; this owner-facing variant rotates the full pair so there
+        is no state where UI shows new-but-backend-accepts-old.)
+        """
+        new_api_key = "ak_" + secrets.token_hex(16)
+        new_secret = encrypt_secret(secrets.token_urlsafe(32))
+        cur = self.db.execute(
+            "UPDATE tenants SET api_key=?, hmac_secret=?, secret_rotated_at=? "
+            "WHERE tenant_id=? AND deleted_at IS NULL",
+            (new_api_key, new_secret, _utcnow(), tenant_id),
         )
-        if not row:
+        if cur.rowcount == 0:
             return None
-        if row.get("status") != "active":
-            return None
-        if not hmac_mod.compare_digest(decrypt_secret(row["hmac_secret"]) or "", api_secret):
-            return None
-        return self._sanitize(row, True)
+        return self.get(tenant_id, reveal=True)
 
     @staticmethod
     def _sanitize(row: dict, reveal: bool) -> dict:
