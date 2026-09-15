@@ -82,7 +82,10 @@ def test_aml_sanctions_hit(client):
     wl = WatchlistRepository(client.app.state.registry.db)
     aml = AMLService(wl)
     tx = _tx(beneficiary_country="IR")
-    sig = asyncio.get_event_loop().run_until_complete(
+    # Test-only fix: asyncio.get_event_loop() is deprecated and raises
+    # RuntimeError when a prior pytest-asyncio test closed the session loop.
+    # asyncio.run() creates a fresh loop per call — order-independent.
+    sig = asyncio.run(
         aml.screen(tx, {"velocity": {}, "amount_flags": {}, "device": {}, "beneficiary": {}})
     )
     assert sig.sanctions_hit is True
