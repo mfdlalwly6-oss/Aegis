@@ -396,13 +396,17 @@ def activate_tenant(
 def rotate_secret(
     tenant_id: str, request: Request, owner=Depends(require_owner), registry=Depends(get_registry)
 ):
-    tenant = registry.tenants.rotate_secret(tenant_id)
+    """Platform Owner ONLY — rotate BOTH the tenant's API key and HMAC secret
+    atomically (old pair invalid immediately). Institution owners have NO
+    rotation capability: the owner-facing /integration/rotate endpoint is
+    removed. Audit logs the rotate event only — never credential values."""
+    tenant = registry.tenants.rotate_integration_credentials(tenant_id)
     if not tenant:
         raise HTTPException(404, "tenant_not_found")
     registry.audit.log(
         tenant_id,
         "owner",
-        "tenant.secret_rotated",
+        "owner.integration_credentials.rotated",
         "tenant",
         tenant_id,
         getattr(request.state, "request_id", None),
@@ -930,26 +934,9 @@ def merchant_reveal_credentials(
             "hmac_secret": tenant["hmac_secret"], "credentials_masked": False}
 
 
-@router.post("/admin/merchant/integration/rotate")
-def merchant_rotate_credentials(
-    body: OwnerPasswordConfirm, request: Request,
-    merchant=Depends(require_merchant), registry=Depends(get_registry),
-):
-    """Step-up: rotate BOTH the API key and HMAC secret for this tenant after
-    verifying the owner's password. The old pair stops working immediately
-    (single authoritative UPDATE). Returns the new pair ONCE for the owner to
-    copy. Audit logs the ROTATE event only — never the new values."""
-    _verify_owner_password(registry, merchant, body.password)
-    tenant = registry.tenants.rotate_integration_credentials(merchant["tenant_id"])
-    if not tenant:
-        raise HTTPException(404, "tenant_not_found")
-    registry.audit.log(
-        merchant["tenant_id"], merchant.get("sub", ""),
-        "owner.integration_credentials.rotated", "tenant", merchant["tenant_id"],
-        getattr(request.state, "request_id", None), {},
-    )
-    return {"tenant_id": tenant["tenant_id"], "api_key": tenant["api_key"],
-            "hmac_secret": tenant["hmac_secret"], "rotated": True}
+# NOTE: institution-owner credential rotation was REMOVED — rotation is a
+# Platform Owner capability only (see POST /admin/tenants/{id}/rotate-secret).
+# An institution owner calling any rotation path gets 404/403 and no change.
 
 
 @router.post("/admin/merchant/change-password")

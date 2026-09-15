@@ -76,6 +76,19 @@ async function api(path, opts = {}) {
   if (!r.ok) throw new Error(d.detail || d.message || ("خطأ " + r.status));
   return d;
 }
+/* apiSoft — like api() but does NOT force logout/redirect on 401. Used for
+   step-up / sensitive actions (change-password, reveal credentials) where a
+   401 means "wrong password", NOT "session expired" — the user must stay on
+   the page and see the error. */
+async function apiSoft(path, opts = {}) {
+  const h = { "Content-Type": "application/json", ...(opts.headers || {}) };
+  if (state.token) h["Authorization"] = "Bearer " + state.token;
+  const r = await fetch(API + path, { ...opts, headers: h, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const txt = await r.text(); let d = {};
+  try { d = txt ? JSON.parse(txt) : {}; } catch { d = { raw: txt }; }
+  if (!r.ok) throw new Error(d.detail === "invalid_credentials" ? "كلمة المرور الحالية غير صحيحة" : (d.detail || d.message || ("خطأ " + r.status)));
+  return d;
+}
 async function apiRoot(path, opts = {}) {
   const h = { "Content-Type": "application/json", ...(opts.headers || {}) };
   if (state.token) h["Authorization"] = "Bearer " + state.token;
@@ -330,9 +343,10 @@ function renderIntegration() {
   function renderCreds(revealed) {
     const ak = revealed ? revealed.api_key : (g.api_key || "•".repeat(28));
     const sk = revealed ? revealed.hmac_secret : (g.hmac_secret || "•".repeat(28));
+    // NOTE: the webhook 🌐 Endpoint is intentionally NOT shown to the
+    // institution owner — integration connectivity is a platform concern.
     box.replaceChildren(
       credRow("🆔 Tenant ID", g.tenant_id),
-      credRow("🌐 Endpoint", g.endpoint),
       credRow("🔑 API Key", ak, true),
       credRow("🔐 HMAC Secret", sk, true));
   }
@@ -344,32 +358,23 @@ function renderIntegration() {
     "لإظهار بيانات الربط الحساسة، أدخل كلمة مرور حساب مالك المؤسسة.",
     "تأكيد وإظهار",
     async (password) => {
-      const r = await api("/integration/reveal", { method: "POST", body: { password } });
+      const r = await apiSoft("/integration/reveal", { method: "POST", body: { password } });
       renderCreds(r);
       toast("أُظهرت بيانات الربط — لا تشاركها مع أي طرف", "success");
     });
 
-  const rotateBtn = el("button", { class: "btn danger", style: "margin-top:12px" }, "🔄 تدوير المفاتيح");
-  rotateBtn.onclick = () => _pwModal(
-    "🔄 تدوير مفاتيح الربط",
-    "⚠️ تحذير: سيتم إبطال بيانات الربط الحالية ولن تعمل المفاتيح القديمة بعد الآن. يجب تحديث نظام التكامل لدى مؤسستك بالبيانات الجديدة. أدخل كلمة مرور مالك المؤسسة للتأكيد.",
-    "تأكيد التدوير",
-    async (password) => {
-      const r = await api("/integration/rotate", { method: "POST", body: { password } });
-      state.integration.api_key = "•".repeat(28); state.integration.hmac_secret = "•".repeat(28);
-      renderCreds(r);  // the new pair is shown ONCE so the owner can copy it
-      toast("✅ تم تدوير مفاتيح الربط — المفاتيح القديمة أُبطلت", "success");
-    });
-
+  // NOTE: credential rotation is a Platform Owner capability only — there is
+  // NO rotate control in the institution owner's portal (and no owner-facing
+  // rotation endpoint exists server-side anymore).
   return el("div", {},
     el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:8px" }, "🔌 إعدادات الربط"),
     el("p", { style: "color:var(--muted);margin-bottom:20px" }, "إعدادات الأمان والربط — بيانات ربط مؤسستك، احفظها في مكان آمن"),
     el("div", { class: "card" },
       el("h3", {}, "🔑 بيانات الربط (Integration Credentials)"),
       box,
-      el("div", { style: "display:flex;gap:10px;flex-wrap:wrap" }, revealBtn, rotateBtn),
+      el("div", { style: "display:flex;gap:10px;flex-wrap:wrap" }, revealBtn),
       el("div", { style: "background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);padding:12px;border-radius:10px;margin-top:14px;font-size:12px;color:#FCD34D" },
-        "⚠️ بيانات الربط مُخفاة افتراضيًا وتُعرض فقط بعد تأكيد كلمة المرور. تدوير المفاتيح يُبطل القديمة فورًا."),
+        "⚠️ بيانات الربط مُخفاة افتراضيًا وتُعرض فقط بعد تأكيد كلمة المرور. لتدوير المفاتيح تواصل مع مدير المنظومة."),
       el("div", { style: "font-size:12px;color:var(--muted);margin-top:10px" },
         "ℹ️ هذه البيانات للتكامل البرمجي (webhook/API) فقط — وليست طريقة لتسجيل الدخول إلى هذه البوابة.")),
     el("div", { class: "card" }, el("h3", { style: "margin-bottom:12px" }, "📖 كود التكامل الجاهز"), renderCodeTabs(g.code_samples)));
@@ -388,7 +393,7 @@ function renderSecurity() {
     if (nw.value !== nw2.value) { err.textContent = "تأكيد كلمة المرور غير مطابق"; return; }
     btn.disabled = true;
     try {
-      const r = await api("/change-password", { method: "POST", body: { current_password: cur.value, new_password: nw.value } });
+      const r = await apiSoft("/change-password", { method: "POST", body: { current_password: cur.value, new_password: nw.value } });
       toast(r.message || "تم تغيير كلمة المرور", "success");
       cur.value = nw.value = nw2.value = "";
     } catch (e) { err.textContent = e.message; }

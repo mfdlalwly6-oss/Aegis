@@ -149,21 +149,40 @@ def test_integration_reveal_requires_password(client):
     assert body["hmac_secret"] == tenant["hmac_secret"]
 
 
-def test_integration_rotate_invalidates_old_pair(client):
+def test_institution_owner_cannot_rotate(client):
+    """Rotation is a Platform Owner capability only. The owner-facing rotation
+    endpoint is removed, so an institution owner gets 404 and NO change."""
     tenant, email = _mk_tenant_with_owner(client)
     lg = _login(client, email)
     h = {"Authorization": f"Bearer {lg.json()['access_token']}"}
-    # wrong password -> rejected
-    bad = client.post(f"{BASE}/admin/merchant/integration/rotate", json={"password": "nope"}, headers=h)
-    assert bad.status_code == 401
-    # correct password -> rotated; new pair differs from old
-    ok = client.post(f"{BASE}/admin/merchant/integration/rotate",
-                     json={"password": "OwnerPass!2026"}, headers=h)
-    assert ok.status_code == 200, ok.text
-    body = ok.json()
+    r = client.post(f"{BASE}/admin/merchant/integration/rotate",
+                    json={"password": "OwnerPass!2026"}, headers=h)
+    assert r.status_code in (403, 404), f"owner rotation must be denied, got {r.status_code}"
+    # api_key unchanged after the denied attempt
+    from app.main import app
+    row = app.state.registry.db.query_one(
+        "SELECT api_key FROM tenants WHERE tenant_id=?", (tenant["tenant_id"],))
+    assert row["api_key"] == tenant["api_key"]
+
+
+def test_platform_owner_rotates_and_invalidates_old_pair(client):
+    """Platform Owner rotates the full pair atomically; old credentials die,
+    new ones are active, and the audit event carries no secrets."""
+    tenant, email = _mk_tenant_with_owner(client)
+    r = client.post(f"{BASE}/admin/tenants/{tenant['tenant_id']}/rotate-secret",
+                    json={}, headers=OWNER_HEADERS)
+    assert r.status_code == 200, r.text
+    body = r.json()
     assert body["api_key"] != tenant["api_key"]
     assert body["hmac_secret"] != tenant["hmac_secret"]
     assert body["api_key"].startswith("ak_")
+    # audit recorded the rotation without leaking the secret value
+    aud = client.get(f"{BASE}/admin/audit?limit=100", headers=OWNER_HEADERS)
+    events = aud.json() if isinstance(aud.json(), list) else aud.json().get("events", [])
+    types = {e.get("event_type") for e in events}
+    assert "owner.integration_credentials.rotated" in types
+    blob = str(events)
+    assert body["hmac_secret"] not in blob and tenant["hmac_secret"] not in blob
 
 
 def test_change_owner_password_flow(client):
