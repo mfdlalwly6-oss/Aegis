@@ -146,8 +146,8 @@ async def ready(request: Request):
     return {"status": "ready" if ok else "degraded", **checks}
 
 
-def _sse_gen(request: Request, registry):
-    queue = registry.events.subscribe()
+def _sse_gen(request: Request, registry, tenant_id: str | None = None):
+    queue = registry.events.subscribe(tenant_id)  # A2: tenant-scoped SSE
 
     async def event_gen():
         try:
@@ -167,13 +167,13 @@ def _sse_gen(request: Request, registry):
 
 @app.get("/api/v1/admin/stream")
 async def stream(request: Request, owner: str = Depends(require_owner)):
-    """SSE stream of live decisions — owner only."""
+    """SSE stream of live decisions — owner only (platform scope: all tenants)."""
     registry = request.app.state.registry
-    return StreamingResponse(_sse_gen(request, registry), media_type="text/event-stream")
+    return StreamingResponse(_sse_gen(request, registry, tenant_id=None), media_type="text/event-stream")
 
 
 @app.get("/api/v1/investigator/stream")
 async def investigator_stream(request: Request, inv: dict = Depends(require_investigator)):
     """SSE stream of live risk events — authenticated, tenant-scoped investigators only."""
     registry = request.app.state.registry
-    return StreamingResponse(_sse_gen(request, registry), media_type="text/event-stream")
+    return StreamingResponse(_sse_gen(request, registry, tenant_id=inv["tenant_id"]), media_type="text/event-stream")

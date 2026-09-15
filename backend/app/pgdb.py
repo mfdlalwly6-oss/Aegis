@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import contextvars
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -31,6 +32,15 @@ import psycopg
 from psycopg.rows import dict_row
 
 from app.core.config import settings
+
+# ── tenant context (A7 fix) ─────────────────────────────────────────────
+# Request-scoped tenant id carried in a ContextVar so it follows the
+# coroutine/async task, NOT the shared DB connection. This kills the
+# connection-pool tenant-bleed that a thread-local/connection-pinned GUC
+# caused when a reused connection retained a previous request's tenant.
+CURRENT_TENANT: contextvars.ContextVar[str] = contextvars.ContextVar(
+    'aegis_tenant', default='platform'
+)
 
 
 def _find_versions_dir() -> Path:
@@ -80,8 +90,17 @@ class PGDatabase:
             # Internal services (bootstrap, AML, graph) operate cross-tenant by design;
             # tenant-facing entry points (deps.require_*, wallet webhook) call
             # set_tenant(tid) explicitly and are then RLS-isolated for the request.
-            conn.execute("SELECT set_config('app.tenant_id', 'platform', false)")
+            conn.execute("SELECT set_config('app.tenant_id', %s, false)",
+                         (CURRENT_TENANT.get(),))
             self._local.conn = conn
+        # A7: re-pin on EVERY acquisition from the request-scoped ContextVar,
+        # so a pooled/reused connection can never serve the previous request's
+        # tenant context.
+        try:
+            conn.execute("SELECT set_config('app.tenant_id', %s, false)",
+                         (CURRENT_TENANT.get(),))
+        except Exception:
+            pass
         return conn
 
     @staticmethod
@@ -177,10 +196,13 @@ class PGDatabase:
         return applied
 
     def set_tenant(self, tenant_id: str) -> None:
-        """Set the RLS tenant context (app.tenant_id GUC) for this thread's connection.
-        'platform' = trusted platform scope (full access); any tenant id = isolated scope."""
+        """Set the RLS tenant scope for the CURRENT request context.
+        A7: writes the request-scoped ContextVar AND pins the live connection.
+        'platform' = trusted platform scope; any tenant id = isolated scope."""
+        tid = tenant_id or "platform"
+        CURRENT_TENANT.set(tid)
         conn = self._conn()
-        conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tenant_id or "platform",))
+        conn.execute("SELECT set_config('app.tenant_id', %s, false)", (tid,))
 
     def close(self) -> None:
         conn = getattr(self._local, "conn", None) if hasattr(self, "_local") else None

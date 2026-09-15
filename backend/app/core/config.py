@@ -6,7 +6,7 @@ import os
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +44,25 @@ class Settings(BaseSettings):
         min_length=32,
     )
     OWNER_TOKEN: str = "aegis-dev-owner-token"
+
+    @model_validator(mode="after")
+    def _reject_default_secrets_outside_dev(self):
+        # A8 fix: the development fallbacks above must be IMPOSSIBLE outside
+        # a dev environment. A staging/production boot with a well-known
+        # SECRET_KEY (JWT forgery) or OWNER_TOKEN (platform takeover) now
+        # refuses to start instead of failing open.
+        if self.ENV in ("staging", "production"):
+            insecure = []
+            if self.SECRET_KEY.startswith("aegis-dev-only-secret-key"):
+                insecure.append("SECRET_KEY")
+            if self.OWNER_TOKEN == "aegis-dev-owner-token":
+                insecure.append("OWNER_TOKEN")
+            if insecure:
+                raise RuntimeError(
+                    f"refusing to start: ENV={self.ENV} with default/insecure "
+                    f"{', '.join(insecure)} - set real values via AEGIS_* env vars"
+                )
+        return self
     DATA_DIR: str = "/tmp/aegis-data"
     DB_PATH: str = ""
     DB_DRIVER: str = "postgres"  # PostgreSQL only — no SQLite driver exists

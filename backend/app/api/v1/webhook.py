@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.api.deps import get_registry
+from app.api.deps import get_registry, require_investigator
 from app.core.config import settings
 from app.models.schemas import BehaviorSignals, DeviceContext, GeoPoint, Transaction
 from app.security import verify_signature
@@ -319,11 +319,17 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
 
 @router.get("/decisions/recent")
 async def recent_decisions(
-    limit: int = 20, request: Request = None, registry=Depends(get_registry)
+    limit: int = 20,
+    request: Request = None,
+    inv=Depends(require_investigator),
+    registry=Depends(get_registry),
 ):
-    """Public read of recent decisions — intentionally limited fields.
-    Owner sees full data via /admin/decisions/recent. Merchants via /admin/merchant/decisions.
+    """A1 fix — was UNAUTHENTICATED and cross-tenant. Now requires an
+    investigator JWT and returns ONLY the caller's tenant's decisions.
+    Owner sees full data via /admin/decisions/recent. Merchants via
+    /admin/merchant/decisions.
     """
+    registry.db.set_tenant(inv["tenant_id"])
     rows = registry.decisions.recent(limit=min(limit, 100))
     return [
         {

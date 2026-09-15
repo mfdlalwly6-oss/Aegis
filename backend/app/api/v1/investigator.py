@@ -82,7 +82,7 @@ def _mark_known_fraud_senders(registry, tenant_id: str, tx_ids) -> int:
     for tx_id in tx_ids or []:
         tx = registry.transactions.get(tx_id, tenant_id=tenant_id)
         if tx and tx.get("sender_account_id"):
-            registry.graph_engine.mark_fraud(tx["sender_account_id"])
+            registry.graph_engine.mark_fraud(tx["sender_account_id"], tenant_id=tenant_id)
             marked += 1
     return marked
 
@@ -371,7 +371,17 @@ def alert_status(
 ):
     if body.status not in ALERT_STATUSES:
         raise HTTPException(400, f"invalid_status: allowed {sorted(ALERT_STATUSES)}")
-    _get_alert(registry, alert_id, inv["tenant_id"])
+    alert = _get_alert(registry, alert_id, inv["tenant_id"])
+    # A4 fix: applying a terminal resolved_* state via the generic status
+    # endpoint IS a resolution. It must pass the same four-eyes gate as
+    # POST /alerts/{id}/resolve — a single investigator can no longer
+    # self-approve high/critical alerts through this side door.
+    if body.status in ALERT_RESOLUTIONS and (alert or {}).get("severity") in FOUR_EYES_SEVERITIES:
+        raise HTTPException(
+            409,
+            "four_eyes_required: resolving a high/critical alert requires a "
+            "second investigator's approval — use POST /alerts/{alert_id}/resolve",
+        )
     alert = registry.alerts.update_status(alert_id, body.status, assignee=body.assignee)
     registry.audit.log(
         inv["tenant_id"],
@@ -803,9 +813,9 @@ def accounts(
 def graph_account(
     account_id: str, inv=Depends(require_investigator), registry=Depends(get_registry)
 ):
-    return registry.graph_engine.account_context(account_id)
+    return registry.graph_engine.account_context(account_id, tenant_id=inv["tenant_id"])
 
 
 @router.get("/graph/insights")
 def graph_insights(inv=Depends(require_investigator), registry=Depends(get_registry)):
-    return registry.graph_engine.insights()
+    return registry.graph_engine.insights(tenant_id=inv["tenant_id"])
