@@ -64,10 +64,16 @@ class Settings(BaseSettings):
         # DATABASE_URL carrying credentials and reject the known dev passwords.
         if self.ENV == "production":
             db = self.DATABASE_URL or ""
-            if not db or "@" not in db or any(p in db for p in _DEV_DB_PASSWORDS):
+            # Require an explicit password: user:password@host. The authority
+            # part is the substring between "://" and the last "@"; it must
+            # contain a non-empty password after "user:".
+            authority = db.split("://", 1)[-1].rsplit("@", 1)[0] if "@" in db else ""
+            has_password = ":" in authority and bool(authority.split(":", 1)[1])
+            if (not db) or (not has_password) or any(p in db for p in _DEV_DB_PASSWORDS):
                 raise RuntimeError(
                     "refusing to start: ENV=production requires a real "
-                    "AEGIS_DATABASE_URL (no empty/embedded/default dev credentials)"
+                    "AEGIS_DATABASE_URL with an explicit password "
+                    "(postgresql://user:password@host/db; no empty/default/dev credentials)"
                 )
             if self.REQUIRE_HTTPS_PROXY and not self.TRUSTED_PROXIES:
                 raise RuntimeError(

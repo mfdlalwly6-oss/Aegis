@@ -115,3 +115,42 @@ class TestArenaRegression:
         r = client.post("/api/v1/wallet/webhook", content=b"{}",
                         headers={"x-api-key": "ak_x", "x-signature": "bad"})
         assert r.status_code == 401
+
+
+class TestDatabaseUrlValidator:
+    """Production DATABASE_URL must carry an explicit user:password@ credentials."""
+
+    def _s(self, url):
+        for k in ("AEGIS_ENV","AEGIS_SECRET_KEY","AEGIS_OWNER_TOKEN","AEGIS_DATABASE_URL"):
+            os.environ.pop(k, None)
+        os.environ.update({
+            "AEGIS_ENV": "production",
+            "AEGIS_SECRET_KEY": "R" * 40,
+            "AEGIS_OWNER_TOKEN": "real-owner-token-value-here",
+            "AEGIS_DATABASE_URL": url,
+        })
+        from app.core.config import Settings
+        return Settings
+
+    def test_rejects_url_without_password(self):
+        # postgresql://u@host/db — no password segment -> reject
+        with pytest.raises(RuntimeError, match="AEGIS_DATABASE_URL"):
+            self._s("postgresql://u@h:5432/db")(ENV="production", _env_file=None)
+
+    def test_rejects_url_with_empty_password(self):
+        # postgresql://u:@host/db — empty password -> reject
+        with pytest.raises(RuntimeError, match="AEGIS_DATABASE_URL"):
+            self._s("postgresql://u:@h:5432/db")(ENV="production", _env_file=None)
+
+    def test_rejects_dev_password(self):
+        with pytest.raises(RuntimeError, match="AEGIS_DATABASE_URL"):
+            self._s("postgresql://aegis_app:AegisApp2026Dev@h:5432/db")(ENV="production", _env_file=None)
+
+    def test_accepts_valid_url_with_password(self):
+        s = self._s("postgresql://aegis_app:RealDbPass456@h:5432/db")(ENV="production", _env_file=None)
+        assert "RealDbPass456" in s.DATABASE_URL
+
+    def test_accepts_valid_postgres_scheme_variant(self):
+        # postgres:// (no "-ql") with creds must also pass
+        s = self._s("postgres://u:Str0ng!Pass@h:5432/db")(ENV="production", _env_file=None)
+        assert "Str0ng!Pass" in s.DATABASE_URL
