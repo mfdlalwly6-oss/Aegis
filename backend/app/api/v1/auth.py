@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import get_registry
 from app.core.config import settings
-from app.security import issue_jwt
+from app.security import issue_jwt, login_throttle
 
 router = APIRouter()
 
@@ -46,9 +46,13 @@ async def login(body: LoginBody, registry=Depends(get_registry)) -> TokenPair:
     # Pre-auth runs in platform scope: reset pooled connection GUC before any
     # DB work (same stale-GUC hazard documented in webhook.py).
     registry.db.set_tenant("platform")
+    if not login_throttle.allow(body.email):
+        raise HTTPException(429, "too_many_attempts")
     user = registry.user_repo.authenticate_global(body.email, body.password)
     if not user or user.get("role") != "admin":
+        login_throttle.record_failure(body.email)
         raise HTTPException(401, "invalid_credentials")
+    login_throttle.reset(body.email)
     return TokenPair(access_token=_issue(user["email"], "admin", settings.JWT_ACCESS_TTL_SEC))
 
 
@@ -58,8 +62,11 @@ def institution_login(body: LoginBody, request: "Request", registry=Depends(get_
     # Pre-auth runs in platform scope: reset pooled connection GUC before the
     # global user lookup + audit insert (audit_log RLS is platform-scoped).
     registry.db.set_tenant("platform")
+    if not login_throttle.allow(body.email):
+        raise HTTPException(429, "too_many_attempts")
     user = registry.user_repo.authenticate_global(body.email, body.password)
     if not user:
+        login_throttle.record_failure(body.email)
         registry.audit.log(
             None,
             body.email[:12],
@@ -85,7 +92,9 @@ def institution_login(body: LoginBody, request: "Request", registry=Depends(get_
             getattr(request.state, "request_id", None),
             {"reason": "tenant_not_active"},
         )
+        login_throttle.record_failure(body.email)
         raise HTTPException(403, "tenant_not_active")
+    login_throttle.reset(body.email)
     token = issue_jwt(
         user["user_id"],
         user["role"],
@@ -113,3 +122,46 @@ def institution_login(body: LoginBody, request: "Request", registry=Depends(get_
             "tenant_name": tenant["name"],
         },
     }
+
+
+class _Email(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+
+
+class _ResetBody(BaseModel):
+    token: str = Field(min_length=8, max_length=200)
+    new_password: str = Field(min_length=8, max_length=200)
+
+
+@router.post("/institution/forgot-password")
+def institution_forgot_password(body: _Email, request: Request, registry=Depends(get_registry)):
+    """Request a password-reset link. Always 200 (no account enumeration)."""
+    registry.db.set_tenant("platform")
+    user = getattr(registry.user_repo, "get_by_email_global", lambda _e: None)(body.email)
+    pr = getattr(registry, "password_resets", None)
+    if user is not None and pr is not None:
+        try:
+            pr.issue(user["user_id"], user["tenant_id"])
+        except Exception:
+            pass
+    registry.audit.log(None, body.email[:12], "authentication.password_reset_requested",
+                       "institution_login", None, getattr(request.state, "request_id", None), {})
+    return {"ok": True}
+
+
+@router.post("/institution/reset-password")
+def institution_reset_password(body: _ResetBody, request: Request, registry=Depends(get_registry)):
+    """Consume a reset token and set a new password."""
+    registry.db.set_tenant("platform")
+    ok = False
+    pr = getattr(registry, "password_resets", None)
+    if pr is not None:
+        try:
+            ok = bool(pr.consume(body.token, body.new_password))
+        except Exception:
+            ok = False
+    if not ok:
+        raise HTTPException(400, "invalid_or_expired_token")
+    registry.audit.log(None, "password_reset", "authentication.password_reset",
+                       "institution_login", None, getattr(request.state, "request_id", None), {})
+    return {"ok": True}

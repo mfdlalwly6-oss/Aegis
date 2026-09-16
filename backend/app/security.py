@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import time
+from collections import defaultdict, deque
 from datetime import UTC, datetime, timedelta
 
 from jose import jwt
@@ -58,3 +60,46 @@ def decode_jwt(token: str) -> dict:
 
 def compare_owner_token(token: str) -> bool:
     return hmac.compare_digest(token, settings.OWNER_TOKEN)
+
+
+class FailedLoginThrottle:
+    """Sliding-window tracker of FAILED logins per account identity.
+
+    Resists distributed brute-force / credential-stuffing against a single
+    account (many source IPs, one email) — something a per-IP limiter cannot
+    catch. It counts only failures, uses a short sliding window, and resets on
+    success, so a legitimate user who mistypes a password is never locked out
+    permanently and the window simply slides forward.
+    """
+
+    def __init__(self, max_failures: int = 5, window_sec: int = 300):
+        self.max_failures = max_failures
+        self.window = window_sec
+        self._fails: dict[str, deque] = defaultdict(deque)
+
+    def _prune(self, q: deque, now: float) -> None:
+        while q and now - q[0] > self.window:
+            q.popleft()
+
+    def allow(self, key: str) -> bool:
+        now = time.time()
+        q = self._fails.get(key)
+        if q is None:
+            return True
+        self._prune(q, now)
+        return len(q) < self.max_failures
+
+    def record_failure(self, key: str) -> None:
+        now = time.time()
+        q = self._fails[key]
+        self._prune(q, now)
+        q.append(now)
+
+    def reset(self, key: str) -> None:
+        self._fails.pop(key, None)
+
+
+# Process-wide throttle for interactive logins. Per-instance by design; the
+# optional Redis-backed variant can replace it for multi-replica deployments
+# without changing call sites.
+login_throttle = FailedLoginThrottle()

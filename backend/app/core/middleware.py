@@ -1,4 +1,10 @@
-"""Request middleware — correlation IDs, rate limiting, PII scrubbing."""
+"""Request middleware — correlation IDs, rate limiting, security headers.
+
+Rate limiting is layered:
+- RateLimitMiddleware: a global per-IP sliding-window cap on ALL requests.
+- AuthRateLimitMiddleware: a TIGHTER, endpoint-scoped cap on authentication /
+  account-recovery endpoints to resist brute-force and credential-stuffing.
+"""
 
 import time
 import uuid
@@ -35,7 +41,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Token-bucket-lite: per-IP sliding-window."""
+    """Token-bucket-lite: per-IP sliding-window (global, all endpoints)."""
 
     def __init__(self, app):
         super().__init__(app)
@@ -53,6 +59,72 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class AuthRateLimitMiddleware(BaseHTTPMiddleware):
+    """Stricter sliding-window limiter for auth / account-recovery endpoints.
+
+    Brute-force resistance without DoS-ing legitimate users:
+    - Per-IP aggregate cap across the whole auth surface (spray resistance).
+    - Per-IP+endpoint cap on each login surface.
+    Account-level (per-email) throttling lives in the login handlers via
+    app.security.login_throttle, so this middleware never has to read and
+    re-inject the request body (fragile under BaseHTTPMiddleware).
+    """
+
+    # endpoint path-prefix -> (limit, window_seconds)
+    RULES: tuple[tuple[str, int, int], ...] = (
+        ("/api/v1/auth/login", 10, 60),
+        ("/api/v1/auth/institution/login", 10, 60),
+        ("/api/v1/auth/institution/forgot-password", 5, 300),
+        ("/api/v1/auth/institution/reset-password", 5, 300),
+        ("/api/v1/auth/institution/invitation", 10, 60),
+        ("/api/v1/auth/institution/accept-invitation", 10, 60),
+        ("/api/v1/investigator/login", 10, 60),
+        ("/api/v1/admin/merchant/login", 10, 60),
+    )
+    IP_AGGREGATE_LIMIT = 40
+    IP_AGGREGATE_WINDOW = 60
+
+    def __init__(self, app):
+        super().__init__(app)
+        self._by_ip: dict[str, deque] = defaultdict(deque)
+        self._by_ip_ep: dict[tuple[str, str], deque] = defaultdict(deque)
+
+    @staticmethod
+    def _prune(bucket: deque, window: float, now: float) -> None:
+        while bucket and now - bucket[0] > window:
+            bucket.popleft()
+
+    def _match(self, path: str):
+        for prefix, limit, window in self.RULES:
+            if path.startswith(prefix):
+                return prefix, limit, window
+        return None
+
+    async def dispatch(self, request, call_next):
+        rule = self._match(request.url.path)
+        if rule is None or request.method.upper() != "POST":
+            return await call_next(request)
+        ip = request.client.host if request.client else "anon"
+        now = time.time()
+
+        agg = self._by_ip[ip]
+        self._prune(agg, self.IP_AGGREGATE_WINDOW, now)
+        if len(agg) >= self.IP_AGGREGATE_LIMIT:
+            return JSONResponse({"error": "auth_rate_limited", "scope": "ip"}, status_code=429)
+        agg.append(now)
+
+        prefix, limit, window = rule
+        bucket = self._by_ip_ep[(ip, prefix)]
+        self._prune(bucket, window, now)
+        if len(bucket) >= limit:
+            return JSONResponse(
+                {"error": "auth_rate_limited", "scope": "endpoint"}, status_code=429
+            )
+        bucket.append(now)
+
+        return await call_next(request)
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Baseline security headers on every response."""
 
@@ -64,4 +136,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-XSS-Protection", "0")
         if request.url.path.startswith("/api/"):
             response.headers.setdefault("Cache-Control", "no-store")
+        # HSTS only when the request arrived over HTTPS (behind a TLS-terminating
+        # reverse proxy). Never sent on plain-HTTP dev traffic.
+        if request.headers.get("x-forwarded-proto", "").lower() == "https" or (
+            request.url.scheme == "https"
+        ):
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
         return response

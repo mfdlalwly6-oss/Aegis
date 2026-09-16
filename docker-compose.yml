@@ -1,3 +1,5 @@
+# AEGIS — Production-grade compose. No secrets are embedded here; all sensitive
+# values MUST come from .env / environment (see .env.example).
 services:
   postgres:
     image: postgres:16-alpine
@@ -5,7 +7,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: aegis
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-AegisPg2026Dev}
+      # Required: fails fast if unset (no dev default baked into the repo).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}
       POSTGRES_DB: aegis
     volumes:
       - pg-data:/var/lib/postgresql/data
@@ -32,8 +35,8 @@ services:
     environment:
       AEGIS_DATA_DIR: /data
       AEGIS_DB_DRIVER: postgres
-      AEGIS_DATABASE_URL: ${AEGIS_DATABASE_URL:-postgresql://aegis_app:AegisApp2026Dev@postgres:5432/aegis}
-      AEGIS_DATABASE_ADMIN_URL: ${AEGIS_DATABASE_ADMIN_URL:-postgresql://aegis:${POSTGRES_PASSWORD:-AegisPg2026Dev}@postgres:5432/aegis}
+      AEGIS_DATABASE_URL: ${AEGIS_DATABASE_URL:?Set AEGIS_DATABASE_URL in .env (see .env.example)}
+      AEGIS_DATABASE_ADMIN_URL: ${AEGIS_DATABASE_ADMIN_URL:-postgresql://aegis:${POSTGRES_PASSWORD}@postgres:5432/aegis}
       PORT: "8000"
     ports:
       - "8000:8000"
