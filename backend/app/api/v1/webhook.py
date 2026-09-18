@@ -4,6 +4,7 @@ Pipeline: auth → signature → idempotency → normalize → orchestrator → 
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from datetime import UTC, datetime
@@ -12,7 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.api.deps import get_registry, require_investigator
 from app.core.config import settings
-from app.models.schemas import BehaviorSignals, DeviceContext, GeoPoint, Transaction
+from app.models.schemas import (AuthenticationContext, BehaviorSignals, CardContext,
+                                DeviceContext, GeoPoint, Transaction)
 from app.security import verify_signature
 
 router = APIRouter()
@@ -59,6 +61,8 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
     if amount_f <= 0:
         raise HTTPException(400, "amount_must_be_positive") from None
 
+    card_raw = src.get("card") or ctx.get("card") or None
+    auth_raw = src.get("authentication") or ctx.get("authentication") or None
     metadata = dict(src.get("metadata") or {})
     for k in ("velocity", "account", "beneficiary", "geo", "customer"):
         if isinstance(ctx.get(k), dict):
@@ -100,6 +104,8 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
         metadata.setdefault("billing_country", metadata["customer"].get("billing_country"))
         metadata.pop("customer", None)
 
+    card_ctx = CardContext(**card_raw) if isinstance(card_raw, dict) else None
+    auth_ctx = AuthenticationContext(**auth_raw) if isinstance(auth_raw, dict) else None
     return Transaction(
         tx_id=str(src.get("tx_id") or src.get("transaction_id") or uuid.uuid4()),
         tenant_id=tenant_id,
@@ -151,6 +157,8 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
         else None,
         geo=GeoPoint(**geo_raw) if geo_raw and "lat" in geo_raw and "lon" in geo_raw else None,
         session_id=src.get("session_id") or ctx.get("session_id"),
+        card=card_ctx,
+        authentication=auth_ctx,
         metadata=metadata,
     )
 
@@ -269,10 +277,16 @@ async def fraud_webhook(request: Request, registry=Depends(get_registry)):
     tx = normalize_transaction(body, tenant["tenant_id"])
     tx = _apply_fx(registry, tx, body)
 
+    # canonical payload hash for idempotency-conflict detection
+    _ph = hashlib.sha256(
+        f"{tx.tx_id}|{tx.amount}|{tx.currency}|{tx.sender_account_id}|{tx.beneficiary_account_id}".encode()
+    ).hexdigest()
+    raw_body_dict = json.loads(raw.decode("utf-8")) if raw else {}
+    raw_body_dict["_payload_hash"] = _ph
     idem_key = request.headers.get("x-idempotency-key") or f"{tenant['tenant_id']}:{tx.tx_id}"
     result = await registry.orchestrator.evaluate_and_persist(
         tx,
-        body,
+        raw_body_dict,
         actor=tenant["name"],
         request_id=request_id,
         idempotency_key=idem_key,

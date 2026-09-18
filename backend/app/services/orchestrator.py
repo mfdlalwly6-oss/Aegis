@@ -8,6 +8,8 @@ import time
 
 import structlog
 
+from fastapi import HTTPException
+
 from app.core.config import settings
 from app.models.schemas import AMLSignal, Decision, GraphSignal, RiskAssessment, RiskBand, Transaction
 from app.services.policy_engine import PolicyEngine
@@ -139,6 +141,12 @@ class DecisionOrchestrator:
             if not self.decisions.mark_seen(idempotency_key, tx.tenant_id, tx.tx_id):
                 cached = self.decisions.get_by_idempotency(idempotency_key)
                 if cached:
+                    # payload_hash: same key + different payload = conflict, never
+                    # a blind replay of the old decision
+                    old_hash = cached.get("payload_hash")
+                    new_hash = (raw_payload or {}).get("_payload_hash")
+                    if old_hash and new_hash and old_hash != new_hash:
+                        raise HTTPException(409, "idempotency_payload_conflict")
                     return {**cached, "duplicate": True}
             # Same tx resubmitted under a DIFFERENT key must still replay the
             # stored decision — retries (new key, same tx) are semantically the
@@ -207,7 +215,9 @@ class DecisionOrchestrator:
         # 7. Behavior score — absent behavior payload is degraded, not failed
         try:
             behavior_score = self._behavior_score(tx)
-            health["behavior"] = {"status": "healthy" if tx.behavior else "degraded"}
+            # missing behavior payload = NO EVIDENCE: component unavailable, its
+            # weight is redistributed (never silently counted as zero risk)
+            health["behavior"] = {"status": "healthy" if tx.behavior else "unavailable"}
         except Exception as e:
             logger.error("component.behavior_unavailable", error=str(e), tenant_id=tx.tenant_id)
             behavior_score = 0.0
@@ -234,12 +244,22 @@ class DecisionOrchestrator:
             health[k]["weight_applied"] = round(applied_weights.get(k, 0.0), 6)
         final = min(1.0, max(0.0, sum(comp_scores[k] * applied_weights[k] for k in applied_weights)))
 
+
+        # All-engines-down guard: when NO component produced evidence there is
+        # nothing to score — fail closed to REVIEW instead of fail-open ALLOW.
+        all_engines_down = not active
         degraded_mode = any(h["status"] != "healthy" for h in health.values())
         degraded_reason = (
             "; ".join(f"{k}={h['status']}" for k, h in health.items() if h["status"] != "healthy")
             if degraded_mode
             else None
         )
+
+        # All-engines-down guard: no component produced evidence -> fail closed to REVIEW
+        if all_engines_down:
+            degraded_mode = True
+            degraded_reason = (degraded_reason + "; " if degraded_reason else "") + "ALL_ENGINES_UNAVAILABLE"
+            final = max(final, policy["thresholds"]["review"])
 
         # Confidence: explicit, interpretable, non-retroactive. Computed from the
         # NOMINAL policy weights (before availability renormalization) weighted by

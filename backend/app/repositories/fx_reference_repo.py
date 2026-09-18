@@ -120,6 +120,22 @@ class FxReferenceRepository:
         cur = self.db.execute("DELETE FROM fx_reference_members WHERE tenant_id=?", (tenant_id,))
         return cur.rowcount > 0
 
+    def delete_set(self, set_id: str) -> dict | None:
+        """Soft-delete a reference set: deactivate it AND remove all memberships so
+        every member tenant falls back cleanly (institution/manual/general). The set
+        row and its immutable version timeline are preserved for audit/history.
+        Returns {"set_id", "name", "unassigned_tenants"} or None if not found."""
+        cur = self.get_set(set_id)
+        if not cur:
+            return None
+        tids = self.members(set_id)
+        for tid in tids:
+            self.db.execute("DELETE FROM fx_reference_members WHERE tenant_id=? AND set_id=?",
+                            (tid, set_id))
+        self.db.execute("UPDATE fx_reference_sets SET active=0, updated_at=? WHERE set_id=?",
+                        (utcnow(), set_id))
+        return {"set_id": set_id, "name": cur["name"], "unassigned_tenants": tids}
+
     def members(self, set_id: str) -> list[str]:
         rows = self.db.query("SELECT tenant_id FROM fx_reference_members WHERE set_id=?", (set_id,))
         return [r["tenant_id"] for r in rows]

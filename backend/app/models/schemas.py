@@ -94,6 +94,26 @@ class GeoPoint(BaseModel):
     city: str | None = None
 
 
+class CardContext(BaseModel):
+    """Card payment context — token/reference only; PAN and CVV are NEVER accepted."""
+    card_token_reference: str | None = None   # network/PSP token — NOT PAN
+    card_present: bool | None = None
+    entry_mode: str | None = None             # chip/contactless/ecom/keyed
+    recurring: bool | None = None
+    tokenized: bool | None = None
+    issuer_id: str | None = None
+    acquirer_id: str | None = None
+
+
+class AuthenticationContext(BaseModel):
+    """Generic EMV-3DS-style authentication context (no proprietary fields)."""
+    three_ds_present: bool | None = None
+    three_ds_version: str | None = None
+    authentication_result: str | None = None   # frictionless/challenge/failed
+    authentication_flow: str | None = None     # frictionless/challenge
+    auth_value_reference: str | None = None    # reference only, not a secret
+
+
 class Transaction(BaseModel):
     """Universal transaction schema — accepts card, wire, wallet, P2P, crypto."""
 
@@ -134,6 +154,8 @@ class Transaction(BaseModel):
 
     card_bin: str | None = None
     card_last4: str | None = None
+    card: CardContext | None = None
+    authentication: AuthenticationContext | None = None
     mcc: str | None = None
     merchant_id: str | None = None
     merchant_name: str | None = None

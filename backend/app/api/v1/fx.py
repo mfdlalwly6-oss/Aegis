@@ -255,6 +255,19 @@ def unassign_reference(tenant_id: str, owner=Depends(require_owner), registry=De
     return {"tenant_id": tenant_id, "removed": removed}
 
 
+@router.delete("/admin/fx/reference-sets/{set_id}")
+def delete_reference_set(set_id: str, owner=Depends(require_owner), registry=Depends(get_registry)):
+    """Soft-delete a reference set: deactivate + unassign all members (each falls back
+    to institution/manual/general). Set row + version timeline are preserved so
+    historical decisions keep their immutable snapshots (non-destructive)."""
+    result = registry.fx_reference_repo.delete_set(set_id)
+    if not result:
+        raise HTTPException(404, "reference_set_not_found")
+    registry.audit.log("platform", "owner", "fx_reference_set.deleted", "fx_reference_set",
+                       set_id, None, {"name": result["name"], "unassigned": result["unassigned_tenants"]})
+    return {"deleted": True, **result}
+
+
 # ── General rate management (§13) ────────────────────────────────────────────
 @router.post("/admin/fx/general/activate")
 def activate_general(body: dict, owner=Depends(require_owner), registry=Depends(get_registry)):

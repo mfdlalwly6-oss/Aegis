@@ -80,7 +80,7 @@ def test_ml_unavailable_lowers_confidence_by_its_weight(client, monkeypatch):
     assert abs(conf - 0.75) < 1e-3, f"expected ~0.75 with ML down, got {conf}"
 
 
-def test_missing_behavior_lowers_confidence_by_half_its_weight(client, monkeypatch):
+def test_missing_behavior_excludes_its_weight(client, monkeypatch):
     """No behavior payload -> behavior degraded (0.5x). confidence = 1 - 0.5*0.10 = 0.95.
     ML forced ready so only the behavior gap affects the value."""
     monkeypatch.setattr(client.app.state.registry.ml_scorer, "ready", True, raising=False)
@@ -90,7 +90,7 @@ def test_missing_behavior_lowers_confidence_by_half_its_weight(client, monkeypat
     assert r.status_code == 200, r.text
     conf = r.json().get("confidence")
     # behavior degraded -> contributes 0.5 * 0.10 = 0.05 instead of 0.10
-    assert abs(conf - 0.95) < 1e-3, f"expected ~0.95, got {conf}"
+    assert abs(conf - 0.90) < 1e-3, f"expected ~0.90 (behavior unavailable excludes full weight), got {conf}"
 
 
 def test_confidence_persisted_and_matches_response(client):

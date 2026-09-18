@@ -4,6 +4,7 @@ from . import (
     alerts,
     auth,
     cases,
+    feedback,
     fx,
     graph,
     health,
@@ -32,3 +33,5 @@ router.include_router(webhook.router, tags=["webhook"])
 router.include_router(watchlist.router, tags=["watchlist"])
 router.include_router(investigator.router, prefix="/investigator", tags=["investigator"])
 router.include_router(reports.router, prefix="/reports", tags=["reports"])
+
+router.include_router(feedback.router, tags=["feedback"])
