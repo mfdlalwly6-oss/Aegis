@@ -26,7 +26,7 @@ class DecisionRepository:
             "reasoning_ar,ai_model,idempotency_key,created_at,"
             "fx_proof_json,tx_snapshot_json,features_snapshot_json,"
             "rule_set_version,model_version,config_version,request_id,"
-            "component_health_json,degraded_mode,degraded_reason,confidence) "
+            "component_health_json,degraded_mode,degraded_reason,confidence,payload_hash) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 did,
@@ -65,6 +65,7 @@ class DecisionRepository:
                 1 if assessment.get("degraded_mode") else 0,
                 assessment.get("degraded_reason"),
                 assessment.get("confidence", 0.0),
+                assessment.get("payload_hash"),
             ),
         )
         return {"decision_id": did, **assessment}

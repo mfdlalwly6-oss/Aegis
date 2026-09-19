@@ -4,6 +4,7 @@ from . import (
     alerts,
     auth,
     cases,
+    feedback,
     fx,
     graph,
     health,
@@ -36,3 +37,4 @@ router.include_router(investigator.router, prefix="/investigator", tags=["invest
 router.include_router(reports.router, prefix="/reports", tags=["reports"])
 router.include_router(weights.router, tags=["weights"])
 router.include_router(thresholds.router, tags=["thresholds"])
+router.include_router(feedback.router, tags=["feedback"])

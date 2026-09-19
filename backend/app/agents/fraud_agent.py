@@ -14,6 +14,20 @@ from .openrouter import OpenRouterClient
 logger = structlog.get_logger(__name__)
 
 
+_SENSITIVE_KEYS = re.compile(
+    r"\"(sender_account_id|beneficiary_account_id|sender_user_id|beneficiary_user_id|"
+    r"sender_name|beneficiary_name|customer_name|customer_dob|customer_identifiers|"
+    r"card_bin|card_last4|card_token_reference|device_id|fingerprint_hash|session_id|ip)\"\s*:\s*\"[^\"]*\"",
+    re.IGNORECASE,
+)
+
+
+def _redact(payload) -> str:
+    """Serialize with sensitive financial/customer identifiers redacted before any external LLM call."""
+    raw = json.dumps(payload, default=str, ensure_ascii=False)
+    return _SENSITIVE_KEYS.sub(lambda m: m.group(0).split(":")[0] + ':"[redacted]"', raw)
+
+
 def _extract_json(text: str) -> dict | None:
     if not text:
         return None
@@ -51,8 +65,8 @@ class FraudAgent:
         ]
         prompt = (
             "أنت محلل احتيال مالي. أجب بـ JSON فقط بدون أي نص إضافي.\n"
-            f"transaction: {json.dumps(tx, default=str, ensure_ascii=False)[:600]}\n"
-            f"rules_hits: {json.dumps(rules_safe, default=str, ensure_ascii=False)[:400]}\n"
+            f"transaction: {_redact(tx)[:600]}\n"
+            f"rules_hits: {_redact(rules_safe)[:400]}\n"
             f"ml_prob: {ml_prob}\n\n"
             'المطلوب JSON: {"typology":"نمط الاحتيال","reasoning_ar":"شرح قصير بالعربية"}'
         )

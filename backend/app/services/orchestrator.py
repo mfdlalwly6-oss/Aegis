@@ -6,7 +6,11 @@ from __future__ import annotations
 
 import time
 
+import hashlib
+
 import structlog
+
+from fastapi import HTTPException
 
 from app.core.config import settings
 from app.models.schemas import AMLSignal, Decision, GraphSignal, RiskAssessment, RiskBand, Transaction
@@ -139,12 +143,18 @@ class DecisionOrchestrator:
         idempotency_key: str | None = None,
     ) -> dict:
         started = time.perf_counter()
+        payload_hash = hashlib.sha256(
+            f"{tx.tx_id}|{tx.amount}|{tx.currency}|{tx.sender_account_id}|{tx.beneficiary_account_id}".encode()
+        ).hexdigest()
 
         # 1. Idempotency — return cached decision if same key seen before
         if idempotency_key:
             if not self.decisions.mark_seen(idempotency_key, tx.tenant_id, tx.tx_id):
                 cached = self.decisions.get_by_idempotency(idempotency_key)
                 if cached:
+                    old_hash = cached.get("payload_hash")
+                    if old_hash and old_hash != payload_hash:
+                        raise HTTPException(409, "idempotency_payload_conflict")
                     return {**cached, "duplicate": True}
             # Same tx resubmitted under a DIFFERENT key must still replay the
             # stored decision — retries (new key, same tx) are semantically the
@@ -213,7 +223,8 @@ class DecisionOrchestrator:
         # 7. Behavior score — absent behavior payload is degraded, not failed
         try:
             behavior_score = self._behavior_score(tx)
-            health["behavior"] = {"status": "healthy" if tx.behavior else "degraded"}
+            # missing behavior payload = NO EVIDENCE: unavailable -> weight redistributed (never silent zero-risk)
+            health["behavior"] = {"status": "healthy" if tx.behavior else "unavailable"}
         except Exception as e:
             logger.error("component.behavior_unavailable", error=str(e), tenant_id=tx.tenant_id)
             behavior_score = 0.0
@@ -258,6 +269,12 @@ class DecisionOrchestrator:
             if degraded_mode
             else None
         )
+
+        # All-engines-down fail-safe: no component produced evidence -> never fail open to ALLOW.
+        if not active:
+            degraded_mode = True
+            degraded_reason = (degraded_reason + "; " if degraded_reason else "") + "ALL_ENGINES_UNAVAILABLE"
+            final = max(final, policy["thresholds"]["review"])
 
         # Confidence: explicit, interpretable, non-retroactive. Computed from the
         # NOMINAL policy weights (before availability renormalization) weighted by
@@ -434,7 +451,9 @@ class DecisionOrchestrator:
             "ip_country": tx.device.ip_country if tx.device else None,
         }
         self.transactions.create(tx_row, features, raw_payload)
-        self.decisions.create(assessment.model_dump(mode="json"), idempotency_key=idempotency_key)
+        _out = assessment.model_dump(mode="json")
+        _out["payload_hash"] = payload_hash
+        self.decisions.create(_out, idempotency_key=idempotency_key)
 
         # 14. Feed graph for future scoring
         self.graph.add_transaction(tx)

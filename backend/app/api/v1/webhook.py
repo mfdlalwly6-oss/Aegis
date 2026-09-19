@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.api.deps import get_registry
 from app.core.config import settings
-from app.models.schemas import BehaviorSignals, DeviceContext, GeoPoint, Transaction
+from app.models.schemas import (AuthenticationContext, BehaviorSignals, CardContext,
+                                DeviceContext, GeoPoint, Transaction)
 from app.security import verify_signature
 
 router = APIRouter()
@@ -100,6 +101,14 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
         metadata.setdefault("billing_country", metadata["customer"].get("billing_country"))
         metadata.pop("customer", None)
 
+    card_raw = src.get("card") or ctx.get("card") or None
+    auth_raw = src.get("authentication") or ctx.get("authentication") or None
+    card_ctx = CardContext(
+        **{k: v for k, v in card_raw.items() if k in CardContext.model_fields}
+    ) if isinstance(card_raw, dict) and card_raw else None
+    auth_ctx = AuthenticationContext(
+        **{k: v for k, v in auth_raw.items() if k in AuthenticationContext.model_fields}
+    ) if isinstance(auth_raw, dict) and auth_raw else None
     return Transaction(
         tx_id=str(src.get("tx_id") or src.get("transaction_id") or uuid.uuid4()),
         tenant_id=tenant_id,
@@ -151,6 +160,8 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
         else None,
         geo=GeoPoint(**geo_raw) if geo_raw and "lat" in geo_raw and "lon" in geo_raw else None,
         session_id=src.get("session_id") or ctx.get("session_id"),
+        card=card_ctx,
+        authentication=auth_ctx,
         metadata=metadata,
     )
 
