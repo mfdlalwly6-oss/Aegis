@@ -345,7 +345,7 @@ function renderTenantFxPanel() {
       el("div", {}, el("strong", {}, "المصدر الحالي: "), srcLabel),
       fx.reference_set
         ? el("div", {}, el("strong", {}, "المجموعة المرجعية: "), (fx.reference_set.name || fx.reference_set.set_id),
-        : el("div", { style: "color:var(--muted)" }, el("strong", { style: "color:var(--text)" }, "المجموعة المرجعية: "), "لا توجد مجموعة مرتبطة"),
+        : null),
       el("div", {}, el("strong", {}, "USD/YER: "), fx.usd_yer != null ? String(fx.usd_yer) : "—",
         el("span", { style: "color:var(--muted);font-size:11px" }, " (" + (fx.usd_yer_source || "") + ")")),
       el("div", {}, el("strong", {}, "SAR/YER: "), fx.sar_yer != null ? String(fx.sar_yer) : "—",
