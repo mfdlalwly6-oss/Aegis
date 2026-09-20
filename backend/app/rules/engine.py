@@ -152,7 +152,6 @@ class Rule:
                 "evaluation_currency": self.currency,
                 "rule_currency": self.currency,
                 "fx_source": fxs.get("source"),
-                "fx_rate": fxs.get("rate"),
             }
         return RuleHit(
             rule_id=self.id,

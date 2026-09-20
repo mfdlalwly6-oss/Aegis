@@ -1,6 +1,6 @@
 """Currency repository — registry of supported currencies (data-driven, extensible).
 
-Adding a currency = one INSERT here + rows in fx_rates. No schema/rule change.
+Adding a currency = one INSERT here. No schema/rule change.
 A currency is NEVER hard-deleted: it is only disabled (active=0) so historical
 transactions, FX snapshots, rules and decisions keep their meaning.
 """
@@ -101,10 +101,10 @@ class CurrencyRepository:
         return self.db.query("SELECT * FROM currencies ORDER BY code")
 
     def usage_count(self, code: str) -> dict:
-        """Real usage for the disable warning (§19): transactions + fx_rates + rules.
+        """Real usage for the disable warning (§19): transactions + rules.
         Best-effort — a missing table/column counts as 0, never raises."""
         code = code.upper()
-        out = {"transactions": 0, "fx_rates": 0, "rules": 0}
+        out = {"transactions": 0, "rules": 0}
         try:
             r = self.db.query_one("SELECT COUNT(*) AS c FROM transactions WHERE currency=?", (code,))
             out["transactions"] = int(r["c"]) if r else 0
@@ -112,9 +112,6 @@ class CurrencyRepository:
             pass
         try:
             r = self.db.query_one(
-                "SELECT COUNT(*) AS c FROM fx_rates WHERE base_ccy=? OR quote_ccy=?", (code, code)
-            )
-            out["fx_rates"] = int(r["c"]) if r else 0
         except Exception:
             pass
         try:

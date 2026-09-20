@@ -80,15 +80,13 @@ def test_legacy_data_preserved(db):
         "SELECT 'tenants' t, COUNT(*) c FROM tenants "
         "UNION ALL SELECT 'transactions', COUNT(*) FROM transactions "
         "UNION ALL SELECT 'decisions', COUNT(*) FROM decisions "
-        "UNION ALL SELECT 'fx_rates', COUNT(*) FROM fx_rates "
-        "UNION ALL SELECT 'rules', COUNT(*) FROM rules "
+                "UNION ALL SELECT 'rules', COUNT(*) FROM rules "
         "UNION ALL SELECT 'currencies', COUNT(*) FROM currencies"
     )
     counts = {r["t"]: r["c"] for r in rows}
     assert counts["tenants"] >= 64, counts
     assert counts["transactions"] >= 47, counts
     assert counts["decisions"] >= 130, counts
-    assert counts["fx_rates"] >= 7, counts
     assert counts["rules"] >= 21, counts
     assert counts["currencies"] >= 3, counts
     print("COUNTS", counts)

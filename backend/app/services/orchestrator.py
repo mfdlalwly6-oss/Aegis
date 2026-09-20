@@ -305,7 +305,7 @@ class DecisionOrchestrator:
                 degraded_reason = "AML_UNAVAILABLE_FAIL_CLOSED; " + degraded_reason
             else:
                 degraded_reason = "AML_UNAVAILABLE_FAIL_CLOSED"
-        fx_missing = getattr(tx, "fx_status", None) == "missing"
+        fx_missing = False  # FX removed: no fx-missing guard
         if fx_missing:
             fx_missing_action = policy["fx_missing_action"]
             if fx_missing_action == "block":
@@ -351,24 +351,8 @@ class DecisionOrchestrator:
                 logger.warning("ai.explanation_failed", error=str(e))
 
         # 12. Build assessment (with FX proof for audit)
-        _fxs = getattr(tx, "fx", None)
-        fx_proof = {
-            "original_amount": tx.amount,
-            "original_currency": tx.currency,
-            "reference_amount": getattr(tx, "reference_amount", None),
-            "reference_currency": getattr(tx, "reference_currency", None),
-            "fx_snapshot_id": getattr(tx, "fx_snapshot_id", None),
-            "fx_status": getattr(tx, "fx_status", None),
-            # Full audit trail of the rate actually used at decision time.
-            "rate": getattr(_fxs, "rate", None),
-            "rate_type": getattr(_fxs, "rate_type", None),
-            "source": getattr(_fxs, "source", None),
-            "region": getattr(_fxs, "region", None),
-            "institution_rate": getattr(_fxs, "institution_rate", None),
-            "divergence_pct": getattr(_fxs, "divergence_pct", None),
-            "is_stale": getattr(_fxs, "is_stale", None),
-            "valid_from": (str(getattr(_fxs, "valid_from")) if getattr(_fxs, "valid_from", None) else None),
-        }
+        _fxs = None  # FX removed
+        fx_proof = {}  # FX removed: no exchange snapshot persisted
         assessment = RiskAssessment(
             tx_id=tx.tx_id,
             tenant_id=tx.tenant_id,
@@ -412,7 +396,6 @@ class DecisionOrchestrator:
             "channel": tx.channel.value,
             "amount": tx.amount,
             "currency": tx.currency,
-            "reference_amount": getattr(tx, "reference_amount", None),
             "reference_currency": getattr(tx, "reference_currency", None),
             "fx_snapshot_id": getattr(tx, "fx_snapshot_id", None),
             "fx_status": getattr(tx, "fx_status", None),
@@ -495,6 +478,5 @@ class DecisionOrchestrator:
         result["case"] = created_case
         # FX reference fields exposed at response root so integrators can read
         # the FATF-equivalent amount/currency without digging into fx_proof.
-        result["reference_amount"] = getattr(tx, "reference_amount", None)
         result["reference_currency"] = getattr(tx, "reference_currency", None)
         return result

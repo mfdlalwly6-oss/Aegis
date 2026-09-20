@@ -714,7 +714,6 @@ function renderDecisionTrace() {
       el("h3", { style: "margin-bottom:10px" }, "💳 المعاملة المرتبطة"),
       el("div", { class: "detail-grid" },
         detail("المبلغ", num(t.amount) + " " + (t.currency || "")),
-        detail("القيمة المرجعية", (t.reference_amount != null ? num(t.reference_amount) + " " + (t.reference_currency || "") : "-")),
         detail("المرسل", t.sender_account_id || "-"),
         detail("المستفيد", t.beneficiary_account_id || "-"),
         detail("لقطة FX", t.fx_snapshot_id || "-"),

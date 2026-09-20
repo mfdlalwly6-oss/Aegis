@@ -344,8 +344,10 @@ function renderTenantFxPanel() {
     el("h3", { style: "margin-bottom:10px" }, "💱 حالة العملات وFX — " + (fx.tenant_id || "")),
     el("div", { style: "font-size:13px;line-height:2" },
       el("div", {}, el("strong", {}, "المصدر الحالي: "), srcLabel),
-      fx.reference_set ? el("div", {}, el("strong", {}, "المجموعة المرجعية: "), (fx.reference_set.name || fx.reference_set.set_id),
-        " ", el("button", { class: "btn sm", style: "padding:2px 8px;font-size:11px", onclick: () => { state.fxTenantId = state.tenantFxStatusFor || null; state.page = "fx"; render(); } }, "📋 فتح إدارة FX")) : null,
+      fx.reference_set
+        ? el("div", {}, el("strong", {}, "المجموعة المرجعية: "), (fx.reference_set.name || fx.reference_set.set_id),
+          " ", el("button", { class: "btn sm", style: "padding:2px 8px;font-size:11px", onclick: () => { state.fxTenantId = state.tenantFxStatusFor || null; state.page = "fx"; render(); } }, "📋 فتح إدارة FX"))
+        : el("div", { style: "color:var(--muted)" }, el("strong", { style: "color:var(--text)" }, "المجموعة المرجعية: "), "لا توجد مجموعة مرتبطة"),
       el("div", {}, el("strong", {}, "USD/YER: "), fx.usd_yer != null ? String(fx.usd_yer) : "—",
         el("span", { style: "color:var(--muted);font-size:11px" }, " (" + (fx.usd_yer_source || "") + ")")),
       el("div", {}, el("strong", {}, "SAR/YER: "), fx.sar_yer != null ? String(fx.sar_yer) : "—",
@@ -1465,6 +1467,20 @@ function renderFxReferenceSets() {
       } catch (e) { toast(e.message, "error"); }
     } }, st.active ? "⏸ تعطيل" : "▶ تفعيل");
 
+    const deleteBtn = el("button", { class: "btn sm danger", style: "padding:3px 8px;font-size:10.5px", onclick: async () => {
+      const n = (st.members || []).length;
+      if (!confirm("حذف المجموعة «" + st.name + "» نهائيًا؟\n" +
+        (n ? ("سيتم فك ارتباط " + n + " مؤسسة تلقائيًا وستعود كل منها إلى سعر المؤسسة/العام.\n") : "") +
+        "سيُحتفظ بسجل المجموعة وأسعارها للتاريخ، لكنها ستُعطّل وتُزال من الاستخدام.")) return;
+      try {
+        const r = await api("/fx/reference-sets/" + encodeURIComponent(st.set_id), { method: "DELETE" });
+        toast("🗑 حُذفت المجموعة «" + st.name + "» (فُك ارتباط " + (r.unassigned_tenants || []).length + " مؤسسة)", "success");
+        await loadFxRefSets();
+        if (state.fxTenantId) { try { state.tenantFxStatus = await api("/tenants/" + encodeURIComponent(state.fxTenantId) + "/fx-status"); } catch (e) {} }
+        render();
+      } catch (e) { toast(e.message, "error"); }
+    } }, "🗑 حذف");
+
     const membersBtn = el("button", { class: "btn sm", style: "padding:3px 8px;font-size:10.5px", onclick: () => {
       const open = membersBox.style.display !== "none";
       if (!open) loadMembersInto();
@@ -1499,7 +1515,7 @@ function renderFxReferenceSets() {
             "عدد المؤسسات: " + (st.member_count || 0) + " · أُنشئت: " + fmtTs(st.created_at) + " · آخر تعديل: " + fmtTs(st.updated_at))),
         el("div", { style: "display:flex;gap:5px;flex-wrap:wrap;align-items:center" },
           el("span", { class: "badge " + (st.active ? "allow" : "block") }, st.active ? "فعّالة" : "معطّلة"),
-          membersBtn, addBtn, statusBtn)),
+          membersBtn, addBtn, statusBtn, deleteBtn)),
       el("div", { style: "display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap" },
         el("span", { style: "font-size:12px" }, "✏️ تعديل: 1 USD ="), eUsd,
         el("span", { style: "font-size:12px" }, "· 1 SAR ="), eSar,
@@ -1642,7 +1658,7 @@ function _fxCurrencyActions(x) {
       let warn = "⚠️ إيقاف عملة " + x.code + "؟ المعاملات الجديدة بها ستُرفض (CURRENCY_DISABLED) والتاريخ يبقى سليمًا.";
       try {
         const u = await api("/fx/currencies/" + encodeURIComponent(x.code) + "/usage");
-        warn = "⚠️ عملة " + x.code + " مستخدمة حاليًا في:\n- " + u.transactions + " معاملة\n- " + u.fx_rates + " سجل FX\n- " + u.rules + " قاعدة\n\nالإيقاف يمنع المعاملات الجديدة فقط دون المساس بالتاريخ. متابعة؟";
+        warn = "⚠️ عملة " + x.code + " مستخدمة حاليًا في:\n- " + u.transactions + " معاملة\n- " + u.rules + " قاعدة\n\nالإيقاف يمنع المعاملات الجديدة فقط دون المساس بالتاريخ. متابعة؟";
       } catch (e) {}
       if (!confirm(warn)) return;
     }

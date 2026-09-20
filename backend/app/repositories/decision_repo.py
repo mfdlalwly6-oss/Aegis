@@ -24,7 +24,7 @@ class DecisionRepository:
             "latency_ms,rule_score,ml_score,graph_score,aml_score,behavior_score,"
             "rules_json,ml_json,graph_json,aml_json,top_reasons_json,typology,"
             "reasoning_ar,ai_model,idempotency_key,created_at,"
-            "fx_proof_json,tx_snapshot_json,features_snapshot_json,"
+            "tx_snapshot_json,features_snapshot_json,"
             "rule_set_version,model_version,config_version,request_id,"
             "component_health_json,degraded_mode,degraded_reason,confidence,payload_hash) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -54,7 +54,6 @@ class DecisionRepository:
                 assessment.get("ai_model"),
                 idempotency_key,
                 now,
-                json.dumps(assessment.get("fx_proof", {}), default=str),
                 json.dumps(assessment.get("tx_snapshot", {}), default=str),
                 json.dumps(assessment.get("features_snapshot", {}), default=str),
                 assessment.get("policy_version"),

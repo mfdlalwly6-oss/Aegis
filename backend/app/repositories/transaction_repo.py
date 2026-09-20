@@ -21,7 +21,7 @@ class TransactionRepository:
             "sender_user_id,beneficiary_account_id,beneficiary_user_id,"
             "beneficiary_country,merchant_id,merchant_name,device_id,ip,"
             "ip_country,raw_json,features_json,created_at,"
-            "reference_amount,reference_currency,fx_snapshot_id,fx_status) "
+            ") "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 row["tx_id"],
@@ -43,11 +43,7 @@ class TransactionRepository:
                 json.dumps(raw, default=str),
                 json.dumps(features, default=str),
                 utcnow(),
-                row.get("reference_amount"),
-                row.get("reference_currency"),
-                row.get("fx_snapshot_id"),
-                row.get("fx_status"),
-            ),
+                                                                            ),
         )
         return row
 
@@ -69,12 +65,12 @@ class TransactionRepository:
     def velocity(self, tenant_id: str, sender: str, window_sec: int) -> dict:
         """Count + currency-normalized sum of this sender's transactions in the window.
 
-        Sums reference_amount (already converted to the platform reference currency
+        Sums native amount (no FX conversion — FX removed)
         at decision time) so amounts in different currencies are never added raw.
         Legacy rows without a reference amount fall back to their raw amount —
         flagged via mixed_currency=False only when every row had a reference value."""
         rows = self.db.query(
-            "SELECT amount, reference_amount, ts FROM transactions "
+            "SELECT amount, ts FROM transactions "
             "WHERE tenant_id=? AND sender_account_id=? "
             "ORDER BY ts DESC LIMIT 200",
             (tenant_id, sender),
@@ -90,7 +86,7 @@ class TransactionRepository:
                 continue
             if ts >= cutoff:
                 count += 1
-                ref = r.get("reference_amount")
+                ref = None  # FX removed: velocity uses native amount
                 if ref is not None:
                     total += float(ref)
                 else:

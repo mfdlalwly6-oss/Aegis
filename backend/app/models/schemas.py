@@ -42,30 +42,11 @@ class FxStatus(str, Enum):
     MISSING = "missing"
 
 
-class FxSnapshot(BaseModel):
-    rate_id: str | None = None  # links to fx_rates.rate_id for audit traceability
-    base_ccy: str
-    quote_ccy: str
-    rate: float | None = None
-    rate_type: str = "mid"
-    source: str = "aegis_reference"
-    region: str = "global"
-    spread_pct: float | None = None
-    fetched_at: datetime | None = None
-    valid_from: datetime | None = None
-    valid_to: datetime | None = None
-    is_stale: bool = False
-    status: FxStatus = FxStatus.OK
-    institution_rate: float | None = None
-    divergence_pct: float | None = None
-
 
 class Money(BaseModel):
     original_amount: float
     original_currency: str
-    reference_amount: float | None = None
     reference_currency: str = "USD"
-    fx: FxSnapshot | None = None
 
 
 class DeviceContext(BaseModel):
@@ -166,12 +147,6 @@ class Transaction(BaseModel):
     session_id: str | None = None
     metadata: dict[str, Any] = {}
 
-    # FX / Money normalization (populated by FxService at ingestion time)
-    reference_amount: float | None = None
-    reference_currency: str | None = None
-    fx_snapshot_id: str | None = None
-    fx_status: str | None = None  # ok | native | stale | divergent | missing
-    fx: FxSnapshot | None = None  # full immutable snapshot (audit trail in fx_proof)
 
 
 class RuleHit(BaseModel):
@@ -187,7 +162,6 @@ class RuleHit(BaseModel):
     evaluation_currency: str | None = None
     rule_currency: str | None = None
     fx_source: str | None = None
-    fx_rate: float | None = None
 
 
 class ModelScore(BaseModel):
