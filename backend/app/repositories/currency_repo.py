@@ -111,4 +111,7 @@ class CurrencyRepository:
             pass
         try:
             r = self.db.query_one("SELECT COUNT(*) AS c FROM rules WHERE currency=?", (code,))
-        existing = self.db.query_one("SELECT COUNT(*) AS c FROM currencies")
+        try:
+            existing = self.db.query_one("SELECT COUNT(*) AS c FROM currencies")
+        except Exception:
+            existing = None
