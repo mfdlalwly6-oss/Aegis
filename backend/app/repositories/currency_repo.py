@@ -111,27 +111,5 @@ class CurrencyRepository:
         except Exception:
             pass
         try:
-            r = self.db.query_one(
-        except Exception:
-            pass
-        try:
             r = self.db.query_one("SELECT COUNT(*) AS c FROM rules WHERE currency=?", (code,))
-            out["rules"] = int(r["c"]) if r else 0
-        except Exception:
-            pass
-        return out
-
-    def seed_defaults(self) -> int:
-        """Seed YER/SAR/USD if the table is empty. Idempotent."""
         existing = self.db.query_one("SELECT COUNT(*) AS c FROM currencies")
-        if existing and existing["c"]:
-            return 0
-        n = 0
-        for code, name, mu, ru, sym in (
-            ("USD", "US Dollar", 2, 1000, "$"),
-            ("SAR", "Saudi Riyal", 2, 1000, "﷼"),
-            ("YER", "Yemeni Rial", 0, 100000, "ر.ي"),
-        ):
-            self.add(code, name, minor_unit=mu, round_unit=ru, symbol=sym, decimal_places=mu)
-            n += 1
-        return n
