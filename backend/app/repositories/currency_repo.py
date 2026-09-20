@@ -100,18 +100,18 @@ class CurrencyRepository:
     def list_all(self) -> list[dict]:
         return self.db.query("SELECT * FROM currencies ORDER BY code")
 
-    def usage_count(self, code: str) -> dict:
-        """Real usage for the disable warning (§19): transactions + rules.
-        Best-effort — a missing table/column counts as 0, never raises."""
+    def usage(self, code: str) -> dict:
+        """Best-effort usage count: transactions + rules. FX removed."""
         code = code.upper()
         out = {"transactions": 0, "rules": 0}
         try:
+            r = self.db.query_one("SELECT COUNT(*) AS c FROM transactions WHERE currency=?", (code,))
             out["transactions"] = int(r["c"]) if r else 0
         except Exception:
             pass
         try:
             r = self.db.query_one("SELECT COUNT(*) AS c FROM rules WHERE currency=?", (code,))
-        try:
-            existing = self.db.query_one("SELECT COUNT(*) AS c FROM currencies")
+            out["rules"] = int(r["c"]) if r else 0
         except Exception:
-            existing = None
+            pass
+        return out

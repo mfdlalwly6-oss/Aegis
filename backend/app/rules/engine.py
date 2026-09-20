@@ -151,7 +151,6 @@ class Rule:
                 "evaluation_amount": (ctx.get("features") or {}).get("amount_usd"),
                 "evaluation_currency": self.currency,
                 "rule_currency": self.currency,
-                "fx_source": fxs.get("source"),
             }
         return RuleHit(
             rule_id=self.id,

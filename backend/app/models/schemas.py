@@ -160,7 +160,6 @@ class RuleHit(BaseModel):
     evaluation_amount: float | None = None
     evaluation_currency: str | None = None
     rule_currency: str | None = None
-    fx_source: str | None = None
 
 
 class ModelScore(BaseModel):
