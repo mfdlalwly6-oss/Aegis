@@ -352,7 +352,6 @@ class DecisionOrchestrator:
 
         # 12. Build assessment (with FX proof for audit)
         _fxs = None  # FX removed
-        fx_proof = {}  # FX removed: no exchange snapshot persisted
         assessment = RiskAssessment(
             tx_id=tx.tx_id,
             tenant_id=tx.tenant_id,
@@ -378,7 +377,6 @@ class DecisionOrchestrator:
             else ("high_risk" if final >= settings.DECISION_THRESHOLD_REVIEW else "normal"),
             model_id="aegis-ensemble@2.0.0",
             policy_version=self._policy_version(tx.tenant_id),
-            fx_proof=fx_proof,
             tx_snapshot=tx.model_dump(mode="json"),
             features_snapshot=features if isinstance(features, dict) else {},
             request_id=request_id,
@@ -396,9 +394,6 @@ class DecisionOrchestrator:
             "channel": tx.channel.value,
             "amount": tx.amount,
             "currency": tx.currency,
-            "reference_currency": getattr(tx, "reference_currency", None),
-            "fx_snapshot_id": getattr(tx, "fx_snapshot_id", None),
-            "fx_status": getattr(tx, "fx_status", None),
             "sender_account_id": tx.sender_account_id,
             "sender_user_id": tx.sender_user_id,
             "beneficiary_account_id": tx.beneficiary_account_id,
@@ -477,6 +472,4 @@ class DecisionOrchestrator:
         result["alert"] = created_alert
         result["case"] = created_case
         # FX reference fields exposed at response root so integrators can read
-        # the FATF-equivalent amount/currency without digging into fx_proof.
-        result["reference_currency"] = getattr(tx, "reference_currency", None)
         return result

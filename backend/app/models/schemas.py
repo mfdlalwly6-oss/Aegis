@@ -46,7 +46,6 @@ class FxStatus(str, Enum):
 class Money(BaseModel):
     original_amount: float
     original_currency: str
-    reference_currency: str = "USD"
 
 
 class DeviceContext(BaseModel):
@@ -236,7 +235,6 @@ class RiskAssessment(BaseModel):
     request_id: str | None = None
 
     # DecisionTrace / audit snapshots (populated by orchestrator before persist)
-    fx_proof: dict[str, Any] = {}
     tx_snapshot: dict[str, Any] = {}
     features_snapshot: dict[str, Any] = {}
 

@@ -46,7 +46,6 @@ class FeatureExtractor:
         # amount_usd: transaction value normalized to the reference currency.
         # FX is applied at ingestion (webhook._apply_fx) before extraction, so
         # FX removed: amount stays in the transaction's native currency.
-        # Missing FX -> fall back to raw amount (fx_status=missing already flags it
         # upstream; policy fx_missing_action decides, never a silent wrong value).
         _ref = None  # FX removed: no reference-currency normalization
         amount_usd = float(_ref) if _ref is not None else float(tx.amount)
