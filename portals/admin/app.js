@@ -42,9 +42,7 @@ const state = {
   lang: (function(){ try { return localStorage.getItem("aegis_lang") || "ar"; } catch (e) { return "ar"; } })(),
   token: localStorage.getItem(TK),
   page: "overview",
-  fxCurrencies: [],
   fxRates: [],
-  fxRefSets: [],
   watchlistEntries: [],
   auditLog: [],
   auditVerifyResult: null,
@@ -311,7 +309,6 @@ function renderOverview() {
           el("tbody", {}, ...rows)
         )
   ));
-  if (state.tenantFxStatusFor) box.appendChild(renderTenantFxPanel());
 
   return box;
 }
@@ -331,29 +328,8 @@ function _tenantPanelRow(t) {
       el("div", { style: "padding:2px 10px 12px" }, content)));
 }
 
-async function loadTenantFxStatus(tid) {
-  state.tenantFxStatusFor = tid;
-}
-function renderTenantFxPanel() {
-  const fx = state.tenantFxStatus;
-  if (!fx) return el("div", { style: "color:var(--muted)" }, "…");
-  const srcLabel = { manual: "🛠️ سعر يدوي (Manual Override)", reference: "📋 مجموعة مرجعية",
-                     general: "🌐 السعر العام (General)", institution: "🏦 سعر المؤسسة" }[fx.source_layer] || fx.source_layer;
-  return el("div", { class: "card", style: "border:1px solid var(--brand);margin:8px 0" },
-    el("h3", { style: "margin-bottom:10px" }, "💱 حالة العملات وFX — " + (fx.tenant_id || "")),
-    el("div", { style: "font-size:13px;line-height:2" },
-      el("div", {}, el("strong", {}, "المصدر الحالي: "), srcLabel),
-      fx.reference_set
-        ? el("div", {}, el("strong", {}, "المجموعة المرجعية: "), (fx.reference_set.name || fx.reference_set.set_id),
-        : null),
-      el("div", {}, el("strong", {}, "USD/YER: "), fx.usd_yer != null ? String(fx.usd_yer) : "—",
-        el("span", { style: "color:var(--muted);font-size:11px" }, " (" + (fx.usd_yer_source || "") + ")")),
-      el("div", {}, el("strong", {}, "SAR/YER: "), fx.sar_yer != null ? String(fx.sar_yer) : "—",
-        el("span", { style: "color:var(--muted);font-size:11px" }, " (" + (fx.sar_yer_source || "") + ")")),
-      el("div", { style: "color:var(--muted);font-size:11px;margin-top:4px" }, "آخر تحديث: " + (fx.at || "")),
-    ),
-  );
-}
+
+
 function renderTenants() {
   const box = el("div", {});
   const header = el("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px" },
@@ -1252,7 +1228,7 @@ async function renderPage() {
       await loadInvestigators();
       c.replaceChildren(renderInvestigators());
     } else if (state.page === "fx") {
-      await Promise.all([loadFxCurrencies(), loadFxRates(), loadTenants(), loadFxRefSets()]);
+      await loadTenants();
     } else if (state.page === "watchlists") {
       await loadWatchlists();
       c.replaceChildren(renderWatchlists());
@@ -1342,13 +1318,9 @@ render();
 /* ═══════════ TASK 11 — advanced admin pages (FX / Watchlists / Policy / Audit) ═══════════ */
 function fmtTs(iso) { if (!iso) return "-"; const s = String(iso); return s.slice(0, 16).replace("T", " "); }
 
-async function loadFxCurrencies() {
-}
-async function loadFxRates() {
-state.tenantFxStatusFor = state.tenantFxStatusFor || null;
-}
-async function loadFxRefSets() {
-}
+
+
+
 async function loadPolicyTenants() {
   try { const r = await api("/tenants"); state.policyTenants = r.tenants || []; } catch { state.policyTenants = []; }
 }
@@ -1427,7 +1399,7 @@ function renderPolicyStudio() {
     editor = el("div", {},
       el("div", { class: "card" },
         el("h3", { style: "margin-bottom:10px" }, "🎛️ سياسة: " + (sel.name || sel.tenant_id)),
-        el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:12px" }, "عتبات القرار ومعالجة غياب سعر الصرف — تُحفظ فورًا وتُستخدم في القرارات القادمة"),
+        el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:12px" }, "عتبات القرار — تُحفظ فورًا وتُستخدم في القرارات القادمة"),
         el("div", { style: "display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end" },
           el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "عتبة Challenge"), tc),
           el("div", {}, el("label", { style: "font-size:12px;color:var(--muted);display:block;margin-bottom:4px" }, "عتبة Review"), tr),
