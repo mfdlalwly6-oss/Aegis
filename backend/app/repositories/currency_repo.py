@@ -106,7 +106,6 @@ class CurrencyRepository:
         code = code.upper()
         out = {"transactions": 0, "rules": 0}
         try:
-            r = self.db.query_one("SELECT COUNT(*) AS c FROM transactions WHERE currency=?", (code,))
             out["transactions"] = int(r["c"]) if r else 0
         except Exception:
             pass
