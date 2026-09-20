@@ -1337,14 +1337,12 @@ function _fxOverrideActions(x) {
     if (nr === null) return;
     try {
       toast("حُدّث الاستثناء (التاريخ محفوظ)", "success");
-      await loadFxRates(); render();
     } catch (e) { toast(e.message, "error"); }
   };
   const btnToggle = el("button", { class: "btn sm " + (isDisabled ? "success" : ""), style: "padding:3px 8px;font-size:10.5px" }, isDisabled ? "▶️" : "⏸");
   btnToggle.onclick = async () => {
     try {
       toast(isDisabled ? "فُعّل الاستثناء — أصبح إجباريًا لهذه المؤسسة" : "عُطّل الاستثناء — عادت المؤسسة للمصدر التالي", "success");
-      await loadFxRates(); render();
     } catch (e) { toast(e.message, "error"); }
   };
   const btnEnd = el("button", { class: "btn sm danger", style: "padding:3px 8px;font-size:10.5px" }, "🗑");
@@ -1352,7 +1350,6 @@ function _fxOverrideActions(x) {
     if (!confirm("إنهاء هذا الاستثناء نهائيًا؟ سيُغلق نطاق صلاحيته (valid_to) دون حذف — التاريخ يبقى سليمًا.")) return;
     try {
       toast("أُنهي الاستثناء", "success");
-      await loadFxRates(); render();
     } catch (e) { toast(e.message, "error"); }
   };
   return el("div", { style: "display:flex;gap:4px" }, btnEdit, btnToggle, btnEnd);
