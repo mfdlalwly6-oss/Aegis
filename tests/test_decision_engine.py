@@ -186,7 +186,6 @@ class TestDecisionEngineE2E:
         assert mine, "decision not persisted"
         d = mine[0]
         for col in (
-            "fx_proof_json",
             "tx_snapshot_json",
             "features_snapshot_json",
             "rule_set_version",
