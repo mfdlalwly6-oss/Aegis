@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))  # repo root importable for `from tests.conftest import ...`
 
 _TEST_DB = "aegis_test"
 

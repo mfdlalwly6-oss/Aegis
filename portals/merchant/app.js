@@ -13,7 +13,7 @@ const EN_LABELS = {
   "نظرة عامة": "Overview", "العملاء (بنوك ومحافظ)": "Tenants (Banks & Wallets)",
   "القرارات": "Decisions", "المحققون": "Investigators", "قواعد السياسة": "Policy Rules",
   "النماذج": "Models", "الرسم البياني": "Graph", "الإعدادات": "Settings", "التوثيق": "Docs",
-  "أسعار الصرف": "FX Rates", "قوائم المراقبة": "Watchlists", "استوديو السياسات": "Policy Studio",
+"قوائم المراقبة": "Watchlists", "استوديو السياسات": "Policy Studio",
   "سجل التدقيق": "Audit Log", "العمليات": "Transactions",
   "🚨 التنبيهات": "🚨 Alerts", "📁 القضايا": "📁 Cases", "🕸️ تحليل الشبكة": "🕸️ Network Graph",
   "⏳ فتح قائمة المراجعة": "⏳ Open Review Queue", "⚡ إجراءات سريعة": "⚡ Quick Actions",

@@ -12,7 +12,7 @@ const EN_LABELS = {
   "نظرة عامة": "Overview", "العملاء (بنوك ومحافظ)": "Tenants (Banks & Wallets)",
   "القرارات": "Decisions", "المحققون": "Investigators", "قواعد السياسة": "Policy Rules",
   "النماذج": "Models", "الرسم البياني": "Graph", "الإعدادات": "Settings", "التوثيق": "Docs",
-  "أسعار الصرف": "FX Rates", "قوائم المراقبة": "Watchlists", "استوديو السياسات": "Policy Studio",
+"قوائم المراقبة": "Watchlists", "استوديو السياسات": "Policy Studio",
   "سجل التدقيق": "Audit Log", "العمليات": "Transactions",
   "🚨 التنبيهات": "🚨 Alerts", "📁 القضايا": "📁 Cases", "🕸️ تحليل الشبكة": "🕸️ Network Graph",
   "⏳ فتح قائمة المراجعة": "⏳ Open Review Queue", "⚡ إجراءات سريعة": "⚡ Quick Actions",
@@ -333,7 +333,6 @@ function _tenantPanelRow(t) {
 
 async function loadTenantFxStatus(tid) {
   state.tenantFxStatusFor = tid;
-  state.tenantFxStatus = await api("/tenants/" + encodeURIComponent(tid) + "/fx-status");
 }
 function renderTenantFxPanel() {
   const fx = state.tenantFxStatus;
@@ -346,7 +345,6 @@ function renderTenantFxPanel() {
       el("div", {}, el("strong", {}, "المصدر الحالي: "), srcLabel),
       fx.reference_set
         ? el("div", {}, el("strong", {}, "المجموعة المرجعية: "), (fx.reference_set.name || fx.reference_set.set_id),
-          " ", el("button", { class: "btn sm", style: "padding:2px 8px;font-size:11px", onclick: () => { state.fxTenantId = state.tenantFxStatusFor || null; state.page = "fx"; render(); } }, "📋 فتح إدارة FX"))
         : el("div", { style: "color:var(--muted)" }, el("strong", { style: "color:var(--text)" }, "المجموعة المرجعية: "), "لا توجد مجموعة مرتبطة"),
       el("div", {}, el("strong", {}, "USD/YER: "), fx.usd_yer != null ? String(fx.usd_yer) : "—",
         el("span", { style: "color:var(--muted);font-size:11px" }, " (" + (fx.usd_yer_source || "") + ")")),
@@ -406,8 +404,6 @@ function renderTenants() {
           }, "⚙️ قواعد"),
           el("button", { class: "btn", style: "padding:5px 8px;font-size:11px",
             onclick: async () => {
-              // §31/§32: open the FX center with THIS institution selected.
-              state.fxTenantId = t.tenant_id;
               state.page = "fx";
               render();
             }
@@ -1257,7 +1253,6 @@ async function renderPage() {
       c.replaceChildren(renderInvestigators());
     } else if (state.page === "fx") {
       await Promise.all([loadFxCurrencies(), loadFxRates(), loadTenants(), loadFxRefSets()]);
-      if (state.fxTenantId) { try { state.tenantFxStatus = await api("/tenants/" + encodeURIComponent(state.fxTenantId) + "/fx-status"); } catch (e) { state.tenantFxStatus = null; } }
       c.replaceChildren(renderFx());
     } else if (state.page === "watchlists") {
       await loadWatchlists();
@@ -1349,15 +1344,11 @@ render();
 function fmtTs(iso) { if (!iso) return "-"; const s = String(iso); return s.slice(0, 16).replace("T", " "); }
 
 async function loadFxCurrencies() {
-  try { const r = await api("/fx/currencies"); state.fxCurrencies = r.currencies || []; } catch { state.fxCurrencies = []; }
 }
 async function loadFxRates() {
-  try { const r = await api("/fx/rates"); state.tenantFxStatus = state.tenantFxStatus || null;
 state.tenantFxStatusFor = state.tenantFxStatusFor || null;
-state.fxRates = r.rates || []; } catch { state.fxRates = []; }
 }
 async function loadFxRefSets() {
-  try { const r = await api("/fx/reference-sets"); state.fxRefSets = r.sets || []; } catch { state.fxRefSets = []; }
 }
 async function loadPolicyTenants() {
   try { const r = await api("/tenants"); state.policyTenants = r.tenants || []; } catch { state.policyTenants = []; }
@@ -1367,188 +1358,10 @@ async function loadAudit() {
 }
 
 
-/* 💱 سعر الصرف المرجعي — إدارة مجموعات الأسعار المرجعية (Reference Sets) */
-function renderFxReferenceSets() {
-  const sets = state.fxRefSets || [];
-  const tenants = state.tenants || [];
-  const tname = tid => (tenants.find(t => t.tenant_id === tid) || {}).name || tid;
-
-  const nmI = el("input", { class: "form-control", placeholder: "اسم المجموعة — مثال: مرجع صنعاء", style: "min-width:170px" });
-  const usdI = el("input", { class: "form-control", type: "number", step: "any", placeholder: "534", dir: "ltr", style: "width:110px" });
-  const sarI = el("input", { class: "form-control", type: "number", step: "any", placeholder: "140", dir: "ltr", style: "width:110px" });
-  const tBoxes = tenants.map(t => {
-    const cb = el("input", { type: "checkbox", value: t.tenant_id, style: "accent-color:var(--accent)" });
-    return { cb, tid: t.tenant_id, node: el("label", { style: "display:flex;align-items:center;gap:6px;padding:4px 8px;background:var(--surface);border:1px solid var(--border);border-radius:7px;font-size:12px;cursor:pointer" },
-      cb, el("span", {}, t.name || t.tenant_id)) };
-  });
-  const cmsg = el("div", { style: "font-size:12.5px;min-height:16px" });
-
-  const createCard = el("div", { class: "card", style: "border-color:var(--accent);border-width:2px;margin-bottom:12px" },
-    el("h3", { style: "margin-bottom:6px" }, "➕ سعر صرف مرجعي جديد"),
-    el("p", { style: "color:var(--muted);font-size:12px;margin-bottom:10px" },
-      "USD/YER = عدد الريالات مقابل 1 دولار · SAR/YER = عدد الريالات مقابل 1 ريال سعودي. اختر المؤسسات التي تستخدم هذا السعر (يمكن اختيار أكثر من مؤسسة)."),
-    el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px" },
-      nmI,
-      el("span", { style: "font-size:12.5px" }, "1 USD ="), usdI, el("span", { style: "font-size:12.5px" }, "YER"),
-      el("span", { style: "font-size:12.5px;margin-inline-start:10px" }, "1 SAR ="), sarI, el("span", { style: "font-size:12.5px" }, "YER")),
-    el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:5px" }, "البنوك والمؤسسات التي تستخدم هذا السعر:"),
-    el("div", { style: "display:flex;flex-wrap:wrap;gap:6px;max-height:130px;overflow:auto;padding:6px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px" },
-      ...tBoxes.map(b => b.node)),
-    el("div", { style: "display:flex;gap:8px;align-items:center" },
-      el("button", { class: "btn success", onclick: async () => {
-        cmsg.textContent = ""; cmsg.style.color = "var(--muted)";
-        const usd = parseFloat(usdI.value), sar = parseFloat(sarI.value);
-        if (!nmI.value.trim()) { cmsg.textContent = "أدخل اسم المجموعة"; cmsg.style.color = "#FCA5A5"; return; }
-        if (isNaN(usd) || usd <= 0 || isNaN(sar) || sar <= 0) { cmsg.textContent = "أدخل سعري USD/YER و SAR/YER موجبين"; cmsg.style.color = "#FCA5A5"; return; }
-        const tids = tBoxes.filter(b => b.cb.checked).map(b => b.tid);
-        try {
-          await api("/fx/reference-sets", { method: "POST", body: { name: nmI.value.trim(), usd_yer: usd, sar_yer: sar, tenant_ids: tids } });
-          toast("✅ أُنشئت المجموعة المرجعية وأُسندت للمؤسسات المختارة", "success");
-          await loadFxRefSets(); render();
-        } catch (e) { cmsg.textContent = e.message; cmsg.style.color = "#FCA5A5"; }
-      } }, "💾 إنشاء المجموعة"),
-      cmsg));
-
-  const setRows = sets.map(st => {
-    const eUsd = el("input", { class: "form-control", type: "number", step: "any", value: st.usd_yer, dir: "ltr", style: "width:100px" });
-    const eSar = el("input", { class: "form-control", type: "number", step: "any", value: st.sar_yer, dir: "ltr", style: "width:100px" });
-    const membersBox = el("div", { style: "display:none;padding:8px;background:var(--surface);border-radius:8px;margin-top:6px" });
-    const addBox = el("div", { style: "display:none;padding:8px;background:var(--surface);border-radius:8px;margin-top:6px" });
-
-    const loadMembersInto = () => {
-      const mrows = (st.members || []).map(tid => {
-        const rmBtn = el("button", { class: "btn sm danger", style: "padding:2px 8px;font-size:10.5px", onclick: async () => {
-          if (!confirm("إزالة " + tname(tid) + " من هذه المجموعة؟ ستعود تلقائيًا إلى سعر المؤسسة/العام.")) return;
-          try {
-            await api("/fx/reference-sets/unassign/" + encodeURIComponent(tid), { method: "POST", body: {} });
-            toast("أُزيلت المؤسسة من المجموعة (fallback تلقائي)", "success");
-            await loadFxRefSets(); render();
-          } catch (e) { toast(e.message, "error"); }
-        } }, "إزالة");
-        return el("div", { style: "display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px" },
-          el("span", { style: "font-size:12.5px" }, "🏢 " + tname(tid)), rmBtn);
-      });
-      const hdr = el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:5px" },
-        "المؤسسات المرتبطة (" + (st.members || []).length + "):");
-      membersBox.replaceChildren(hdr, ...mrows);
-    };
-
-    const loadAddInto = () => {
-      const free = tenants.filter(t => !(st.members || []).includes(t.tenant_id));
-      const boxes = free.map(t => {
-        const cb = el("input", { type: "checkbox", value: t.tenant_id, style: "accent-color:var(--accent)" });
-        return { cb, tid: t.tenant_id, node: el("label", { style: "display:flex;align-items:center;gap:6px;padding:3px 7px;border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer" },
-          cb, el("span", {}, t.name || t.tenant_id)) };
-      });
-      const kids = [];
-      kids.push(el("div", { style: "font-size:12px;color:var(--muted);margin-bottom:5px" }, "المؤسسات غير المرتبطة بهذه المجموعة:"));
-      if (free.length === 0) {
-        kids.push(el("div", { style: "color:var(--muted);font-size:12px" }, "كل المؤسسات مرتبطة بهذه المجموعة."));
-      } else {
-        kids.push(el("div", { style: "display:flex;flex-wrap:wrap;gap:5px;max-height:110px;overflow:auto;margin-bottom:6px" }, ...boxes.map(b => b.node)));
-        kids.push(el("button", { class: "btn sm success", onclick: async () => {
-          const tids = boxes.filter(b => b.cb.checked).map(b => b.tid);
-          if (!tids.length) { toast("اختر مؤسسة واحدة على الأقل", "error"); return; }
-          try {
-            await api("/fx/reference-sets/" + encodeURIComponent(st.set_id) + "/assign", { method: "POST", body: { tenant_ids: tids } });
-            toast("✅ أُضيفت المؤسسات (مع نقل تلقائي من أي مجموعة سابقة)", "success");
-            await loadFxRefSets(); render();
-          } catch (e) { toast(e.message, "error"); }
-        } }, "➕ إضافة المحدد"));
-      }
-      addBox.replaceChildren(...kids);
-    };
-
-    const statusBtn = el("button", { class: "btn sm", style: "padding:3px 8px;font-size:10.5px", onclick: async () => {
-      try {
-        await api("/fx/reference-sets/" + encodeURIComponent(st.set_id) + "/status?active=" + (!st.active), { method: "POST", body: {} });
-        toast(st.active ? "عُطّلت المجموعة" : "فُعّلت المجموعة", "success");
-        await loadFxRefSets(); render();
-      } catch (e) { toast(e.message, "error"); }
-    } }, st.active ? "⏸ تعطيل" : "▶ تفعيل");
-
-    const deleteBtn = el("button", { class: "btn sm danger", style: "padding:3px 8px;font-size:10.5px", onclick: async () => {
-      const n = (st.members || []).length;
-      if (!confirm("حذف المجموعة «" + st.name + "» نهائيًا؟\n" +
-        (n ? ("سيتم فك ارتباط " + n + " مؤسسة تلقائيًا وستعود كل منها إلى سعر المؤسسة/العام.\n") : "") +
-        "سيُحتفظ بسجل المجموعة وأسعارها للتاريخ، لكنها ستُعطّل وتُزال من الاستخدام.")) return;
-      try {
-        const r = await api("/fx/reference-sets/" + encodeURIComponent(st.set_id), { method: "DELETE" });
-        toast("🗑 حُذفت المجموعة «" + st.name + "» (فُك ارتباط " + (r.unassigned_tenants || []).length + " مؤسسة)", "success");
-        await loadFxRefSets();
-        if (state.fxTenantId) { try { state.tenantFxStatus = await api("/tenants/" + encodeURIComponent(state.fxTenantId) + "/fx-status"); } catch (e) {} }
-        render();
-      } catch (e) { toast(e.message, "error"); }
-    } }, "🗑 حذف");
-
-    const membersBtn = el("button", { class: "btn sm", style: "padding:3px 8px;font-size:10.5px", onclick: () => {
-      const open = membersBox.style.display !== "none";
-      if (!open) loadMembersInto();
-      membersBox.style.display = open ? "none" : "block";
-      addBox.style.display = "none";
-    } }, "👥 المؤسسات");
-
-    const addBtn = el("button", { class: "btn sm", style: "padding:3px 8px;font-size:10.5px", onclick: () => {
-      const open = addBox.style.display !== "none";
-      if (!open) loadAddInto();
-      addBox.style.display = open ? "none" : "block";
-      membersBox.style.display = "none";
-    } }, "➕ إضافة");
-
-    const saveEditBtn = el("button", { class: "btn sm primary", style: "padding:3px 8px;font-size:10.5px", onclick: async () => {
-      const usd = parseFloat(eUsd.value), sar = parseFloat(eSar.value);
-      if (isNaN(usd) || usd <= 0 || isNaN(sar) || sar <= 0) { toast("أدخل قيمًا موجبة", "error"); return; }
-      try {
-        await api("/fx/reference-sets/" + encodeURIComponent(st.set_id), { method: "PUT", body: { usd_yer: usd, sar_yer: sar } });
-        toast("✅ عُدّل السعر — المؤسسات المرتبطة بقيت كما هي", "success");
-        await loadFxRefSets(); render();
-      } catch (e) { toast(e.message, "error"); }
-    } }, "💾 حفظ التعديل");
-
-    return el("div", { style: "padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;background:var(--surface)" },
-      el("div", { style: "display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px" },
-        el("div", {},
-          el("div", { style: "font-weight:700" }, "📌 " + st.name),
-          el("div", { style: "font-size:12.5px;margin-top:3px" },
-            "1 USD = ", el("b", { dir: "ltr" }, String(st.usd_yer)), " YER · 1 SAR = ", el("b", { dir: "ltr" }, String(st.sar_yer)), " YER"),
-          el("div", { style: "font-size:11.5px;color:var(--muted);margin-top:2px" },
-            "عدد المؤسسات: " + (st.member_count || 0) + " · أُنشئت: " + fmtTs(st.created_at) + " · آخر تعديل: " + fmtTs(st.updated_at))),
-        el("div", { style: "display:flex;gap:5px;flex-wrap:wrap;align-items:center" },
-          el("span", { class: "badge " + (st.active ? "allow" : "block") }, st.active ? "فعّالة" : "معطّلة"),
-          membersBtn, addBtn, statusBtn, deleteBtn)),
-      el("div", { style: "display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap" },
-        el("span", { style: "font-size:12px" }, "✏️ تعديل: 1 USD ="), eUsd,
-        el("span", { style: "font-size:12px" }, "· 1 SAR ="), eSar,
-        saveEditBtn),
-      membersBox, addBox);
-  });
-
-  return el("div", { class: "card" },
-    el("h3", { style: "margin-bottom:4px" }, "💱 سعر الصرف المرجعي (Reference Rates)"),
-    el("p", { style: "color:var(--muted);font-size:12.5px;margin-bottom:12px" },
-      "مجموعات أسعار مرجعية تُسند لمؤسسات محددة. الأولوية: يدوي > سعر المؤسسة > مرجعي > عام. تعديل المجموعة لا يعيد تسعير القرارات القديمة."),
-    createCard,
-    sets.length === 0
-      ? el("div", { style: "color:var(--muted);padding:12px" }, "لا مجموعات مرجعية بعد — أنشئ أول واحدة أعلاه.")
-      : el("div", {}, ...setRows));
-}
-
 /* 💱 FX Center — collapsible hub. General / Reference (as-is) / Overrides /
    Currencies / Historical (read-only). Reuses existing loaders + APIs. */
 
-function _fxSection(key, title, bodyFn, openDefault) {
-  state.fxSec = state.fxSec || {};
-  if (state.fxSec[key] === undefined) state.fxSec[key] = !!openDefault;
-  const open = state.fxSec[key];
-  const head = el("button", {
-    class: "btn",
-    style: "width:100%;text-align:right;justify-content:space-between;display:flex;padding:12px 16px;font-size:14px;font-weight:700",
-    onclick: () => { state.fxSec[key] = !state.fxSec[key]; render(); }
-  }, el("span", {}, title), el("span", {}, open ? "▲" : "▼"));
-  const card = el("div", { class: "card", style: "padding:0;overflow:hidden" }, head);
-  if (open) card.appendChild(el("div", { style: "padding:16px" }, bodyFn()));
-  return card;
-}
+
 
 /* Action buttons for a general rate row — edit (versioned), toggle, end. */
 function _fxRateActions(x) {
@@ -1557,7 +1370,6 @@ function _fxRateActions(x) {
     const nr = prompt("السعر الجديد لـ " + x.base_ccy + "/" + x.quote_ccy + " (الحالي: " + x.rate + "):");
     if (nr === null) return;
     try {
-      await api("/fx/rates/" + encodeURIComponent(x.rate_id), { method: "PUT", body: { rate: Number(nr) } });
       toast("حُدّث السعر (التاريخ محفوظ)", "success");
       await loadFxRates(); render();
     } catch (e) { toast(e.message, "error"); }
@@ -1566,7 +1378,6 @@ function _fxRateActions(x) {
   const btnToggle = el("button", { class: "btn sm", style: "padding:3px 8px;font-size:10.5px" }, isDisabled ? "▶️" : "⏸");
   btnToggle.onclick = async () => {
     try {
-      await api("/fx/rates/" + encodeURIComponent(x.rate_id) + "/status", { method: "POST", body: { active: isDisabled } });
       toast(isDisabled ? "فُعّل" : "عُطّل", "success");
       await loadFxRates(); render();
     } catch (e) { toast(e.message, "error"); }
@@ -1575,7 +1386,6 @@ function _fxRateActions(x) {
   btnEnd.onclick = async () => {
     if (!confirm("إنهاء هذا السعر؟ سيُغلق نطاق صلاحيته (valid_to) دون حذف — اللقطات التاريخية تبقى سليمة.")) return;
     try {
-      await api("/fx/rates/" + encodeURIComponent(x.rate_id) + "/end", { method: "POST", body: {} });
       toast("أُنهي السعر", "success");
       await loadFxRates(); render();
     } catch (e) { toast(e.message, "error"); }
@@ -1583,62 +1393,7 @@ function _fxRateActions(x) {
   return el("div", { style: "display:flex;gap:4px" }, btnEdit, btnToggle, btnEnd);
 }
 
-function renderFxGeneral() {
-  const rates = (state.fxRates || []).filter(x => !x.tenant_id);
-  const nowIso = new Date().toISOString();
-  const inWindow = x => !x.valid_to || x.valid_to > nowIso;
-  const actives = (state.fxCurrencies || []).filter(c => c.active);
-  const gb = el("select", { class: "form-control", style: "width:120px" }, ...actives.map(c => el("option", { value: c.code }, c.code)));
-  const gq = el("select", { class: "form-control", style: "width:120px" }, ...actives.map(c => el("option", { value: c.code }, c.code)));
-  const gr = el("input", { class: "form-control", type: "number", step: "any", placeholder: "550", dir: "ltr", style: "width:120px" });
-  const gregion = el("select", { class: "form-control", style: "width:130px" },
-    el("option", { value: "global" }, "global"),
-    el("option", { value: "sanaa" }, "صنعاء (sanaa)"),
-    el("option", { value: "aden" }, "عدن (aden)"));
-  const gmsg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
-  const hint = el("div", { style: "font-size:12px;color:var(--muted);margin-top:2px" }, "");
-  function updHint() { hint.textContent = (gb.value && gq.value && gr.value) ? ("1 " + gb.value + " = " + gr.value + " " + gq.value) : ""; }
-  gb.onchange = updHint; gq.onchange = updHint; gr.oninput = updHint;
 
-  const addBtn = el("button", { class: "btn success" }, "➕ إضافة سعر عام");
-  addBtn.onclick = async () => {
-    gmsg.textContent = ""; gmsg.style.color = "var(--muted)";
-    if (!gb.value || !gq.value || !gr.value) { gmsg.textContent = "أدخل الزوج والسعر"; gmsg.style.color = "#FCA5A5"; return; }
-    try {
-      await api("/fx/rates", { method: "POST", body: { base_ccy: gb.value, quote_ccy: gq.value, rate: Number(gr.value), source: "aegis_reference", region: gregion.value || "global" } });
-      toast("أُضيف السعر العام (لقطة جديدة)", "success");
-      gr.value = ""; hint.textContent = "";
-      await loadFxRates(); render();
-    } catch (e) { gmsg.textContent = e.message; gmsg.style.color = "#FCA5A5"; }
-  };
-
-  const form = el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px" },
-    el("span", { style: "font-size:12.5px;color:var(--muted)" }, "من:"), gb,
-    el("span", { style: "font-size:12.5px;color:var(--muted)" }, "إلى:"), gq,
-    el("span", { style: "font-size:12.5px;color:var(--muted)" }, "السعر:"), gr,
-    gregion, addBtn);
-
-  const rows = rates.map(x => {
-    const isAct = inWindow(x) && x.active !== 0 && x.active !== false;
-    return el("tr", { style: isAct ? "" : "opacity:.55" },
-      el("td", { style: "font-weight:700" }, el("code", { style: "font-size:11px" }, (x.base_ccy || "") + "/" + (x.quote_ccy || ""))),
-      el("td", {}, String(x.rate)),
-      el("td", { style: "font-size:11px" }, x.region || "global"),
-      el("td", {}, el("span", { class: "badge info" }, x.source || "")),
-      el("td", {}, el("span", { class: "badge " + (isAct ? "allow" : "block") }, isAct ? "🟢 فعّال" : "🔴 موقوف/منتهٍ")),
-      el("td", {}, inWindow(x) ? _fxRateActions(x) : null));
-  });
-  const table = rates.length === 0
-    ? el("div", { style: "color:var(--muted)" }, "لا أسعار عامة مسجَّلة.")
-    : el("div", { style: "overflow:auto" }, el("table", {},
-        el("thead", {}, el("tr", {},
-          el("th", {}, "الزوج"), el("th", {}, "السعر"), el("th", {}, "المنطقة"),
-          el("th", {}, "المصدر"), el("th", {}, "الحالة"), el("th", {}, "إجراءات"))),
-        el("tbody", {}, ...rows)));
-
-  return el("div", {}, form, hint, gmsg,
-    el("h4", { style: "margin:12px 0 8px" }, "📊 الأسعار العامة الحالية"), table);
-}
 
 /* Action buttons for a currency row — edit name, disable/enable (never delete). */
 function _fxCurrencyActions(x) {
@@ -1647,7 +1402,6 @@ function _fxCurrencyActions(x) {
     const nn = prompt("الاسم الجديد لـ " + x.code + ":", x.name);
     if (nn === null) return;
     try {
-      await api("/fx/currencies/" + encodeURIComponent(x.code), { method: "PUT", body: { name: nn } });
       toast("حُدّثت العملة", "success");
       await loadFxCurrencies(); render();
     } catch (e) { toast(e.message, "error"); }
@@ -1657,13 +1411,11 @@ function _fxCurrencyActions(x) {
     if (x.active) {
       let warn = "⚠️ إيقاف عملة " + x.code + "؟ المعاملات الجديدة بها ستُرفض (CURRENCY_DISABLED) والتاريخ يبقى سليمًا.";
       try {
-        const u = await api("/fx/currencies/" + encodeURIComponent(x.code) + "/usage");
         warn = "⚠️ عملة " + x.code + " مستخدمة حاليًا في:\n- " + u.transactions + " معاملة\n- " + u.rules + " قاعدة\n\nالإيقاف يمنع المعاملات الجديدة فقط دون المساس بالتاريخ. متابعة؟";
       } catch (e) {}
       if (!confirm(warn)) return;
     }
     try {
-      await api("/fx/currencies/" + encodeURIComponent(x.code) + "/" + (x.active ? "disable" : "enable"), { method: "POST", body: {} });
       toast(x.active ? "أُوقفت العملة" : "فُعّلت العملة", "success");
       await loadFxCurrencies(); render();
     } catch (e) { toast(e.message, "error"); }
@@ -1671,83 +1423,9 @@ function _fxCurrencyActions(x) {
   return el("div", { style: "display:flex;gap:4px" }, btnEdit, btnToggle);
 }
 
-function renderFxCurrencies() {
-  const cur = state.fxCurrencies || [];
-  const filter = state.fxCurFilter || "all";
-  const list = filter === "active" ? cur.filter(c => c.active) : filter === "disabled" ? cur.filter(c => !c.active) : cur;
-  const cc = el("input", { class: "form-control", placeholder: "USD", maxlength: 3, dir: "ltr", style: "width:90px" });
-  const cn = el("input", { class: "form-control", placeholder: "اسم العملة", style: "width:160px" });
-  const csym = el("input", { class: "form-control", placeholder: "الرمز ($)", style: "width:90px" });
-  const cmu = el("input", { class: "form-control", type: "number", value: 2, placeholder: "الوحدة الصغرى", style: "width:110px" });
-  const cdp = el("input", { class: "form-control", type: "number", value: 2, placeholder: "خانات عشرية", style: "width:110px" });
-  const cmsg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
-  function fbtn(v, label) {
-    const b = el("button", { class: "btn sm" + (filter === v ? " primary" : ""), style: "padding:4px 10px;font-size:11.5px" }, label);
-    b.onclick = () => { state.fxCurFilter = v; render(); };
-    return b;
-  }
-  const addBtn = el("button", { class: "btn success" }, "➕ إضافة عملة");
-  addBtn.onclick = async () => {
-    cmsg.textContent = ""; cmsg.style.color = "var(--muted)";
-    if (!cc.value.trim() || !cn.value.trim()) { cmsg.textContent = "أدخل الرمز والاسم"; cmsg.style.color = "#FCA5A5"; return; }
-    try {
-      await api("/fx/currencies", { method: "POST", body: {
-        code: cc.value.trim().toUpperCase(), name: cn.value.trim(),
-        symbol: csym.value.trim() || null,
-        minor_unit: Number(cmu.value || 2),
-        decimal_places: Number(cdp.value || cmu.value || 2) } });
-      toast("أُضيفت العملة", "success");
-      await loadFxCurrencies(); render();
-    } catch (e) { cmsg.textContent = e.message; cmsg.style.color = "#FCA5A5"; }
-  };
 
-  const form = el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px" },
-    cc, cn, csym, cmu, cdp, addBtn);
-  const filters = el("div", { style: "display:flex;gap:6px;margin-bottom:10px" },
-    fbtn("all", "الكل"), fbtn("active", "🟢 المفعلة"), fbtn("disabled", "🔴 الموقوفة"));
 
-  const rows = list.map(x => el("tr", {},
-    el("td", { style: "font-weight:700" }, el("code", {}, x.code)),
-    el("td", {}, x.name),
-    el("td", {}, x.symbol || "—"),
-    el("td", {}, String(x.decimal_places != null ? x.decimal_places : x.minor_unit)),
-    el("td", {}, el("span", { class: "badge " + (x.active ? "allow" : "block") }, x.active ? "🟢 مفعلة" : "🔴 موقوفة")),
-    el("td", {}, _fxCurrencyActions(x))));
-  const table = list.length === 0
-    ? el("div", { style: "color:var(--muted)" }, "لا عملات.")
-    : el("div", { style: "overflow:auto" }, el("table", {},
-        el("thead", {}, el("tr", {},
-          el("th", {}, "الرمز"), el("th", {}, "الاسم"), el("th", {}, "الرمز المختصر"),
-          el("th", {}, "خانات عشرية"), el("th", {}, "الحالة"), el("th", {}, "إجراءات"))),
-        el("tbody", {}, ...rows)));
 
-  return el("div", {}, form, cmsg, filters, table);
-}
-
-function renderFxHistory() {
-  const rates = state.fxRates || [];
-  const rows = rates.map(x => el("tr", {},
-    el("td", { style: "font-weight:600" }, el("code", { style: "font-size:11px" }, (x.base_ccy || "") + "/" + (x.quote_ccy || ""))),
-    el("td", {}, String(x.rate)),
-    el("td", {}, el("span", { class: "badge info" }, x.source || "")),
-    el("td", {}, x.tenant_id
-      ? el("span", { class: "badge review" }, "🏢 " + ((state.tenants.find(t => t.tenant_id === x.tenant_id) || {}).name || x.tenant_id))
-      : el("span", { class: "badge allow" }, "🌐 عام")),
-    el("td", { style: "font-size:11px" }, fmtTs(x.valid_from)),
-    el("td", { style: "font-size:11px" }, x.valid_to ? fmtTs(x.valid_to) : "مفتوح"),
-    el("td", { style: "font-size:11px" }, fmtTs(x.fetched_at))));
-  const table = rates.length === 0
-    ? el("div", { style: "color:var(--muted)" }, "لا سجلّات.")
-    : el("div", { style: "overflow:auto;max-height:360px" }, el("table", {},
-        el("thead", {}, el("tr", {},
-          el("th", {}, "الزوج"), el("th", {}, "السعر"), el("th", {}, "المصدر"), el("th", {}, "النطاق"),
-          el("th", {}, "صالح من"), el("th", {}, "صالح إلى"), el("th", {}, "سُجّل"))),
-        el("tbody", {}, ...rows)));
-  return el("div", {},
-    el("p", { style: "color:var(--muted);font-size:12.5px;margin-bottom:10px" },
-      "قراءة فقط — اللقطات التاريخية لا تُعدَّل ولا تُحذف (append-only)."),
-    table);
-}
 
 /* 💱 Tenant FX banner — shown when the center is opened from a specific
    institution (real tenant_id), making the source-of-truth explicit (§32/§34). */
@@ -1766,7 +1444,6 @@ function renderFxTenantBanner() {
           el("strong", {}, "مصدر FX الحالي: "), srcLabel,
           el("span", { style: "color:var(--muted)" }, " — USD/YER: " + (fx.usd_yer != null ? fx.usd_yer : "—") + "، SAR/YER: " + (fx.sar_yer != null ? fx.sar_yer : "—"))) : null),
       el("button", { class: "btn sm", style: "padding:6px 12px;font-size:12px",
-        onclick: () => { state.fxTenantId = null; state.tenantFxStatus = null; render(); } }, "✕ عرض عام")));
 }
 
 /* ── shared custom select (fxSel) — replaces native <select> popups that render
@@ -1845,14 +1522,10 @@ function renderFx() {
     banner,
     el("div", { class: "grid", style: "margin-bottom:6px" },
       kpi("العملات", cur.length, "المسجَّلة", "brand"),
-      kpi("أسعار الصرف", rates.length, "لقطات محفوظة", "info"),
-      kpi("أزواج فريدة", new Set(rates.map(r => (r.base_ccy || "") + "/" + (r.quote_ccy || ""))).size, "Base/Quote", "purple"),
+            kpi("أزواج فريدة", new Set(rates.map(r => (r.base_ccy || "") + "/" + (r.quote_ccy || ""))).size, "Base/Quote", "purple"),
     ),
-    _fxSection("general", "📊 أسعار الصرف العامة (General Rates)", renderFxGeneral, true),
     _fxSection("reference", "💱 سعر الصرف المرجعي (Reference Rates)", renderFxReferenceSets, false),
-    _fxSection("overrides", "🎯 استثناءات المؤسسات (Tenant FX Overrides)", renderFxOverrides, false),
     _fxSection("currencies", "🪙 العملات المدعومة (Supported Currencies)", renderFxCurrencies, true),
-    _fxSection("history", "📜 لقطات أسعار الصرف التاريخية (Historical FX)", renderFxHistory, false),
   );
 }
 
@@ -1869,7 +1542,6 @@ function _fxOverrideActions(x) {
     const nr = prompt("السعر الجديد لـ " + x.base_ccy + "/" + x.quote_ccy + " (" + (x.tenant_name || x.tenant_id) + ") — الحالي: " + x.rate + ":");
     if (nr === null) return;
     try {
-      await api("/fx/rates/" + encodeURIComponent(x.rate_id), { method: "PUT", body: { rate: Number(nr) } });
       toast("حُدّث الاستثناء (التاريخ محفوظ)", "success");
       await loadFxRates(); render();
     } catch (e) { toast(e.message, "error"); }
@@ -1877,7 +1549,6 @@ function _fxOverrideActions(x) {
   const btnToggle = el("button", { class: "btn sm " + (isDisabled ? "success" : ""), style: "padding:3px 8px;font-size:10.5px" }, isDisabled ? "▶️" : "⏸");
   btnToggle.onclick = async () => {
     try {
-      await api("/fx/rates/" + encodeURIComponent(x.rate_id) + "/status", { method: "POST", body: { active: isDisabled } });
       toast(isDisabled ? "فُعّل الاستثناء — أصبح إجباريًا لهذه المؤسسة" : "عُطّل الاستثناء — عادت المؤسسة للمصدر التالي", "success");
       await loadFxRates(); render();
     } catch (e) { toast(e.message, "error"); }
@@ -1886,7 +1557,6 @@ function _fxOverrideActions(x) {
   btnEnd.onclick = async () => {
     if (!confirm("إنهاء هذا الاستثناء نهائيًا؟ سيُغلق نطاق صلاحيته (valid_to) دون حذف — التاريخ يبقى سليمًا.")) return;
     try {
-      await api("/fx/rates/" + encodeURIComponent(x.rate_id) + "/end", { method: "POST", body: {} });
       toast("أُنهي الاستثناء", "success");
       await loadFxRates(); render();
     } catch (e) { toast(e.message, "error"); }
@@ -1894,84 +1564,7 @@ function _fxOverrideActions(x) {
   return el("div", { style: "display:flex;gap:4px" }, btnEdit, btnToggle, btnEnd);
 }
 
-function renderFxOverrides() {
-  const rates = state.fxRates || [];
-  const nowIso = new Date().toISOString();
-  const tenantRows = rates.filter(x => x.tenant_id);
-  const actOf = x => (!x.valid_to || x.valid_to > nowIso) && x.active !== 0 && x.active !== false;
-  const activesCcy = (state.fxCurrencies || []).filter(c => c.active);
-  const tenants = (state.tenants || []).filter(t => t.status !== "deleted");
 
-  // Create form — institution + from/to currency + rate (real dropdowns).
-  const _fxTenantOpts = [{ value: "", label: "— اختر المؤسسة —" },
-    ...tenants.map(t => ({ value: t.tenant_id, label: "🏢 " + (t.name || t.tenant_id) }))];
-  const tSel = fxSel(_fxTenantOpts, {
-    value: state.fxTenantId || "",
-    placeholder: "— اختر المؤسسة —",
-    minWidth: "230px",
-    onChange: () => {},  // value read at save time via tSel.getValue()
-  });
-  const fromSel = el("select", { class: "form-control", style: "width:110px" }, ...activesCcy.map(c => el("option", { value: c.code }, c.code)));
-  const toSel = el("select", { class: "form-control", style: "width:110px" }, ...activesCcy.map(c => el("option", { value: c.code }, c.code)));
-  if (activesCcy.some(c => c.code === "USD")) fromSel.value = "USD";
-  if (activesCcy.some(c => c.code === "YER")) toSel.value = "YER";
-  const rateIn = el("input", { class: "form-control", type: "number", step: "any", placeholder: "550", dir: "ltr", style: "width:120px" });
-  const hint = el("div", { style: "font-size:12px;color:var(--muted);margin-top:2px;min-height:14px" }, "");
-  function updHint() { hint.textContent = (fromSel.value && toSel.value && rateIn.value) ? ("1 " + fromSel.value + " = " + rateIn.value + " " + toSel.value) : ""; }
-  fromSel.onchange = updHint; toSel.onchange = updHint; rateIn.oninput = updHint;
-  const omsg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
-
-  const saveBtn = el("button", { class: "btn success" }, "➕ إضافة استثناء");
-  saveBtn.onclick = async () => {
-    omsg.textContent = ""; omsg.style.color = "var(--muted)";
-    if (!tSel.getValue()) { omsg.textContent = "اختر المؤسسة"; omsg.style.color = "#FCA5A5"; return; }
-    if (!fromSel.value || !toSel.value || !rateIn.value) { omsg.textContent = "أدخل الزوج والسعر"; omsg.style.color = "#FCA5A5"; return; }
-    if (fromSel.value === toSel.value) { omsg.textContent = "العملتان يجب أن تختلفا"; omsg.style.color = "#FCA5A5"; return; }
-    try {
-      await api("/fx/rates", { method: "POST", body: { base_ccy: fromSel.value, quote_ccy: toSel.value, rate: Number(rateIn.value), source: "manual", tenant_id: tSel.getValue() } });
-      toast("أُضيف الاستثناء — أصبح إجباريًا لهذه المؤسسة", "success");
-      rateIn.value = ""; hint.textContent = "";
-      await loadFxRates(); render();
-    } catch (e) { omsg.textContent = e.message; omsg.style.color = "#FCA5A5"; }
-  };
-
-  const form = el("div", { style: "border:1px dashed var(--brand);border-radius:10px;padding:12px;margin-bottom:14px" },
-    el("div", { style: "font-weight:700;font-size:13px;margin-bottom:8px" }, "➕ إضافة استثناء مؤسسة جديد (يصبح فعّالًا وإجباريًا فورًا)"),
-    el("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center" },
-      el("span", { style: "font-size:12px;color:var(--muted)" }, "المؤسسة:"), tSel,
-      el("span", { style: "font-size:12px;color:var(--muted)" }, "من:"), fromSel,
-      el("span", { style: "font-size:12px;color:var(--muted)" }, "إلى:"), toSel,
-      el("span", { style: "font-size:12px;color:var(--muted)" }, "السعر:"), rateIn,
-      saveBtn),
-    hint, omsg);
-
-  // Current overrides list — full management actions.
-  const rows = tenantRows.map(x => {
-    const tname = (state.tenants.find(t => t.tenant_id === x.tenant_id) || {}).name || x.tenant_id;
-    const act = actOf(x);
-    x.tenant_name = tname;
-    return el("tr", { style: act ? "" : "opacity:.55" },
-      el("td", { style: "font-weight:600;font-size:12.5px" }, "🏢 " + tname,
-        el("div", { style: "font-size:10px;color:var(--muted)" }, el("code", { style: "font-size:10px" }, x.tenant_id))),
-      el("td", {}, el("code", { style: "font-size:11px" }, (x.base_ccy || "") + "/" + (x.quote_ccy || ""))),
-      el("td", { style: "font-weight:700" }, "1 " + (x.base_ccy || "") + " = " + x.rate + " " + (x.quote_ccy || "")),
-      el("td", {}, el("span", { class: "badge info" }, x.source || "manual")),
-      el("td", {}, el("span", { class: "badge " + (act ? "allow" : "block") }, act ? "🟢 فعّال" : (x.active === 0 || x.active === false ? "⏸ معطّل" : "منتهٍ"))),
-      el("td", { style: "font-size:11px" }, fmtTs(x.valid_from)),
-      el("td", {}, (!x.valid_to || x.valid_to > nowIso) ? _fxOverrideActions(x) : null));
-  });
-  const table = tenantRows.length === 0
-    ? el("div", { style: "color:var(--muted)" }, "لا استثناءات مسجّلة — كل المؤسسات تستخدم السعر العام أو سعرها المُرسَل أو مجموعتها المرجعية.")
-    : el("div", { style: "overflow:auto" }, el("table", {},
-        el("thead", {}, el("tr", {},
-          el("th", {}, "المؤسسة"), el("th", {}, "الزوج"), el("th", {}, "السعر"), el("th", {}, "المصدر"),
-          el("th", {}, "الحالة"), el("th", {}, "صالح من"), el("th", {}, "إجراءات"))),
-        el("tbody", {}, ...rows)));
-
-  return el("div", {}, form,
-    el("h4", { style: "margin:0 0 8px" }, "📋 الاستثناءات الحالية"),
-    table);
-}
 
 
 
