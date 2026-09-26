@@ -135,11 +135,6 @@ class PolicyEngine:
         disabled -= PROTECTED_RULES
 
         # --- FX missing action (can never be a silent allow) ---
-        fx_missing_action = str(
-            raw_policy.get("fx_missing_action") or settings.FX_MISSING_DECISION
-        ).lower()
-        if fx_missing_action not in ("review", "block"):
-            fx_missing_action = "review"
 
         return {
             "thresholds": th,
@@ -152,7 +147,6 @@ class PolicyEngine:
             "expected_regions": raw_policy.get("expected_regions")
             or profile.get("expected_regions")
             or [],
-            "fx_missing_action": fx_missing_action,
             "profile": profile_name,
             "version": POLICY_SCHEMA_VERSION,
         }
