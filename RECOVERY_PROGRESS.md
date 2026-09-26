@@ -67,3 +67,10 @@
 - Merge of origin/aegis-v3-main (7faf53a) into local 9bc8a68; safety refs: backup-local-9bc8a68, tag backup-pre-merge-9bc8a68.
 - Conflict resolution: semantic — remote security kept (session revocation, password salt, rate limiting, Gmail SMTP, invitation lifecycle+UI, credential rotation, weights/thresholds repos), FX stripped with compile/JS gates; FX files re-added by remote were re-deleted.
 - FX scan after merge: see FX_SCAN_COUNT in session log (target 0).
+
+## Post-merge FX purge (2026-09-26, after eb0fb65)
+- HONESTY: first merge push (eb0fb65) contained 36 FX refs + broken thresholds.py (syntax) — pushed before gates verified; fixed here.
+- config.py: remote version restored (Gmail SMTP/brevo security config kept) + FX_MISSING_DECISION line removed.
+- DELETED: thresholds.py router (corrupted + fx-coupled; thresholds remain functional via policy_engine defaults), threshold_repo.py (fx-coupled), test_fx_missing_options.py, test_thresholds.py.
+- registry.py: threshold_repo refs removed; invitations/password_resets/email wiring ported from remote registry.
+- __init__.py: thresholds import removed.

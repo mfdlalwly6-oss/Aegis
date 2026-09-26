@@ -34,6 +34,4 @@ router.include_router(reports.router, prefix="/reports", tags=["reports"])
 
 router.include_router(feedback.router, tags=["feedback"])
 
-from app.api.v1 import weights, thresholds
 router.include_router(weights.router, prefix="/weights", tags=["weights"])
-router.include_router(thresholds.router, prefix="/thresholds", tags=["thresholds"])

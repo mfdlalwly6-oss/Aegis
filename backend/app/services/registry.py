@@ -35,6 +35,8 @@ from app.repositories.weight_repo import WeightRepository
 from app.rules.engine import RuleEngine
 from app.services.notifications import NotificationService, provider_from_settings
 from app.services.orchestrator import DecisionOrchestrator
+from app.repositories.invitation_repo import InvitationRepository
+from app.services.email_service import EmailService
 from app.streaming import EventBus
 
 logger = structlog.get_logger(__name__)
@@ -144,6 +146,7 @@ class ServiceRegistry:
         self.investigators = InvestigatorRepository(self.db)
         self.currency_repo = CurrencyRepository(self.db)
         self.weights = WeightRepository(self.db)
+        self.invitations = InvitationRepository(self.db)
 
         # Bootstrap a first investigator from env when none exists (dev convenience).
         # Investigators are tenant-scoped: use INVESTIGATOR_TENANT_ID, else first

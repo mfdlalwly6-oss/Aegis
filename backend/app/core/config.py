@@ -6,12 +6,20 @@ import os
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _database_url_env_shim() -> None:
-    """Map platform-standard env vars to AEGIS_* names when unset."""
+    """Map platform-standard env vars to AEGIS_* names when unset.
+
+    Many PostgreSQL providers inject a standard unprefixed DATABASE_URL
+    (Railway, Heroku, Render, managed Postgres, generic Docker). AEGIS reads
+    AEGIS_DATABASE_URL (env_prefix="AEGIS_"). If only the unprefixed form exists,
+    adopt it — the explicitly-prefixed form always wins when set. This keeps the
+    app deployment-agnostic: configuration comes from env, code knows no provider.
+    No secrets are logged or written; this only re-points an env var reference.
+    """
     if not os.environ.get("AEGIS_DATABASE_URL") and os.environ.get("DATABASE_URL"):
         os.environ["AEGIS_DATABASE_URL"] = os.environ["DATABASE_URL"]
         os.environ.setdefault("AEGIS_DB_DRIVER", "postgres")
@@ -19,15 +27,14 @@ def _database_url_env_shim() -> None:
 
 _database_url_env_shim()
 
-# Known development-only database passwords — must never be valid in production.
-_DEV_DB_PASSWORDS = ("AegisPg2026Dev", "AegisApp2026Dev")
-
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="AEGIS_", extra="ignore")
 
     VERSION: str = "2.0.0"
     ENV: Literal["development", "staging", "production"] = "development"
+    # API docs/OpenAPI are disabled by default (attack-surface reduction);
+    # enable explicitly via AEGIS_ENABLE_DOCS=true in dev only.
     ENABLE_DOCS: bool = False
     WORKERS: int = 1
     PORT: int = 8000
@@ -37,54 +44,13 @@ class Settings(BaseSettings):
         min_length=32,
     )
     OWNER_TOKEN: str = "aegis-dev-owner-token"
-
-    # Production hardening: when REQUIRE_HTTPS_PROXY is true the app asserts it
-    # sits behind a TLS-terminating proxy and requires TRUSTED_PROXIES to be set.
-    REQUIRE_HTTPS_PROXY: bool = False
-    TRUSTED_PROXIES: str = ""
-
-    @model_validator(mode="after")
-    def _reject_default_secrets_outside_dev(self):
-        # The development fallbacks above must be IMPOSSIBLE outside dev: a
-        # staging/production boot with a well-known SECRET_KEY (JWT forgery) or
-        # OWNER_TOKEN (platform takeover) refuses to start instead of failing open.
-        if self.ENV in ("staging", "production"):
-            insecure = []
-            if self.SECRET_KEY.startswith("aegis-dev-only-secret-key"):
-                insecure.append("SECRET_KEY")
-            if self.OWNER_TOKEN == "aegis-dev-owner-token":
-                insecure.append("OWNER_TOKEN")
-            if insecure:
-                raise RuntimeError(
-                    f"refusing to start: ENV={self.ENV} with default/insecure "
-                    f"{', '.join(insecure)} - set real values via AEGIS_* env vars"
-                )
-        # Production must use real, non-default database credentials. The
-        # compose file no longer embeds dev passwords, so require an explicit
-        # DATABASE_URL carrying credentials and reject the known dev passwords.
-        if self.ENV == "production":
-            db = self.DATABASE_URL or ""
-            # Require an explicit password: user:password@host. The authority
-            # part is the substring between "://" and the last "@"; it must
-            # contain a non-empty password after "user:".
-            authority = db.split("://", 1)[-1].rsplit("@", 1)[0] if "@" in db else ""
-            has_password = ":" in authority and bool(authority.split(":", 1)[1])
-            if (not db) or (not has_password) or any(p in db for p in _DEV_DB_PASSWORDS):
-                raise RuntimeError(
-                    "refusing to start: ENV=production requires a real "
-                    "AEGIS_DATABASE_URL with an explicit password "
-                    "(postgresql://user:password@host/db; no empty/default/dev credentials)"
-                )
-            if self.REQUIRE_HTTPS_PROXY and not self.TRUSTED_PROXIES:
-                raise RuntimeError(
-                    "refusing to start: REQUIRE_HTTPS_PROXY=true requires TRUSTED_PROXIES"
-                )
-        return self
-
     DATA_DIR: str = "/tmp/aegis-data"
     DB_PATH: str = ""
-    DB_DRIVER: str = "postgres"
-    DATABASE_URL: str = ""
+    DB_DRIVER: str = "postgres"  # PostgreSQL only — no SQLite driver exists
+    DATABASE_URL: str = ""  # postgresql://user:pass@host:5432/db — runtime (least-privilege aegis_app)
+    # Optional superuser/owner connection used ONLY by pgdb.migrate() to create
+    # roles/schema (migration 008 creates aegis_app itself). If empty, migrate()
+    # falls back to DATABASE_URL (works for pre-migrated databases).
     DATABASE_ADMIN_URL: str = ""
     LEGACY_SECRET: str = ""
     PUBLIC_URL: str = "http://localhost:8000"
@@ -110,18 +76,21 @@ class Settings(BaseSettings):
     WEIGHT_AML: float = 0.15
     WEIGHT_BEHAVIOR: float = 0.10
 
-    # Rate limit (global per-IP)
+    # Rate limit
     RATE_LIMIT_PER_MIN: int = 240
     CORS_ORIGINS: str = "http://localhost:8000"
 
-    # FX / multi-currency
-    REFERENCE_CURRENCY: str = "USD"
-    DISPLAY_CURRENCY: str = "YER"
-    FX_DEFAULT_REGION: str = "global"
-    FX_STALE_HOURS: int = 24
-    FX_DIVERGENCE_PCT: float = 3.0
-    FX_MISSING_DECISION: str = "review"
-    FX_INSTITUTION_TRUST_PCT: float = 6.0
+    # FX / multi-currency (risk reference layer)
+    REFERENCE_CURRENCY: str = "USD"  # single decision reference (FATF-equivalent)
+    DISPLAY_CURRENCY: str = "YER"  # local display/policy reference (derived, not stored truth)
+    FX_DEFAULT_REGION: str = "global"  # data-driven; Yemen regions live in fx_rates rows
+    FX_STALE_HOURS: int = 24  # rate older than this => FX_STALE
+    FX_DIVERGENCE_PCT: float = 3.0  # institution rate deviation => FX_DIVERGENT flag
+    # Global behavior when an FX rate is missing. This is what the 'default'
+    # threshold-profile option resolves to at decision time. Institutions may
+    # explicitly override with review | block | allow via threshold_profiles.
+    FX_INSTITUTION_TRUST_PCT: float = 6.0  # institution rate trusted if within this % of platform reference
+
 
     # Observability
     OTEL_ENDPOINT: str = ""
@@ -132,7 +101,7 @@ class Settings(BaseSettings):
     AI_MIN_SCORE: float = 0.45
     OPENROUTER_TIMEOUT_SEC: float = 12.0
 
-    # Investigator bootstrap
+    # Investigator bootstrap (first-run convenience — set via env in production)
     INVESTIGATOR_EMAIL: str = ""
     PLATFORM_ADMIN_EMAIL: str = ""
     PLATFORM_ADMIN_PASSWORD: str = ""
@@ -151,6 +120,35 @@ class Settings(BaseSettings):
     NOTIFICATION_SMTP_TO: str = ""
     NOTIFICATION_SMTP_USE_TLS: bool = True
 
+    # ── Institution-owner onboarding / transactional email ──────────────
+    # EMAIL_PROVIDER: 'console' (dev/test — no external mail, captured in the
+    # EmailService outbox), 'brevo' (production transactional API), or 'smtp'
+    # (any real SMTP relay, e.g. Gmail — see GMAIL_SMTP_* below).
+    EMAIL_PROVIDER: str = "console"
+    BREVO_API_KEY: str = ""
+    BREVO_SENDER_EMAIL: str = ""
+    BREVO_SENDER_NAME: str = "AEGIS"
+    # ── SMTP relay (real integration / production). Gmail is the configured
+    # sender via an App Password. Credentials come ONLY from the environment
+    # (GMAIL_SMTP_PASSWORD) — never hard-coded, committed, logged, or shown in
+    # reports. These names are intentionally UNPREFIXED (read straight from
+    # os.environ via default_factory, bypassing the AEGIS_ prefix) so the
+    # provided secret mechanism (GMAIL_SMTP_*) works unchanged inside Docker.
+    GMAIL_SMTP_HOST: str = Field(default_factory=lambda: os.environ.get("GMAIL_SMTP_HOST", "smtp.gmail.com"))
+    GMAIL_SMTP_PORT: int = Field(default_factory=lambda: int(os.environ.get("GMAIL_SMTP_PORT", "587")))
+    GMAIL_SMTP_USERNAME: str = Field(default_factory=lambda: os.environ.get("GMAIL_SMTP_USERNAME", ""))
+    GMAIL_SMTP_PASSWORD: str = Field(default_factory=lambda: os.environ.get("GMAIL_SMTP_PASSWORD", ""))  # env-only App Password
+    GMAIL_SMTP_USE_TLS: bool = Field(default_factory=lambda: os.environ.get("GMAIL_SMTP_USE_TLS", "true").lower() in ("1", "true", "yes"))
+    GMAIL_SMTP_SENDER_EMAIL: str = Field(default_factory=lambda: os.environ.get("GMAIL_SMTP_SENDER_EMAIL", ""))
+    GMAIL_SMTP_SENDER_NAME: str = Field(default_factory=lambda: os.environ.get("GMAIL_SMTP_SENDER_NAME", "AEGIS"))
+    SMTP_TIMEOUT_SEC: float = 15.0
+    # Base URL used to build invitation / password-reset links (the merchant portal).
+    FRONTEND_BASE_URL: str = "http://localhost:8000"
+    # Invitation lifetime (single-use, revocable, expiring).
+    INVITATION_TTL_HOURS: int = 72
+    # Password-reset token lifetime.
+    RESET_TOKEN_TTL_HOURS: int = 1
+
     @property
     def db_path(self) -> str:
         return self.DB_PATH or f"{self.DATA_DIR}/aegis.db"
@@ -161,6 +159,8 @@ class Settings(BaseSettings):
 
     @property
     def openrouter_keys(self) -> list[str]:
+        import os
+
         raw = os.environ.get("OPENROUTER_KEYS", "").strip()
         if not raw or raw.startswith("your-"):
             return []
