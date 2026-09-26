@@ -424,6 +424,8 @@ function renderAddTenantForm() {
   );
   const emailI = el("input", { class: "form-control", type: "email", placeholder: "api@bank.example (اختياري)" });
   const phoneI = el("input", { class: "form-control", placeholder: "+967 77 123 4567 (اختياري)" });
+  const oNameI = el("input", { class: "form-control", placeholder: "مثال: أحمد الحميري" });
+  const oEmailI = el("input", { class: "form-control", type: "email", dir: "ltr", placeholder: "owner@bank.example" });
   const limitI = el("input", { class: "form-control", type: "number", value: "5", min: "0", max: "500" });
   const ARAB_TZ = [
     ["Asia/Aden", "اليمن — عدن (UTC+3)"],
@@ -459,6 +461,9 @@ function renderAddTenantForm() {
     onsubmit: async e => {
       e.preventDefault();
       if (!nameI.value.trim()) { err.textContent = "الاسم مطلوب"; return; }
+      const oEmail = oEmailI.value.trim(), oName = oNameI.value.trim();
+      if (oEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(oEmail)) { err.textContent = "بريد المالك غير صالح"; return; }
+      if (!oEmail && oName) { err.textContent = "أدخل بريد المالك لإرسال الدعوة"; return; }
       btn.disabled = true; btn.textContent = "جارٍ الإنشاء…";
       try {
         const r = await api("/tenants", { method: "POST", body: {
@@ -470,11 +475,13 @@ function renderAddTenantForm() {
           contact_phone: phoneI.value.trim() || null,
           investigator_limit: Math.max(0, parseInt(limitI.value, 10) || 5),
           timezone: tzI.value.trim() || "Asia/Aden",
+          owner_email: oEmail || null,
+          owner_name: oName || null,
         }});
         state.lastCreated = r;
         state.showAddForm = false;
         await loadTenants();
-        toast("✅ تم إنشاء العميل — انسخ المفاتيح الآن!", "success");
+        toast(oEmail ? "✅ تم إنشاء العميل وأُرسلت دعوة المالك إلى بريده" : "✅ تم إنشاء العميل — انسخ المفاتيح الآن!", "success");
         render();
       } catch (ex) {
         err.textContent = ex.message;
@@ -489,6 +496,8 @@ function renderAddTenantForm() {
       el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "🎯 الخطة"), planI),
       el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "📧 بريد التواصل"), emailI),
       el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "📱 هاتف التواصل"), phoneI),
+      el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "👤 اسم المالك (للدعوة)"), oNameI),
+      el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "📧 بريد المالك (للدعوة)"), oEmailI),
       el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "👥 حد المحققين (الافتراضي 5)"), limitI),
       el("div", {}, el("label", { style: "font-size:12.5px;color:var(--muted);display:block;margin-bottom:6px" }, "🌐 المنطقة الزمنية"), tzI),
     ),

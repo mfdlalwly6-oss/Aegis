@@ -56,3 +56,9 @@
 - FINAL STATE: ALL_COMPILE_OK, 3 portals JS_OK, decision-engine 4 passed, FX active-code scan = 0.
 - COMMITS this session: 63b8c3c → 8eb30e1 → fe8e35d → da1058e → afb1bea → a27e8c7 → 2a40802 → 856b510 → 201f312 → this.
 - PUSH: FAILED (no GitHub credentials in sandbox) — all commits local on aegis-v3-main, ready to fetch/push when credentials or SSH return.
+
+## Update 2026-09-26 (batch 9 — owner fields restored)
+- admin/app.js: Owner Name + Owner Email visible inputs RESTORED into Create Institution form (declarations, validation, POST body owner_email/owner_name, grid rows, invitation toast) — ported verbatim from pre-FX reference, node --check verified. Chain: UI inputs → POST /tenants payload → tenants.py owner creation (owner_email+owner_password path, lines 98-104).
+- owner_phone: NOT restored — pre-FX evidence shows only owner_email/owner_name existed; no fabrication.
+- Institution accept-invitation page: backend endpoints present (peek/accept, ported batch 5); standalone accept page UI: NOT FOUND in pre-FX ref portals (admin/merchant/investigator only) → invitation flow was email-link driven to backend; classification E (never existed as dedicated portal page).
+- FX active-code scan: 0. ALL_COMPILE_OK. 3 portals JS_OK. decision-engine tests: 4 passed.
