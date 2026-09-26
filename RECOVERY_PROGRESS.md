@@ -37,3 +37,10 @@
 - Institution Portal as separate portal: NOT in pre-FX ref (portals = admin/merchant/investigator only) → classification E (never existed as separate portal; institution owner flow was via invitation email + accept page + login, all backend-driven).
 - CONFIRMED: pre-FX admin UI had owner_email + owner_name fields (line 530-531) in create-institution form.
 - SSH to real device: DOWN (unchanged). PUSH: pending credentials.
+
+## Update 2026-09-26 (batch 6 — final wiring)
+- threshold_repo.py: repaired pre-FX signature corruption (note: str|None=None duplication) + fx keys stripped — compile-gated restore.
+- registry.py: WeightRepository/ThresholdRepository wired if absent (compile-gated, revert-on-fail).
+- admin UI: owner_email/owner_name invitation fields ported into create-institution form (node --check gated).
+- FX active-code scan: 0.
+- PUSH: still blocked (no GitHub credentials); SSH to real device: DOWN. All work committed locally on aegis-v3-main.

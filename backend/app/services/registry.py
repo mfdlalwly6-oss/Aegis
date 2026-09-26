@@ -31,6 +31,7 @@ from app.repositories import (
     WatchlistRepository,
 )
 from app.repositories.currency_repo import CurrencyRepository
+from app.repositories.weight_repo import WeightRepository
 from app.rules.engine import RuleEngine
 from app.services.notifications import NotificationService, provider_from_settings
 from app.services.orchestrator import DecisionOrchestrator
@@ -142,6 +143,7 @@ class ServiceRegistry:
             logger.info("migration.012_encrypt_hmac_secrets", encrypted=n)
         self.investigators = InvestigatorRepository(self.db)
         self.currency_repo = CurrencyRepository(self.db)
+        self.weights = WeightRepository(self.db)
 
         # Bootstrap a first investigator from env when none exists (dev convenience).
         # Investigators are tenant-scoped: use INVESTIGATOR_TENANT_ID, else first
