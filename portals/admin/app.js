@@ -1365,7 +1365,7 @@ function renderPolicyStudio() {
   const pmsg = el("div", { style: "font-size:12.5px;min-height:16px;margin-top:6px" });
   const _polOpts = [{ value: "", label: "— اختر مؤسسة لتحرير سياستها —" },
     ...tenants.map(t => ({ value: t.tenant_id, label: (t.name || t.tenant_id) }))];
-  const picker = fxSel(_polOpts, {
+  const picker = policySel(_polOpts, {
     value: sel ? sel.tenant_id : "",
     placeholder: "— اختر مؤسسة لتحرير سياستها —",
     minWidth: "240px",

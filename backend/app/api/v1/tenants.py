@@ -49,7 +49,6 @@ class UpdatePolicy(BaseModel):
     weights: dict | None = None
     enabled_rules: list[str] | None = None
     disabled_rules: list[str] | None = None
-    fx_missing_action: str | None = None
     note: str | None = None  # free-text rationale, stored on the policy version
 
 

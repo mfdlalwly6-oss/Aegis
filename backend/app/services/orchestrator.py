@@ -307,7 +307,6 @@ class DecisionOrchestrator:
                 degraded_reason = "AML_UNAVAILABLE_FAIL_CLOSED"
         fx_missing = False  # FX removed: no fx-missing guard
         if fx_missing:
-            fx_missing_action = policy["fx_missing_action"]
             if fx_missing_action == "block":
                 decision = Decision.BLOCK
                 final = max(final, policy["thresholds"]["block"])
