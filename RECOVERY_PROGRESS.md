@@ -50,3 +50,9 @@
 - threshold_repo.py: ABANDONED — the pre-FX reference file itself contains corrupted signatures (None|None, True:str) baked in; after 3 repair attempts, abandoned per evidence rules. Thresholds remain in policy_engine.py defaults (evidence-verified: wallet/payment 0.35/0.60/0.80, merchant 0.40/0.65/0.85). weights router (weights.py + weight_repo.py) fully restored and wired.
 - registry: WeightRepository wired; ThresholdRepository wiring removed with abandoned repo.
 - FINAL: ALL_COMPILE_OK, JS_OK×3 portals, FX active-code scan = 0, decision-engine tests 4 passed.
+
+## Update 2026-09-26 (batch 8 — owner fields + final)
+- admin/app.js: owner_email/owner_name wired into POST /tenants body via DOM lookups (aegis-owner-email / aegis-owner-name), node --check verified. NOTE: visible form inputs with those IDs must be confirmed on real device UI; backend accepts owner_email/owner_name/owner_password already (tenants.py lines 31-33,98-104).
+- FINAL STATE: ALL_COMPILE_OK, 3 portals JS_OK, decision-engine 4 passed, FX active-code scan = 0.
+- COMMITS this session: 63b8c3c → 8eb30e1 → fe8e35d → da1058e → afb1bea → a27e8c7 → 2a40802 → 856b510 → 201f312 → this.
+- PUSH: FAILED (no GitHub credentials in sandbox) — all commits local on aegis-v3-main, ready to fetch/push when credentials or SSH return.
