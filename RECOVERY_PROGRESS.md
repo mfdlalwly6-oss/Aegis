@@ -11,3 +11,11 @@
 - CLEANED: features.py fx residue
 - PUSH: FAILED (no GitHub credentials in sandbox) — commits held locally
 - REMAINING: full pytest green run, institution portal UI, real-device sync (SSH down)
+
+## Update 2026-09-26 (batch 3 — final)
+- POLICY_ENGINE: fx_missing_action fully purged, compile-verified
+- THRESHOLDS router: restored from pre-FX reference, fx keys stripped, compile-verified
+- WEIGHTS router: restored (139 lines), registered in api/v1/__init__.py
+- FINAL FX SCAN (active code): fx_missing_action/renderFx/loadFx/fxsel = 0; fx_rates refs only in historical migrations (kept for migration-chain integrity)
+- Commits: 63b8c3c, 8eb30e1, fe8e35d + this one — PUSH FAILED (no GitHub credentials in sandbox)
+- SSH to real device (193.161.193.99:43607/52489): DOWN — real device untouched, local copy only
