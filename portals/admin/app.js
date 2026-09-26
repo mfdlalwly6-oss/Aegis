@@ -172,63 +172,6 @@ async function loadOverview() {
 
 async function loadTenants() {
   try {
-    // Owner invitation fields (restored from pre-FX design)
-const oNameI = el("input", { class: "form-control", placeholder: "مثال: أحمد الحميري" });
-  const oEmailI = el("input", { class: "form-control", type: "email", dir: "ltr", placeholder: "owner@bank.example" });
-  const limitI = el("input", { class: "form-control", type: "number", value: "5", min: "0", max: "500" });
-  const ARAB_TZ = [
-    ["Asia/Aden", "اليمن — عدن (UTC+3)"],
-    ["Asia/Riyadh", "السعودية — الرياض (UTC+3)"],
-    ["Asia/Dubai", "الإمارات — دبي (UTC+4)"],
-    ["Asia/Qatar", "قطر — الدوحة (UTC+3)"],
-    ["Asia/Bahrain", "البحرين — المنامة (UTC+3)"],
-    ["Asia/Kuwait", "الكويت — الكويت (UTC+3)"],
-    ["Asia/Muscat", "عُمان — مسقط (UTC+4)"],
-    ["Asia/Baghdad", "العراق — بغداد (UTC+3)"],
-    ["Asia/Amman", "الأردن — عمّان (UTC+3)"],
-    ["Asia/Beirut", "لبنان — بيروت (UTC+2)"],
-    ["Asia/Damascus", "سوريا — دمشق (UTC+3)"],
-    ["Asia/Jerusalem", "فلسطين — القدس (UTC+2)"],
-    ["Africa/Cairo", "مصر — القاهرة (UTC+2)"],
-    ["Africa/Khartoum", "السودان — الخرطوم (UTC+2)"],
-    ["Africa/Tripoli", "ليبيا — طرابلس (UTC+2)"],
-    ["Africa/Tunis", "تونس — تونس (UTC+1)"],
-    ["Africa/Algiers", "الجزائر — الجزائر (UTC+1)"],
-    ["Africa/Casablanca", "المغرب — الدار البيضاء (UTC+1)"],
-    ["Africa/Nouakchott", "موريتانيا — نواكشوط (UTC+0)"],
-    ["Africa/Djibouti", "جيبوتي — جيبوتي (UTC+3)"],
-    ["Africa/Mogadishu", "الصومال — مقديشو (UTC+3)"],
-    ["Indian/Comoros", "جزر القمر — موروني (UTC+3)"]
-  ];
-  const tzI = el("select", { class: "form-control", dir: "rtl" },
-    ...ARAB_TZ.map(([v, label]) => el("option", { value: v }, label)));
-  tzI.value = "Asia/Aden";
-  const err = el("div", { style: "color:#FCA5A5;font-size:13px;margin-top:8px" });
-
-  const btn = el("button", { class: "btn primary", style: "padding:12px 24px;font-size:14px" }, "✨ إنشاء + توليد المفاتيح");
-  const form = el("form", {
-    onsubmit: async e => {
-      e.preventDefault();
-      if (!nameI.value.trim()) { err.textContent = "الاسم مطلوب"; return; }
-      const oEmail = oEmailI.value.trim(), oName = oNameI.value.trim();
-      if (oEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(oEmail)) { err.textContent = "بريد المالك غير صالح"; return; }
-      if (!oEmail && oName) { err.textContent = "أدخل بريد المالك لإرسال الدعوة"; return; }
-      btn.disabled = true; btn.textContent = "جارٍ الإنشاء…";
-      try {
-        const r = await api("/tenants", { method: "POST", body: {
-          name: nameI.value.trim(),
-          type: typeI.value,
-          country: countryI.value.trim() || "YE",
-          plan: planI.value,
-          contact_email: emailI.value.trim() || null,
-          contact_phone: phoneI.value.trim() || null,
-          investigator_limit: Math.max(0, parseInt(limitI.value, 10) || 5),
-          timezone: tzI.value.trim() || "Asia/Aden",
-          owner_email: oEmail || null,
-          owner_name: oName || null,
-        }});
-
-
     const r = await api("/tenants");
     state.tenants = (r && r.tenants) || [];
   } catch { state.tenants = []; }

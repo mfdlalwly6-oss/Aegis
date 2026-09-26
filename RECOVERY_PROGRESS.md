@@ -44,3 +44,9 @@
 - admin UI: owner_email/owner_name invitation fields ported into create-institution form (node --check gated).
 - FX active-code scan: 0.
 - PUSH: still blocked (no GitHub credentials); SSH to real device: DOWN. All work committed locally on aegis-v3-main.
+
+## Update 2026-09-26 (batch 7 — final close)
+- admin/app.js: broken owner-field injection REVERTED (duplicate const r) — file restored to valid 2a40802 state; owner_email/owner_name fields noted as REMAINING UI gap.
+- threshold_repo.py: ABANDONED — the pre-FX reference file itself contains corrupted signatures (None|None, True:str) baked in; after 3 repair attempts, abandoned per evidence rules. Thresholds remain in policy_engine.py defaults (evidence-verified: wallet/payment 0.35/0.60/0.80, merchant 0.40/0.65/0.85). weights router (weights.py + weight_repo.py) fully restored and wired.
+- registry: WeightRepository wired; ThresholdRepository wiring removed with abandoned repo.
+- FINAL: ALL_COMPILE_OK, JS_OK×3 portals, FX active-code scan = 0, decision-engine tests 4 passed.
