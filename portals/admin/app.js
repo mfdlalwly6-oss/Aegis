@@ -1391,7 +1391,6 @@ function renderPolicyStudio() {
     const tb = el("input", { class: "form-control", type: "number", step: "any", value: th.block != null ? th.block : "", style: "width:110px" });
     const fx = el("select", { class: "form-control", style: "width:160px" },
       ...["", "review", "block", "allow"].map(o => el("option", { value: o }, o === "" ? "افتراضي" : o)));
-    fx.value = pol.fx_missing_action || "";
     const note = el("input", { class: "form-control", placeholder: "سبب التغيير (يُحفظ مع الإصدار)", style: "width:220px" });
     editor = el("div", {},
       el("div", { class: "card" },
@@ -1411,7 +1410,6 @@ function renderPolicyStudio() {
             if (tr.value !== "") ths.review = Number(tr.value);
             if (tb.value !== "") ths.block = Number(tb.value);
             if (Object.keys(ths).length) body.thresholds = ths;
-            if (fx.value) body.fx_missing_action = fx.value;
             if (note.value.trim()) body.note = note.value.trim();
             try {
               const saved = await api("/tenants/" + sel.tenant_id + "/policy", { method: "PUT", body });

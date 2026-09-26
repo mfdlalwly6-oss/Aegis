@@ -134,7 +134,6 @@ class PolicyEngine:
             )
         disabled -= PROTECTED_RULES
 
-        # --- FX missing action (can never be a silent allow) ---
 
         return {
             "thresholds": th,
