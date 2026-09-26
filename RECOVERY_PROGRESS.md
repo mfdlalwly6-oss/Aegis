@@ -81,3 +81,7 @@
 - Tests: pure-logic tests pass; DB-dependent tests error (no PostgreSQL in sandbox) — classified infrastructure, NOT code failures.
 - Final FX scan: 0. Security work from GitHub all present (session revocation, salt, rate limit, Gmail SMTP, invitations, migrations 030/031).
 - KNOWN GAP (flagged honestly): remote admin-portal UI (invitation panels, credential rotation UX from c975f58/7faf53a) NOT ported — admin/app.js fell back to local FX-free version after automated FX-strip broke JS syntax twice; backend endpoints for those features are all present. Merchant/investigator portals kept remote versions (auto-merged clean).
+
+## Correction + real fix (2026-09-26, after 8a3f06d)
+- HONESTY: commit 8a3f06d did NOT fix the NameError (runtime smoke still failed at its creation; its message was wrong). Real fix here: module-level `from app.api.v1 import weights` inserted directly above its include_router usage (earlier insertions into the import block failed with SyntaxError — root cause: file's import expressions span multiple lines/aliases).
+- Gate: `from app.main import app` → APP_IMPORT_OK before push.
