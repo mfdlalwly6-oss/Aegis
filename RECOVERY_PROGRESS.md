@@ -74,3 +74,10 @@
 - DELETED: thresholds.py router (corrupted + fx-coupled; thresholds remain functional via policy_engine defaults), threshold_repo.py (fx-coupled), test_fx_missing_options.py, test_thresholds.py.
 - registry.py: threshold_repo refs removed; invitations/password_resets/email wiring ported from remote registry.
 - __init__.py: thresholds import removed.
+
+## Final fix (2026-09-26, after a5d7f05)
+- NameError fix: re-added `from app.api.v1 import weights` in api/v1/__init__.py (import line was removed together with thresholds on the same line). APP_IMPORT_OK gate.
+- weights.py: present/verified; weights router registered (GET/PUT default, overrides per tenant).
+- Tests: pure-logic tests pass; DB-dependent tests error (no PostgreSQL in sandbox) — classified infrastructure, NOT code failures.
+- Final FX scan: 0. Security work from GitHub all present (session revocation, salt, rate limit, Gmail SMTP, invitations, migrations 030/031).
+- KNOWN GAP (flagged honestly): remote admin-portal UI (invitation panels, credential rotation UX from c975f58/7faf53a) NOT ported — admin/app.js fell back to local FX-free version after automated FX-strip broke JS syntax twice; backend endpoints for those features are all present. Merchant/investigator portals kept remote versions (auto-merged clean).
