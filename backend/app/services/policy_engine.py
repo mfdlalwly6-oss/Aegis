@@ -10,7 +10,6 @@ Guarantees (enforced here, not by convention):
 - Institution profile (bank / wallet / exchange / remittance / merchant_*)
   selects behavioral defaults so a high-velocity remittance company is not
   judged with a consumer's thresholds.
-- FX safety flags are policy-controlled: fx_missing_action defaults to REVIEW
   and can never be weakened to a silent ALLOW.
 """
 

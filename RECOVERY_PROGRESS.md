@@ -19,3 +19,11 @@
 - FINAL FX SCAN (active code): fx_missing_action/renderFx/loadFx/fxsel = 0; fx_rates refs only in historical migrations (kept for migration-chain integrity)
 - Commits: 63b8c3c, 8eb30e1, fe8e35d + this one — PUSH FAILED (no GitHub credentials in sandbox)
 - SSH to real device (193.161.193.99:43607/52489): DOWN — real device untouched, local copy only
+
+## Update 2026-09-26 (batch 4 — ZERO)
+- orchestrator.py: dead fx_missing guard block removed (decision flows straight to _decide)
+- policy_engine.py: fx docstring line removed
+- pg_migrate.py: fx_rates removed from managed-tables list
+- ACTIVE-CODE FX SCAN = 0 (only historical migrations retain fx table names — required for chain integrity)
+- NOTE: thresholds.py router could not be restored cleanly from pre-FX ref (old file had pre-existing syntax quirks + fx coupling); weights.py restored OK. Policy thresholds live in policy_engine.py defaults (challenge 0.35/review 0.60/block 0.80 for wallet+payment).
+- HEAD: see git log; PUSH: FAILED (no GitHub credentials in sandbox); SSH to real device: DOWN.

@@ -305,16 +305,7 @@ class DecisionOrchestrator:
                 degraded_reason = "AML_UNAVAILABLE_FAIL_CLOSED; " + degraded_reason
             else:
                 degraded_reason = "AML_UNAVAILABLE_FAIL_CLOSED"
-        fx_missing = False  # FX removed: no fx-missing guard
-        if fx_missing:
-            if fx_missing_action == "block":
-                decision = Decision.BLOCK
-                final = max(final, policy["thresholds"]["block"])
-            else:
-                decision = Decision.REVIEW
-                final = max(final, policy["thresholds"]["review"])
-        else:
-            decision = self._decide(final, aml_sig.sanctions_hit, policy)
+        decision = self._decide(final, aml_sig.sanctions_hit, policy)  # FX removed: no fx-missing guard
         if aml_sig.sanctions_hit and final < policy["thresholds"]["block"]:
             final = policy["thresholds"]["block"]  # reported risk floor for hard blocks
         latency_ms = (time.perf_counter() - started) * 1000

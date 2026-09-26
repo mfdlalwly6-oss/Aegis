@@ -38,7 +38,7 @@ from app.pgdb import PGDatabase  # noqa: E402
 TABLE_ORDER = [
     "tenants", "currencies", "users", "investigators", "transactions",
     "decisions", "alerts", "cases", "audit_log", "rules", "webhooks_seen",
-    "watchlist", "model_registry", "fx_rates", "account_profiles",
+    "watchlist", "model_registry", "account_profiles",
 ]
 
 GUARDS = [
