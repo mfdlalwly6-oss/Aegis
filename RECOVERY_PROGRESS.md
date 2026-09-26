@@ -27,3 +27,13 @@
 - ACTIVE-CODE FX SCAN = 0 (only historical migrations retain fx table names — required for chain integrity)
 - NOTE: thresholds.py router could not be restored cleanly from pre-FX ref (old file had pre-existing syntax quirks + fx coupling); weights.py restored OK. Policy thresholds live in policy_engine.py defaults (challenge 0.35/review 0.60/block 0.80 for wallet+payment).
 - HEAD: see git log; PUSH: FAILED (no GitHub credentials in sandbox); SSH to real device: DOWN.
+
+## Update 2026-09-26 (batch 5 — restore+port)
+- VERIFIED via pre-FX evidence: DEFAULT_WEIGHTS = {rules:0.35, ml:0.25, graph:0.15, aml:0.15, behavior:0.10} in weight_repo.py (was present pre-FX) — weight_repo.py RESTORED fx-free.
+- VERIFIED via pre-FX evidence: thresholds defaults 0.35/0.60/0.80 (wallet+payment), 0.40/0.65/0.85 (merchant), 0.45/0.70/0.88 (wholesale/real_estate), 0.30/0.55/0.78 (gov), clamps 0.20-0.50/0.40-0.75/0.60-0.95 — these ARE the pre-FX values (0.20/0.40/0.60 were clamp WINDOWS, not defaults).
+- RESTORED: weight_repo.py (fx-free, compile-verified).
+- threshold_repo.py: restore attempted, pre-FX file had fx coupling; repaired signature + stripped fx keys.
+- PORTED: GET /institution/invitation (peek: valid|invalid|expired|revoked|used) + POST /institution/accept-invitation (consume, set password, activate, single-use token, tenant-active check, audit).
+- Institution Portal as separate portal: NOT in pre-FX ref (portals = admin/merchant/investigator only) → classification E (never existed as separate portal; institution owner flow was via invitation email + accept page + login, all backend-driven).
+- CONFIRMED: pre-FX admin UI had owner_email + owner_name fields (line 530-531) in create-institution form.
+- SSH to real device: DOWN (unchanged). PUSH: pending credentials.

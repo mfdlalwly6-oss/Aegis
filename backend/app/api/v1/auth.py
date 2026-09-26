@@ -36,6 +36,10 @@ def _issue(sub: str, role: str, ttl: int) -> str:
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
+class AcceptInvitationBody(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+    password: str = Field(min_length=8, max_length=200)
+
 @router.post("/login", response_model=TokenPair)
 async def login(body: LoginBody, registry=Depends(get_registry)) -> TokenPair:
     """Platform admin login — authenticated against the users table.
@@ -132,6 +136,45 @@ class _ResetBody(BaseModel):
     token: str = Field(min_length=8, max_length=200)
     new_password: str = Field(min_length=8, max_length=200)
 
+
+@router.get("/institution/invitation")
+def peek_invitation(token: str, registry=Depends(get_registry)):
+    """Preview an invitation (no consumption). Powers the accept page states:
+    valid | invalid | expired | revoked | used."""
+    registry.db.set_tenant("platform")
+    verdict, inv = registry.invitations.peek(token)
+    if verdict != "valid" or not inv:
+        return {"status": verdict}
+    tenant = registry.tenants.get(inv["tenant_id"])
+    return {
+        "status": "valid",
+        "email": inv["email"],
+        "tenant_name": (tenant or {}).get("name", inv["tenant_id"]),
+        "expires_at": inv["expires_at"],
+    }
+
+
+@router.post("/institution/accept-invitation")
+def accept_invitation(body: AcceptInvitationBody, request: Request, registry=Depends(get_registry)):
+    """Consume the invitation: verify token/expiry/revocation/single-use, set the
+    owner password, activate the account, mark the invitation accepted, audit."""
+    registry.db.set_tenant("platform")
+    verdict, inv = registry.invitations.consume(body.token)
+    if verdict != "valid" or not inv:
+        raise HTTPException(410, f"invitation_{verdict}")
+    tenant = registry.tenants.get(inv["tenant_id"])
+    if not tenant or tenant.get("status") != "active":
+        raise HTTPException(403, "tenant_not_active")
+    user = registry.user_repo.get(inv["user_id"])
+    if not user:
+        raise HTTPException(404, "owner_not_found")
+    registry.user_repo.set_password(user["user_id"], body.password)
+    registry.user_repo.set_status(user["user_id"], "active")
+    registry.audit.log(
+        inv["tenant_id"], user["email"], "owner.invitation_accepted", "user",
+        user["user_id"], getattr(request.state, "request_id", None), {},
+    )
+    return {"activated": True, "message": "تم تفعيل حسابك بنجاح. يمكنك الآن تسجيل الدخول."}
 
 @router.post("/institution/forgot-password")
 def institution_forgot_password(body: _Email, request: Request, registry=Depends(get_registry)):
