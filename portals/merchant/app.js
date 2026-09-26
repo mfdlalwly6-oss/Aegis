@@ -47,6 +47,8 @@ const state = {
   decisions: [], alerts: [], cases: [],
   feed: null, feedFilter: "all", feedDetail: null,
   invs: null, manual: null, report: null, rperiod: "daily",
+  view: (() => { try { return new URLSearchParams(location.search).get("view"); } catch { return null; } })(),
+  viewToken: (() => { try { return new URLSearchParams(location.search).get("token") || ""; } catch { return ""; } })(),
 };
 const $ = s => document.querySelector(s);
 const el = (t, a = {}, ...kids) => {
@@ -74,6 +76,19 @@ async function api(path, opts = {}) {
   if (!r.ok) throw new Error(d.detail || d.message || ("خطأ " + r.status));
   return d;
 }
+/* apiSoft — like api() but does NOT force logout/redirect on 401. Used for
+   step-up / sensitive actions (change-password, reveal credentials) where a
+   401 means "wrong password", NOT "session expired" — the user must stay on
+   the page and see the error. */
+async function apiSoft(path, opts = {}) {
+  const h = { "Content-Type": "application/json", ...(opts.headers || {}) };
+  if (state.token) h["Authorization"] = "Bearer " + state.token;
+  const r = await fetch(API + path, { ...opts, headers: h, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const txt = await r.text(); let d = {};
+  try { d = txt ? JSON.parse(txt) : {}; } catch { d = { raw: txt }; }
+  if (!r.ok) throw new Error(d.detail === "invalid_credentials" ? "كلمة المرور الحالية غير صحيحة" : (d.detail || d.message || ("خطأ " + r.status)));
+  return d;
+}
 async function apiRoot(path, opts = {}) {
   const h = { "Content-Type": "application/json", ...(opts.headers || {}) };
   if (state.token) h["Authorization"] = "Bearer " + state.token;
@@ -88,60 +103,127 @@ async function copy(txt, btn) { try { await navigator.clipboard.writeText(txt); 
 
 /* ── LOGIN: institution-owner (email/password) OR API key ── */
 function renderLogin() {
-  let mode = "owner";
+  // Single sign-in method for a human into the Merchant Portal: owner
+  // email + password. API Key / HMAC are integration credentials (webhook),
+  // NOT a login method — they are managed under 🔌 إعدادات الربط instead.
   const em = el("input", { class: "form-control", type: "email", placeholder: "owner@bank.com", dir: "ltr" });
   const pw = el("input", { class: "form-control", type: "password", placeholder: "••••••••" });
-  const key = el("input", { class: "form-control", type: "text", placeholder: "ak_...", dir: "ltr" });
-  const sec = el("input", { class: "form-control", type: "password", placeholder: "aeg_sk_...", dir: "ltr" });
   const err = el("div", { style: "color:#FCA5A5;font-size:13px;margin-top:8px;min-height:16px" });
   const ownerBox = el("div", { style: "margin-bottom:10px" },
     el("label", { style: "font-size:13px;color:var(--muted);margin-bottom:6px;display:block" }, "📧 بريد المالك"), em,
     el("label", { style: "font-size:13px;color:var(--muted);margin:10px 0 6px;display:block" }, "🔑 كلمة المرور"), pw);
-  const apiBox = el("div", { style: "margin-bottom:10px;display:none" },
-    el("label", { style: "font-size:13px;color:var(--muted);margin-bottom:6px;display:block" }, "🔑 API Key"), key,
-    el("label", { style: "font-size:13px;color:var(--muted);margin:10px 0 6px;display:block" }, "🔐 API Secret (HMAC)"), sec);
-  const tabsRow = el("div", { style: "display:flex;gap:6px;margin-bottom:14px" });
-  const tabs = {
-    owner: el("button", { class: "btn sm" }, "👤 مالك المؤسسة"),
-    api: el("button", { class: "btn sm" }, "🔑 مفاتيح API"),
-  };
-  tabsRow.appendChild(tabs.owner); tabsRow.appendChild(tabs.api);
-  function setMode(m) {
-    mode = m;
-    ownerBox.style.display = m === "owner" ? "block" : "none";
-    apiBox.style.display = m === "api" ? "block" : "none";
-    tabs.owner.style.borderColor = m === "owner" ? "var(--accent)" : "transparent";
-    tabs.api.style.borderColor = m === "api" ? "var(--accent)" : "transparent";
-  }
-  tabs.owner.onclick = () => setMode("owner");
-  tabs.api.onclick = () => setMode("api");
-  setMode("owner");
   async function doLogin() {
     try {
-      let j, t;
-      if (mode === "owner") {
-        const r = await fetch(ROOT + "/auth/institution/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: em.value.trim(), password: pw.value }) });
-        j = await r.json(); if (!r.ok) throw new Error(j.detail || "بيانات خاطئة");
-        state.token = j.access_token;
-        t = await api("/me");
-        state.role = "institution_owner";
-      } else {
-        const r = await fetch(API + "/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ api_key: key.value.trim(), api_secret: sec.value.trim() }) });
-        j = await r.json(); if (!r.ok) throw new Error(j.detail || "بيانات خاطئة");
-        state.token = j.merchant_token; t = j.tenant; state.role = "merchant";
-      }
+      const r = await fetch(ROOT + "/auth/institution/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: em.value.trim(), password: pw.value }) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.detail || "بيانات خاطئة");
+      state.token = j.access_token;
+      const t = await api("/me");
+      state.role = "institution_owner";
       state.tenant = t;
+      state.ownerEmail = em.value.trim();
       localStorage.setItem(TK, state.token); localStorage.setItem(TT, JSON.stringify(t));
       toast("مرحبًا " + (t.name || ""), "success"); render();
     } catch (ex) { err.textContent = ex.message; }
   }
+  const forgot = el("a", { href: "?view=forgot-password", style: "display:block;text-align:center;margin-top:10px;font-size:12.5px;color:var(--accent);text-decoration:none", onclick: (e) => { e.preventDefault(); state.view = "forgot-password"; render(); } }, "نسيت كلمة المرور؟");
   return el("div", { class: "login-wrap" },
     el("div", { class: "login-card" },
       el("div", { style: "font-size:4rem;text-align:center" }, "🏦"),
       el("h1", { style: "text-align:center;font-size:1.7rem;font-weight:900" }, "AEGIS Merchant"),
       el("p", { style: "text-align:center;color:var(--muted);font-size:13px;margin:8px 0 20px" }, "بوابة البنك / المحفظة / المؤسسة — رؤية مؤسستك فقط"),
-      tabsRow, ownerBox, apiBox, err,
-      el("button", { class: "btn primary", style: "width:100%;padding:13px;margin-top:6px", onclick: doLogin }, "🔓 دخول")));
+      ownerBox, err,
+      el("button", { class: "btn primary", style: "width:100%;padding:13px;margin-top:6px", onclick: doLogin }, "🔓 دخول"), forgot));
+}
+
+/* ── INVITATION ACCEPT / PASSWORD RESET (public, token from email link) ── */
+function _portalCard(title, sub, ...children) {
+  return el("div", { class: "login-wrap" },
+    el("div", { class: "login-card" },
+      el("div", { style: "font-size:4rem;text-align:center" }, "🏦"),
+      el("h1", { style: "text-align:center;font-size:1.5rem;font-weight:900" }, title),
+      sub ? el("p", { style: "text-align:center;color:var(--muted);font-size:13px;margin:8px 0 16px" }, sub) : null,
+      ...children));
+}
+function _goLoginLink() {
+  return el("a", { href: "/merchant/", style: "display:block;text-align:center;margin-top:12px;font-size:13px;color:var(--accent);text-decoration:none", onclick: (e) => { e.preventDefault(); state.view = null; render(); } }, "→ تسجيل الدخول");
+}
+
+function renderAcceptInvitation(token) {
+  const err = el("div", { style: "color:#FCA5A5;font-size:13px;margin-top:8px;min-height:16px" });
+  const info = el("div", { style: "color:var(--muted);font-size:13px;margin-bottom:12px;text-align:center" }, "⏳ جارٍ التحقق من الدعوة…");
+  const pw = el("input", { class: "form-control", type: "password", placeholder: "كلمة المرور (8+ أحرف)" });
+  const pw2 = el("input", { class: "form-control", type: "password", placeholder: "تأكيد كلمة المرور" });
+  const form = el("div", { style: "display:none" },
+    el("label", { style: "font-size:13px;color:var(--muted);margin-bottom:6px;display:block" }, "🔑 كلمة المرور"), pw,
+    el("label", { style: "font-size:13px;color:var(--muted);margin:10px 0 6px;display:block" }, "🔑 تأكيد كلمة المرور"), pw2, err,
+    el("button", { class: "btn primary", style: "width:100%;padding:13px;margin-top:6px", onclick: async () => {
+      err.textContent = "";
+      if (pw.value.length < 8) { err.textContent = "كلمة المرور يجب ألا تقل عن 8 أحرف"; return; }
+      if (pw.value !== pw2.value) { err.textContent = "تأكيد كلمة المرور غير مطابق"; return; }
+      try {
+        const r = await fetch(ROOT + "/auth/institution/accept-invitation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, password: pw.value }) });
+        const j = await r.json(); if (!r.ok) throw new Error(j.detail || "تعذّر التفعيل");
+        state.view = null; render();
+        toast(j.message || "تم تفعيل حسابك بنجاح", "success");
+      } catch (ex) { err.textContent = ex.message; }
+    } }, "✅ تفعيل حسابي"));
+  fetch(ROOT + "/auth/institution/invitation?token=" + encodeURIComponent(token))
+    .then(r => r.json())
+    .then(j => {
+      if (j.status === "valid") {
+        info.textContent = "المؤسسة: " + (j.tenant_name || "") + " — البريد: " + (j.email || "");
+        form.style.display = "block";
+      } else {
+        const msg = { invalid: "رابط الدعوة غير صالح.", expired: "انتهت صلاحية الدعوة — اطلب من مدير المنظومة إعادة إرسالها.", revoked: "أُبطلت هذه الدعوة — اطلب دعوة جديدة.", used: "هذه الدعوة استُخدمت مسبقًا." };
+        info.textContent = msg[j.status] || "رابط الدعوة غير صالح.";
+        info.style.color = "#FCA5A5";
+        info.appendChild(_goLoginLink());
+      }
+    })
+    .catch(() => { info.textContent = "تعذّر التحقق من الدعوة — حاول لاحقًا."; info.style.color = "#FCA5A5"; });
+  return _portalCard("تفعيل حساب AEGIS", null, info, form);
+}
+
+function renderForgotPassword() {
+  const em = el("input", { class: "form-control", type: "email", dir: "ltr", placeholder: "owner@bank.com" });
+  const msg = el("div", { style: "font-size:13px;margin-top:10px;min-height:16px" });
+  const done = el("div", { style: "display:none;color:#86EFAC;font-size:13.5px;text-align:center;margin-top:10px;line-height:1.9" });
+  const btn = el("button", { class: "btn primary", style: "width:100%;padding:13px;margin-top:6px", onclick: async () => {
+    msg.textContent = ""; msg.style.color = "#FCA5A5";
+    const email = em.value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { msg.textContent = "أدخل بريدًا صالحًا"; return; }
+    btn.disabled = true; btn.textContent = "جارٍ الإرسال…";
+    try {
+      const r = await fetch(ROOT + "/auth/institution/forgot-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.detail || "تعذّر الإرسال");
+      btn.style.display = "none";
+      done.textContent = j.message || "إذا كان البريد مسجلًا، ستصلك رسالة إعادة التعيين.";
+      done.style.display = "block";
+    } catch (ex) { msg.textContent = ex.message; btn.disabled = false; btn.textContent = "📧 إرسال رابط إعادة التعيين"; }
+  } }, "📧 إرسال رابط إعادة التعيين");
+  return _portalCard("استعادة كلمة المرور", "أدخل بريد المالك وسنرسل رابط إعادة التعيين.",
+    el("label", { style: "font-size:13px;color:var(--muted);margin-bottom:6px;display:block" }, "📧 البريد"), em, btn, msg, done, _goLoginLink());
+}
+
+function renderResetPassword(token) {
+  const err = el("div", { style: "color:#FCA5A5;font-size:13px;margin-top:8px;min-height:16px" });
+  const pw = el("input", { class: "form-control", type: "password", placeholder: "كلمة المرور الجديدة (8+ أحرف)" });
+  const pw2 = el("input", { class: "form-control", type: "password", placeholder: "تأكيد كلمة المرور" });
+  const btn = el("button", { class: "btn primary", style: "width:100%;padding:13px;margin-top:6px", onclick: async () => {
+    err.textContent = "";
+    if (pw.value.length < 8) { err.textContent = "كلمة المرور يجب ألا تقل عن 8 أحرف"; return; }
+    if (pw.value !== pw2.value) { err.textContent = "تأكيد كلمة المرور غير مطابق"; return; }
+    btn.disabled = true;
+    try {
+      const r = await fetch(ROOT + "/auth/institution/reset-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, password: pw.value }) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.detail || "تعذّر التعيين");
+      state.view = null; render();
+      toast(j.message || "تم تغيير كلمة المرور", "success");
+    } catch (ex) { err.textContent = ex.message; btn.disabled = false; }
+  } }, "✅ تعيين كلمة المرور");
+  return _portalCard("إعادة تعيين كلمة المرور", null,
+    el("label", { style: "font-size:13px;color:var(--muted);margin-bottom:6px;display:block" }, "🔑 كلمة المرور الجديدة"), pw,
+    el("label", { style: "font-size:13px;color:var(--muted);margin:10px 0 6px;display:block" }, "🔑 تأكيد كلمة المرور"), pw2, err, btn, _goLoginLink());
 }
 
 /* ── LOADERS ── */
@@ -231,21 +313,121 @@ function renderCodeTabs(samples) {
   copyBtn.onclick = () => copy(samples.curl, copyBtn);
   return el("div", {}, tabs, box);
 }
+/* ── 🔌 إعدادات الربط — credentials masked by default; reveal/rotate require
+      a server-side password step-up (POST /integration/reveal|rotate). The raw
+      values are never placed in the URL, logs, or persisted client-side. ── */
+function _pwModal(title, subtitle, cta, onConfirm) {
+  const pw = el("input", { class: "form-control", type: "password", placeholder: "كلمة المرور", dir: "ltr" });
+  const err = el("div", { style: "color:#FCA5A5;font-size:13px;min-height:16px;margin-top:6px" });
+  const overlay = el("div", { style: "position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:1000" });
+  const close = () => overlay.remove();
+  const ok = el("button", { class: "btn primary", style: "flex:1" }, cta);
+  ok.onclick = async () => {
+    err.textContent = ""; ok.disabled = true;
+    try { await onConfirm(pw.value); close(); }
+    catch (e) { err.textContent = e.message || "تعذّر التنفيذ"; ok.disabled = false; }
+  };
+  overlay.appendChild(el("div", { class: "card", style: "max-width:420px;width:92%;padding:20px" },
+    el("h3", { style: "margin-bottom:8px" }, title),
+    el("p", { style: "color:var(--muted);font-size:13px;margin-bottom:14px;line-height:1.8" }, subtitle),
+    pw, err,
+    el("div", { style: "display:flex;gap:8px;margin-top:14px" },
+      ok, el("button", { class: "btn", style: "flex:1", onclick: close }, "إلغاء"))));
+  document.body.appendChild(overlay);
+}
+
 function renderIntegration() {
   if (!state.integration) return el("div", {}, "جارٍ التحميل…");
   const g = state.integration;
+  const box = el("div", { class: "creds-box" });
+  function renderCreds(revealed) {
+    const ak = revealed ? revealed.api_key : (g.api_key || "•".repeat(28));
+    const sk = revealed ? revealed.hmac_secret : (g.hmac_secret || "•".repeat(28));
+    // NOTE: the webhook 🌐 Endpoint is intentionally NOT shown to the
+    // institution owner — integration connectivity is a platform concern.
+    box.replaceChildren(
+      credRow("🆔 Tenant ID", g.tenant_id),
+      credRow("🔑 API Key", ak, true),
+      credRow("🔐 HMAC Secret", sk, true));
+  }
+  renderCreds(null);
+
+  const revealBtn = el("button", { class: "btn", style: "margin-top:12px" }, "🔐 إظهار بيانات الربط");
+  revealBtn.onclick = () => _pwModal(
+    "🔐 تأكيد الهوية",
+    "لإظهار بيانات الربط الحساسة، أدخل كلمة مرور حساب مالك المؤسسة.",
+    "تأكيد وإظهار",
+    async (password) => {
+      const r = await apiSoft("/integration/reveal", { method: "POST", body: { password } });
+      renderCreds(r);
+      toast("أُظهرت بيانات الربط — لا تشاركها مع أي طرف", "success");
+    });
+
+  // NOTE: credential rotation is a Platform Owner capability only — there is
+  // NO rotate control in the institution owner's portal (and no owner-facing
+  // rotation endpoint exists server-side anymore).
   return el("div", {},
-    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:8px" }, "🔌 إعدادات الأمان والربط"),
-    el("p", { style: "color:var(--muted);margin-bottom:20px" }, "بيانات ربط مؤسستك — احفظها في مكان آمن"),
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:8px" }, "🔌 إعدادات الربط"),
+    el("p", { style: "color:var(--muted);margin-bottom:20px" }, "إعدادات الأمان والربط — بيانات ربط مؤسستك، احفظها في مكان آمن"),
     el("div", { class: "card" },
-      el("h3", {}, "🔑 مفاتيح الربط (API Credentials)"),
-      el("div", { class: "creds-box" },
-        credRow("🆔 tenant_id", g.tenant_id),
-        credRow("🌐 endpoint", g.endpoint),
-        credRow("🔑 api_key", g.api_key),
-        credRow("🔐 hmac_secret", g.hmac_secret, true)),
-      el("div", { style: "background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);padding:12px;border-radius:10px;margin-top:14px;font-size:12px;color:#FCD34D" }, "⚠️ لا تشارك HMAC Secret مع أي طرف. إذا تسرّب اطلب من مالك المنظومة تدويره.")),
+      el("h3", {}, "🔑 بيانات الربط (Integration Credentials)"),
+      box,
+      el("div", { style: "display:flex;gap:10px;flex-wrap:wrap" }, revealBtn),
+      el("div", { style: "background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);padding:12px;border-radius:10px;margin-top:14px;font-size:12px;color:#FCD34D" },
+        "⚠️ بيانات الربط مُخفاة افتراضيًا وتُعرض فقط بعد تأكيد كلمة المرور. لتدوير المفاتيح تواصل مع مدير المنظومة."),
+      el("div", { style: "font-size:12px;color:var(--muted);margin-top:10px" },
+        "ℹ️ هذه البيانات للتكامل البرمجي (webhook/API) فقط — وليست طريقة لتسجيل الدخول إلى هذه البوابة.")),
     el("div", { class: "card" }, el("h3", { style: "margin-bottom:12px" }, "📖 كود التكامل الجاهز"), renderCodeTabs(g.code_samples)));
+}
+
+/* ── 🛡️ إعدادات الأمان — حساب المالك + تغيير كلمة المرور (server-side) ── */
+function renderSecurity() {
+  const cur = el("input", { class: "form-control", type: "password", placeholder: "كلمة المرور الحالية" });
+  const nw = el("input", { class: "form-control", type: "password", placeholder: "كلمة المرور الجديدة (8+ أحرف)" });
+  const nw2 = el("input", { class: "form-control", type: "password", placeholder: "تأكيد كلمة المرور الجديدة" });
+  const err = el("div", { style: "color:#FCA5A5;font-size:13px;min-height:16px;margin-top:6px" });
+  const btn = el("button", { class: "btn primary" }, "🔐 تغيير كلمة المرور");
+  btn.onclick = async () => {
+    err.textContent = "";
+    if (nw.value.length < 8) { err.textContent = "كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف"; return; }
+    if (nw.value !== nw2.value) { err.textContent = "تأكيد كلمة المرور غير مطابق"; return; }
+    btn.disabled = true;
+    try {
+      const r = await apiSoft("/change-password", { method: "POST", body: { current_password: cur.value, new_password: nw.value } });
+      toast(r.message || "تم تغيير كلمة المرور", "success");
+      cur.value = nw.value = nw2.value = "";
+    } catch (e) { err.textContent = e.message; }
+    finally { btn.disabled = false; }
+  };
+  const t = state.tenant || {};
+  return el("div", {},
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:8px" }, "🛡️ إعدادات الأمان"),
+    el("div", { class: "card" },
+      el("h3", {}, "👤 حساب المالك"),
+      el("div", { class: "creds-box" },
+        credRow("📧 البريد", (state.ownerEmail || "—")),
+        credRow("🏢 المؤسسة", t.name || "—"),
+        credRow("الحالة", "🟢 نشط"))),
+    el("div", { class: "card" },
+      el("h3", {}, "🔐 تغيير كلمة المرور"),
+      el("p", { style: "color:var(--muted);font-size:12.5px;margin-bottom:12px" }, "بعد التغيير تُنهى جلساتك الأخرى ويُطلب تسجيل الدخول مجددًا عليها."),
+      el("div", { style: "display:grid;gap:10px;max-width:420px" }, cur, nw, nw2, err, btn)));
+}
+
+/* ── 📜 سجل التدقيق ── */
+async function renderAuditM() {
+  const rows = await api("/audit?limit=100").catch(() => []);
+  const list = Array.isArray(rows) ? rows : (rows.events || rows.audit || []);
+  return el("div", {},
+    el("h1", { style: "font-size:1.7rem;font-weight:900;margin-bottom:8px" }, "📜 سجل التدقيق"),
+    el("p", { style: "color:var(--muted);margin-bottom:16px" }, "أحداث الأمان على حساب مؤسستك فقط"),
+    el("div", { class: "card" },
+      list.length === 0 ? el("div", { style: "text-align:center;color:var(--muted);padding:40px" }, "لا توجد أحداث بعد")
+      : el("table", {}, el("thead", {}, el("tr", {}, ["الوقت", "الحدث", "الفاعل"].map(h => el("th", {}, h)))),
+        el("tbody", {}, ...list.slice(0, 100).map(a => el("tr", {},
+          el("td", { style: "font-size:11px" }, dt(a.created_at || a.ts)),
+          el("td", {}, el("code", { style: "font-size:11px" }, a.action || a.event || "-")),
+          el("td", { style: "font-size:11px;color:var(--muted)" }, (a.actor || a.actor_id || "-").slice(0, 24))))))));
 }
 
 /* ── DECISIONS / ALERTS / CASES (as before) ── */
@@ -474,6 +656,8 @@ async function renderPage() {
     else if (state.page === "investigators") { await loadInvs(); c.replaceChildren(await renderInvestigatorsM()); }
     else if (state.page === "manual") { await loadManual(); c.replaceChildren(renderManualReviews()); }
     else if (state.page === "reports") { c.replaceChildren(renderReports()); }
+    else if (state.page === "security") { c.replaceChildren(renderSecurity()); }
+    else if (state.page === "audit") { c.replaceChildren(await renderAuditM()); }
   } catch (e) {
     if (String(e.message).includes("401") || String(e.message).includes("انتهت")) { localStorage.removeItem(TK); localStorage.removeItem(TT); state.token = null; render(); return; }
     c.textContent = "خطأ: " + e.message;
@@ -483,6 +667,9 @@ async function renderPage() {
 /* ── MAIN RENDER ── */
 function render() {
   const root = $("#app"); root.innerHTML = "";
+  if (state.view === "accept-invitation") { root.appendChild(renderAcceptInvitation(state.viewToken)); return; }
+  if (state.view === "reset-password") { root.appendChild(renderResetPassword(state.viewToken)); return; }
+  if (state.view === "forgot-password") { root.appendChild(renderForgotPassword()); return; }
   if (!state.token) { root.appendChild(renderLogin()); return; }
   if (!state.tenant) { try { state.tenant = JSON.parse(localStorage.getItem(TT) || "null"); } catch {} }
   const pages = [
@@ -495,6 +682,8 @@ function render() {
     { id: "alerts", icon: "🚨", label: tl("التنبيهات") },
     { id: "cases", icon: "📁", label: tl("القضايا") },
     { id: "integration", icon: "🔌", label: tl("إعدادات الربط") },
+    { id: "security", icon: "🛡️", label: tl("إعدادات الأمان") },
+    { id: "audit", icon: "📜", label: tl("سجل التدقيق") },
   ];
   root.appendChild(el("div", { class: "layout" },
     el("header", { class: "top" },

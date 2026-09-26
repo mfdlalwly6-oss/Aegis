@@ -52,9 +52,16 @@ class UpdatePolicy(BaseModel):
     note: str | None = None  # free-text rationale, stored on the policy version
 
 
-class MerchantLogin(BaseModel):
-    api_key: str
-    api_secret: str
+class OwnerPasswordConfirm(BaseModel):
+    """Step-up re-authentication for sensitive institution-owner actions
+    (reveal / rotate integration credentials). Verified server-side against the
+    owner's salted password hash."""
+    password: str = Field(min_length=1, max_length=200)
+
+
+class ChangeOwnerPassword(BaseModel):
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=8, max_length=200)
 
 
 class CreateInvestigator(BaseModel):
@@ -94,26 +101,44 @@ def create_tenant(
 ):
     data = body.model_dump(exclude_none=True)
     tenant = registry.tenants.create(data)
-    # Create institution owner account if requested
-    if body.owner_email and body.owner_password:
-        existing = registry.user_repo.get_by_email(tenant["tenant_id"], body.owner_email)
+    # Create the first institution owner. Two modes:
+    #  - invitation (preferred): owner_email WITHOUT a password → the account is
+    #    created as 'invited' (cannot log in) and a secure single-use expiring
+    #    invitation is emailed; the owner sets their own password on acceptance.
+    #  - legacy: owner_email WITH owner_password → direct active account
+    #    (kept for backward compatibility with existing admin flows/tests).
+    if body.owner_email:
+        existing = registry.user_repo.find_by_email_any_status(tenant["tenant_id"], body.owner_email)
         if not existing:
-            registry.user_repo.create(
+            invited = not body.owner_password
+            user = registry.user_repo.create(
                 tenant["tenant_id"],
                 body.owner_email,
                 body.owner_name or body.name,
                 role="institution_owner",
-                password=body.owner_password,
+                password=(body.owner_password or None),
+                status=("invited" if invited else "active"),
             )
-            registry.audit.log(
-                tenant["tenant_id"],
-                "owner",
-                "tenant.owner_created",
-                "user",
-                None,
-                getattr(request.state, "request_id", None),
-                {"email": body.owner_email},
-            )
+            if invited:
+                _row, raw = registry.invitations.create_invitation(
+                    tenant["tenant_id"], user["user_id"], user["email"],
+                    invited_by="owner", ttl_hours=settings.INVITATION_TTL_HOURS,
+                )
+                registry.email.send_invitation(
+                    to=user["email"], tenant_name=tenant["name"],
+                    owner_name=user["name"], token=raw,
+                )
+                registry.audit.log(
+                    tenant["tenant_id"], "owner", "owner.invited", "user",
+                    user["user_id"], getattr(request.state, "request_id", None),
+                    {"email": user["email"]},
+                )
+            else:
+                registry.audit.log(
+                    tenant["tenant_id"], "owner", "tenant.owner_created", "user",
+                    user["user_id"], getattr(request.state, "request_id", None),
+                    {"email": user["email"]},
+                )
     registry.audit.log(
         tenant["tenant_id"],
         "owner",
@@ -124,6 +149,91 @@ def create_tenant(
         {"name": tenant["name"], "plan": tenant["plan"]},
     )
     return tenant
+
+
+# ═══════════════════ INSTITUTION OWNER MANAGEMENT (admin) ═══════════════════
+
+def _owner_summary(registry, tenant_id: str) -> dict | None:
+    """The current owner row + its latest invitation state (never secrets)."""
+    owners = [u for u in registry.user_repo.list_by_tenant(tenant_id)
+              if u.get("role") in ("institution_owner", "tenant_admin")]
+    if not owners:
+        # include non-active owners too (invited/disabled)
+        rows = registry.db.query(
+            "SELECT user_id,tenant_id,email,name,role,status,created_at FROM users "
+            "WHERE tenant_id=? AND role IN ('institution_owner','tenant_admin') ORDER BY created_at DESC",
+            (tenant_id,))
+        owners = [dict(r) for r in rows]
+    if not owners:
+        return None
+    u = owners[0]
+    inv = registry.invitations.latest_for_user(u["user_id"])
+    return {
+        "user_id": u["user_id"], "email": u["email"], "name": u["name"],
+        "status": u["status"],
+        "invitation_status": (inv or {}).get("status"),
+        "invitation_expires_at": (inv or {}).get("expires_at"),
+    }
+
+
+@router.get("/admin/tenants/{tenant_id}/owner")
+def get_tenant_owner(tenant_id: str, owner=Depends(require_owner), registry=Depends(get_registry)):
+    if not registry.tenants.get(tenant_id):
+        raise HTTPException(404, "tenant_not_found")
+    return {"tenant_id": tenant_id, "owner": _owner_summary(registry, tenant_id)}
+
+
+@router.post("/admin/tenants/{tenant_id}/owner/resend-invitation")
+def resend_invitation(tenant_id: str, request: Request, owner=Depends(require_owner), registry=Depends(get_registry)):
+    """Revoke any pending invitation and issue a fresh one (single-use, 72h)."""
+    tenant = registry.tenants.get(tenant_id)
+    if not tenant:
+        raise HTTPException(404, "tenant_not_found")
+    summ = _owner_summary(registry, tenant_id)
+    if not summ:
+        raise HTTPException(404, "owner_not_found")
+    if summ["status"] == "active":
+        raise HTTPException(409, "owner_already_active")
+    registry.invitations.revoke_user_pending(summ["user_id"])
+    _row, raw = registry.invitations.create_invitation(
+        tenant_id, summ["user_id"], summ["email"],
+        invited_by="owner", ttl_hours=settings.INVITATION_TTL_HOURS,
+    )
+    registry.email.send_invitation(to=summ["email"], tenant_name=tenant["name"],
+                                   owner_name=summ["name"], token=raw)
+    registry.audit.log(tenant_id, "owner", "owner.invitation_resent", "user",
+                       summ["user_id"], getattr(request.state, "request_id", None),
+                       {"email": summ["email"]})
+    return {"resent": True, "email": summ["email"], "expires_in_hours": settings.INVITATION_TTL_HOURS}
+
+
+@router.post("/admin/tenants/{tenant_id}/owner/disable")
+def disable_owner(tenant_id: str, request: Request, owner=Depends(require_owner), registry=Depends(get_registry)):
+    if not registry.tenants.get(tenant_id):
+        raise HTTPException(404, "tenant_not_found")
+    summ = _owner_summary(registry, tenant_id)
+    if not summ:
+        raise HTTPException(404, "owner_not_found")
+    registry.user_repo.set_status(summ["user_id"], "disabled")
+    registry.invitations.revoke_user_pending(summ["user_id"])
+    registry.audit.log(tenant_id, "owner", "owner.disabled", "user",
+                       summ["user_id"], getattr(request.state, "request_id", None), {})
+    return {"status": "disabled"}
+
+
+@router.post("/admin/tenants/{tenant_id}/owner/enable")
+def enable_owner(tenant_id: str, request: Request, owner=Depends(require_owner), registry=Depends(get_registry)):
+    if not registry.tenants.get(tenant_id):
+        raise HTTPException(404, "tenant_not_found")
+    summ = _owner_summary(registry, tenant_id)
+    if not summ:
+        raise HTTPException(404, "owner_not_found")
+    if not registry.user_repo.get(summ["user_id"]).get("password_hash"):
+        raise HTTPException(409, "owner_no_password_yet")
+    registry.user_repo.set_status(summ["user_id"], "active")
+    registry.audit.log(tenant_id, "owner", "owner.enabled", "user",
+                       summ["user_id"], getattr(request.state, "request_id", None), {})
+    return {"status": "active"}
 
 
 
@@ -243,13 +353,17 @@ def activate_tenant(
 def rotate_secret(
     tenant_id: str, request: Request, owner=Depends(require_owner), registry=Depends(get_registry)
 ):
-    tenant = registry.tenants.rotate_secret(tenant_id)
+    """Platform Owner ONLY — rotate BOTH the tenant's API key and HMAC secret
+    atomically (old pair invalid immediately). Institution owners have NO
+    rotation capability: the owner-facing /integration/rotate endpoint is
+    removed. Audit logs the rotate event only — never credential values."""
+    tenant = registry.tenants.rotate_integration_credentials(tenant_id)
     if not tenant:
         raise HTTPException(404, "tenant_not_found")
     registry.audit.log(
         tenant_id,
         "owner",
-        "tenant.secret_rotated",
+        "owner.integration_credentials.rotated",
         "tenant",
         tenant_id,
         getattr(request.state, "request_id", None),
@@ -582,48 +696,11 @@ def list_all_investigators(owner=Depends(require_owner), registry=Depends(get_re
 
 
 # ═══════════════════ MERCHANT / INSTITUTION ENDPOINTS ═══════════════════
-
-
-@router.post("/admin/merchant/login")
-def merchant_login(body: MerchantLogin, request: Request, registry=Depends(get_registry)):
-    tenant = registry.tenants.authenticate_merchant(body.api_key, body.api_secret)
-    if not tenant:
-        registry.audit.log(
-            None,
-            body.api_key[:12],
-            "authentication.failure",
-            "merchant_login",
-            None,
-            getattr(request.state, "request_id", None),
-            {},
-        )
-        raise HTTPException(401, "invalid_credentials")
-    token = issue_jwt(
-        tenant["tenant_id"],
-        "merchant",
-        settings.MERCHANT_JWT_TTL_SEC,
-        {"tenant_id": tenant["tenant_id"], "tenant_name": tenant["name"]},
-    )
-    registry.audit.log(
-        tenant["tenant_id"],
-        tenant["name"],
-        "authentication.success",
-        "merchant_login",
-        tenant["tenant_id"],
-        getattr(request.state, "request_id", None),
-        {},
-    )
-    return {
-        "merchant_token": token,
-        "token_type": "Bearer",
-        "tenant": {
-            "tenant_id": tenant["tenant_id"],
-            "name": tenant["name"],
-            "type": tenant["type"],
-            "country": tenant["country"],
-            "plan": tenant["plan"],
-        },
-    }
+# NOTE: the legacy human "API key + secret" login (POST /admin/merchant/login)
+# was REMOVED. The ONLY human sign-in to the Merchant Portal is owner
+# email+password at POST /auth/institution/login. API Key / HMAC Secret remain
+# strictly as INTEGRATION credentials (webhook signature verification) and are
+# managed under 🔌 إعدادات الربط below — they never authenticate a person.
 
 
 @router.get("/admin/merchant/me")
@@ -718,21 +795,40 @@ def _top_reasons(registry, tenant_id: str, limit: int = 8) -> list[dict]:
     return [{"reason": k, "count": v} for k, v in counts.most_common(limit)]
 
 
+def _mask(secret: str | None) -> str:
+    """Never reveal a stored credential in a default GET — mask it."""
+    return "••••••••••••••••" if secret else ""
+
+
+def _verify_owner_password(registry, merchant: dict, password: str) -> None:
+    """Step-up check: the JWT subject (user_id) must exist and the supplied
+    password must verify against its salted hash. 401 otherwise."""
+    from app.repositories.user_repo import _verify_pw  # salted+legacy verify
+    user = registry.user_repo.get(merchant.get("sub", ""))
+    if not user or user.get("status") != "active":
+        raise HTTPException(401, "reauth_required")
+    if not _verify_pw(password, user):
+        raise HTTPException(401, "invalid_credentials")
+
+
 @router.get("/admin/merchant/integration")
 def merchant_integration(merchant=Depends(require_merchant), registry=Depends(get_registry)):
+    """Integration settings — secrets are MASKED by default. Use
+    POST /admin/merchant/integration/reveal (password step-up) to view them."""
     tenant = registry.tenants.get(merchant["tenant_id"], reveal=True)
     endpoint = f"{settings.PUBLIC_URL}/api/v1/wallet/webhook"
     return {
         "tenant_id": tenant["tenant_id"],
         "endpoint": endpoint,
-        "api_key": tenant["api_key"],
-        "hmac_secret": tenant["hmac_secret"],
+        "api_key": _mask(tenant["api_key"]),
+        "hmac_secret": _mask(tenant["hmac_secret"]),
+        "credentials_masked": True,
         "headers": {
-            "X-API-Key": tenant["api_key"],
+            "X-API-Key": "<API_KEY>",
             "X-Wallet-Signature": "HMAC_SHA256(body, hmac_secret)",
         },
         "curl": f"curl -X POST '{endpoint}' -H 'Content-Type: application/json' "
-        f"-H 'X-API-Key: {tenant['api_key']}' "
+        f"-H 'X-API-Key: <API_KEY>' "
         f"-H 'X-Wallet-Signature: <signature>' "
         f'-d \'{{"transaction":{{"amount":100,"sender_account_id":"acct_1","beneficiary_account_id":"acct_2"}}}}\'',
         "python": "import hmac,hashlib; sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()",
@@ -744,7 +840,7 @@ def merchant_integration(merchant=Depends(require_merchant), registry=Depends(ge
                 f"SIG=$(printf '%s' \"$BODY\" | openssl dgst -sha256 -hmac \"<HMAC_SECRET>\" | awk '{{print $2}}')\n"
                 f"curl -X POST '{endpoint}' \\\n"
                 "  -H 'Content-Type: application/json' \\\n"
-                f"  -H 'X-API-Key: {tenant['api_key']}' \\\n"
+                "  -H 'X-API-Key: <API_KEY>' \\\n"
                 '  -H "x-wallet-signature: $SIG" \\\n'
                 '  -d "$BODY"'
             ),
@@ -757,7 +853,7 @@ def merchant_integration(merchant=Depends(require_merchant), registry=Depends(ge
                 f"const r = await fetch('{endpoint}', {{\n"
                 "  method: 'POST',\n"
                 "  headers: { 'Content-Type': 'application/json',\n"
-                f"    'X-API-Key': '{tenant['api_key']}', 'x-wallet-signature': sig }},\n"
+                "    'X-API-Key': '<API_KEY>', 'x-wallet-signature': sig },\n"
                 "  body\n"
                 "});\n"
                 "const { decision, risk_score, reasoning_ar } = await r.json();"
@@ -768,12 +864,55 @@ def merchant_integration(merchant=Depends(require_merchant), registry=Depends(ge
                 '  "sender_account_id": "acct_1", "beneficiary_account_id": "acct_2"}}, separators=(",", ":"))\n'
                 "sig = hmac.new(b'<HMAC_SECRET>', body.encode(), hashlib.sha256).hexdigest()\n"
                 f"r = requests.post('{endpoint}', data=body, headers={{\n"
-                f"  'Content-Type': 'application/json', 'X-API-Key': '{tenant['api_key']}',\n"
+                "  'Content-Type': 'application/json', 'X-API-Key': '<API_KEY>',\n"
                 "  'x-wallet-signature': sig})\n"
                 "print(r.json())"
             ),
         },
     }
+
+
+@router.post("/admin/merchant/integration/reveal")
+def merchant_reveal_credentials(
+    body: OwnerPasswordConfirm, request: Request,
+    merchant=Depends(require_merchant), registry=Depends(get_registry),
+):
+    """Step-up: reveal this tenant's integration credentials after verifying
+    the owner's password server-side. Audit logs the VIEW event only — never
+    the credential values."""
+    _verify_owner_password(registry, merchant, body.password)
+    tenant = registry.tenants.get(merchant["tenant_id"], reveal=True)
+    registry.audit.log(
+        merchant["tenant_id"], merchant.get("sub", ""),
+        "owner.integration_credentials.viewed", "tenant", merchant["tenant_id"],
+        getattr(request.state, "request_id", None), {},
+    )
+    return {"tenant_id": tenant["tenant_id"], "api_key": tenant["api_key"],
+            "hmac_secret": tenant["hmac_secret"], "credentials_masked": False}
+
+
+# NOTE: institution-owner credential rotation was REMOVED — rotation is a
+# Platform Owner capability only (see POST /admin/tenants/{id}/rotate-secret).
+# An institution owner calling any rotation path gets 404/403 and no change.
+
+
+@router.post("/admin/merchant/change-password")
+def merchant_change_password(
+    body: ChangeOwnerPassword, request: Request,
+    merchant=Depends(require_merchant), registry=Depends(get_registry),
+):
+    """Change the institution owner's password. Verifies the CURRENT password
+    server-side, sets a fresh per-user salt + hash, and bumps
+    tokens_valid_after so every OTHER session is revoked (this one stays alive
+    until its natural expiry — the standard post-rotation behavior)."""
+    _verify_owner_password(registry, merchant, body.current_password)
+    registry.user_repo.set_password(merchant["sub"], body.new_password)
+    registry.audit.log(
+        merchant["tenant_id"], merchant.get("sub", ""),
+        "owner.password_changed", "user", merchant["sub"],
+        getattr(request.state, "request_id", None), {},
+    )
+    return {"changed": True, "message": "تم تغيير كلمة المرور. سجّل الدخول مجددًا على أجهزتك الأخرى."}
 
 
 @router.get("/admin/merchant/connection-status")

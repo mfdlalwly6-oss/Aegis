@@ -62,3 +62,8 @@
 - owner_phone: NOT restored — pre-FX evidence shows only owner_email/owner_name existed; no fabrication.
 - Institution accept-invitation page: backend endpoints present (peek/accept, ported batch 5); standalone accept page UI: NOT FOUND in pre-FX ref portals (admin/merchant/investigator only) → invitation flow was email-link driven to backend; classification E (never existed as dedicated portal page).
 - FX active-code scan: 0. ALL_COMPILE_OK. 3 portals JS_OK. decision-engine tests: 4 passed.
+
+## Merge 2026-09-26: GitHub security work integrated, FX stays removed
+- Merge of origin/aegis-v3-main (7faf53a) into local 9bc8a68; safety refs: backup-local-9bc8a68, tag backup-pre-merge-9bc8a68.
+- Conflict resolution: semantic — remote security kept (session revocation, password salt, rate limiting, Gmail SMTP, invitation lifecycle+UI, credential rotation, weights/thresholds repos), FX stripped with compile/JS gates; FX files re-added by remote were re-deleted.
+- FX scan after merge: see FX_SCAN_COUNT in session log (target 0).
