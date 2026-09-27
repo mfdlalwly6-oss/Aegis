@@ -94,3 +94,10 @@
 ## Hotfix (2026-09-27, after 82d243d) — honest correction
 - BUG in 82d243d: block extraction captured only the comment line (boundary hit `const OWNER_STATUS_LABEL` immediately after marker); renderOwnerCard(t) hook referenced an undefined function → runtime ReferenceError (node --check cannot catch it). 
 - FIX: full block (OWNER_STATUS_LABEL + loadTenantOwner + renderOwnerCard, brace-matched, ~40 lines) extracted verbatim from 7faf53a blob, FX-asserted, inserted at top level; static assertions added (def==1, hook present, label==1, loader==1).
+
+## Webhook restoration (2026-09-27, after 20cfcfa)
+- RESTORED: POST /api/v1/wallet/webhook from commit 851c275 (last version with full hardening: HMAC verify, timestamp skew ±300s, idempotency payload_hash 409, LLM redaction, card/3DS, all-engines-down guard, tenant isolation).
+- Adaptation: exactly 2 edits — removed `_apply_fx` call line + dead `_apply_fx` function def (FX stays removed; Transaction schema keeps amount+currency only).
+- Also restored GET /decisions/recent (webhook-scoped variant present in 851c275).
+- Verified: route registered in FastAPI (see route dump), test_api_security + test_security_production_hardening + arena all run in Docker.
+- FX scan after restore: 0 active-code refs.
