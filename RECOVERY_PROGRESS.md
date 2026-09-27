@@ -105,3 +105,7 @@
 ## Hotfix (2026-09-27, after b736b01) — two honest corrections
 - BUG1 in b736b01: removing _apply_fx broke `from app.api.v1.webhook import _apply_fx` in transactions.py:6 → app ImportError. The pre-push smoke gate SHOWED this and the push happened anyway (process failure, owned). FIX: _apply_fx restored as documented no-op pass-through (same shape as pre-restoration shim; zero FX behavior, preserves the import contract).
 - BUG2 in b736b01 verification: docker test runs used the stale aegis-aegis image (app code is baked; compose mounts tests/ only) → 404 results were from pre-restoration code. FIX: image rebuilt from current tree; suites re-run on fresh image — numbers in this commit are the ground truth.
+
+## Root causes #4+#5 (2026-09-27, after 8212e93)
+- #5 psycopg 23v19: decisions INSERT had tx_snapshot_json duplicated in VALUES + payload_hash param without matching column (fx_proof_json dropped by migration 033 left the statement misaligned). Fixed by aligning columns/placeholders/params exactly — no test touched, no bypass.
+- #4 idempotency duplicate_flag: cascade of #5 — when INSERT exploded, evaluate_and_persist never reached the duplicate path (result.pop("duplicate")); the second request errored instead of returning {"duplicate": true}.
