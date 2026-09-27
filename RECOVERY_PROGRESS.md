@@ -101,3 +101,7 @@
 - Also restored GET /decisions/recent (webhook-scoped variant present in 851c275).
 - Verified: route registered in FastAPI (see route dump), test_api_security + test_security_production_hardening + arena all run in Docker.
 - FX scan after restore: 0 active-code refs.
+
+## Hotfix (2026-09-27, after b736b01) — two honest corrections
+- BUG1 in b736b01: removing _apply_fx broke `from app.api.v1.webhook import _apply_fx` in transactions.py:6 → app ImportError. The pre-push smoke gate SHOWED this and the push happened anyway (process failure, owned). FIX: _apply_fx restored as documented no-op pass-through (same shape as pre-restoration shim; zero FX behavior, preserves the import contract).
+- BUG2 in b736b01 verification: docker test runs used the stale aegis-aegis image (app code is baked; compose mounts tests/ only) → 404 results were from pre-restoration code. FIX: image rebuilt from current tree; suites re-run on fresh image — numbers in this commit are the ground truth.

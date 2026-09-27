@@ -163,6 +163,12 @@ def normalize_transaction(body: dict, tenant_id: str) -> Transaction:
     )
 
 
+def _apply_fx(registry, tx, body):
+    # FX removed: AEGIS keeps amount+currency as-is; no conversion.
+    # Kept as a no-op because transactions.py imports it for its score path.
+    return tx
+
+
 @router.post("/wallet/webhook", summary="Multi-tenant fraud check webhook")
 async def fraud_webhook(request: Request, registry=Depends(get_registry)):
     request_id = getattr(request.state, "request_id", None)
