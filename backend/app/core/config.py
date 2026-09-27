@@ -6,7 +6,7 @@ import os
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +28,12 @@ def _database_url_env_shim() -> None:
 _database_url_env_shim()
 
 
+# Development-only defaults (Arena A8). Referenced by name so the boot guard
+# compares against the exact same constants — no secret is duplicated or added.
+_DEV_SECRET_KEY = "aegis-dev-only-secret-key-please-override-in-production"
+_DEV_OWNER_TOKEN = "aegis-dev-owner-token"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="AEGIS_", extra="ignore")
 
@@ -40,10 +46,26 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     SECRET_KEY: str = Field(
-        default="aegis-dev-only-secret-key-please-override-in-production",
+        default=_DEV_SECRET_KEY,
         min_length=32,
     )
-    OWNER_TOKEN: str = "aegis-dev-owner-token"
+    OWNER_TOKEN: str = _DEV_OWNER_TOKEN
+
+    @model_validator(mode="after")
+    def _refuse_default_secrets_outside_development(self):
+        """Arena A8: the dev defaults must never boot outside development."""
+        if self.ENV != "development":
+            if self.SECRET_KEY == _DEV_SECRET_KEY:
+                raise RuntimeError(
+                    "Refusing to boot: SECRET_KEY is still the development default — "
+                    "set a real AEGIS_SECRET_KEY before running outside development."
+                )
+            if self.OWNER_TOKEN == _DEV_OWNER_TOKEN:
+                raise RuntimeError(
+                    "Refusing to boot: OWNER_TOKEN is still the development default — "
+                    "set a real AEGIS_OWNER_TOKEN before running outside development."
+                )
+        return self
     DATA_DIR: str = "/tmp/aegis-data"
     DB_PATH: str = ""
     DB_DRIVER: str = "postgres"  # PostgreSQL only — no SQLite driver exists
