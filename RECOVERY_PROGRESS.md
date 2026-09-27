@@ -90,3 +90,7 @@
 - Ported institution-owner management card verbatim from 7faf53a blob (OWNER_STATUS_LABEL + loadTenantOwner + renderOwnerCard, ~40 lines) — additive merge, no file replacement, zero FX in block (asserted).
 - Hooked renderOwnerCard(t) into tenant detail panel after creds box (t in scope); auto-loads via GET /admin/tenants/{id}/owner.
 - Buttons wired to real endpoints: resend-invitation / disable / enable (all confirmed in tenants.py).
+
+## Hotfix (2026-09-27, after 82d243d) — honest correction
+- BUG in 82d243d: block extraction captured only the comment line (boundary hit `const OWNER_STATUS_LABEL` immediately after marker); renderOwnerCard(t) hook referenced an undefined function → runtime ReferenceError (node --check cannot catch it). 
+- FIX: full block (OWNER_STATUS_LABEL + loadTenantOwner + renderOwnerCard, brace-matched, ~40 lines) extracted verbatim from 7faf53a blob, FX-asserted, inserted at top level; static assertions added (def==1, hook present, label==1, loader==1).

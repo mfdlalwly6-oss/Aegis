@@ -109,7 +109,49 @@ async function api(path, opts = {}) {
   return d;
 }
 
+
 /* ── Institution Owner management card (inside tenant detail) ── */
+const OWNER_STATUS_LABEL = { invited: ["📩 مدعو", "badge assigned"], active: ["✅ نشط", "badge assigned"], disabled: ["⛔ معطّل", "badge assigned"] };
+async function loadTenantOwner(tid) {
+  try { const r = await api("/tenants/" + tid + "/owner"); state.tenantOwner = r.owner; }
+  catch (e) { state.tenantOwner = { __error: e.message }; }
+}
+function renderOwnerCard(t) {
+  const o = state.tenantOwner;
+  if (!o || state.tenantOwnerFor !== t.tenant_id) { loadTenantOwner(t.tenant_id).then(() => render()); state.tenantOwnerFor = t.tenant_id; }
+  const cur = state.tenantOwner;
+  let body;
+  if (!cur) {
+    body = el("div", { style: "color:var(--muted);font-size:13px;padding:8px 0" }, "⏳ جارٍ تحميل بيانات المالك…");
+  } else if (cur.__error) {
+    body = el("div", { style: "color:#FCA5A5;font-size:13px;padding:8px 0" }, "تعذّر تحميل بيانات المالك: " + cur.__error);
+  } else if (!cur.user_id && !cur.email) {
+    body = el("div", { style: "color:var(--muted);font-size:13px;padding:8px 0" }, "لا يوجد مالك مؤسسة بعد — يمكنك دعوته من نموذج إنشاء مؤسسة جديدة.");
+  } else {
+    const st = OWNER_STATUS_LABEL[cur.status] || [cur.status, "badge assigned"];
+    const acts = [];
+    if (cur.status === "invited") {
+      acts.push(el("button", { class: "btn sm", onclick: async () => { try { const r = await api("/tenants/" + t.tenant_id + "/owner/resend-invitation", { method: "POST", body: {} }); toast("أُرسلت دعوة جديدة (صالحة " + r.expires_in_hours + " ساعة)", "success"); await loadTenantOwner(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } } }, "✉️ إعادة إرسال الدعوة"));
+      acts.push(el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("تعطيل حساب المالك؟ سيُلغى أي دعوة معلّقة.")) return; try { await api("/tenants/" + t.tenant_id + "/owner/disable", { method: "POST", body: {} }); toast("عُطّل حساب المالك", "success"); await loadTenantOwner(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } } }, "⛔ تعطيل"));
+    } else if (cur.status === "active") {
+      acts.push(el("button", { class: "btn sm danger", onclick: async () => { if (!confirm("تعطيل حساب المالك؟ لن يستطيع تسجيل الدخول.")) return; try { await api("/tenants/" + t.tenant_id + "/owner/disable", { method: "POST", body: {} }); toast("عُطّل حساب المالك", "success"); await loadTenantOwner(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } } }, "⛔ تعطيل"));
+    } else if (cur.status === "disabled") {
+      acts.push(el("button", { class: "btn sm success", onclick: async () => { try { await api("/tenants/" + t.tenant_id + "/owner/enable", { method: "POST", body: {} }); toast("فُعّل حساب المالك", "success"); await loadTenantOwner(t.tenant_id); render(); } catch (e) { toast(e.message, "error"); } } }, "▶ تفعيل"));
+    }
+    body = el("div", {},
+      el("div", { class: "creds-box" },
+        credRow("👤 الاسم", cur.name || "—"),
+        credRow("📧 البريد", cur.email || "—"),
+        el("div", { style: "display:flex;gap:8px;align-items:center;font-size:13px;padding:4px 0" },
+          el("span", { style: "color:var(--muted)" }, "📊 الحالة:"), el("span", { class: st[1] }, st[0])),
+      ),
+      el("div", { style: "margin-top:10px;display:flex;gap:8px;flex-wrap:wrap" }, ...acts),
+    );
+  }
+  return el("div", { style: "margin-top:16px;padding:14px;border:1px solid var(--brand);border-radius:10px" },
+    el("h4", { style: "margin-bottom:10px;color:var(--brand)" }, "👤 مالك المؤسسة"),
+    body);
+}
 
 async function apiRoot(path, opts = {}) {
   const h = { "Content-Type": "application/json", "X-Owner-Token": state.token, ...(opts.headers || {}) };
