@@ -85,3 +85,8 @@
 ## Correction + real fix (2026-09-26, after 8a3f06d)
 - HONESTY: commit 8a3f06d did NOT fix the NameError (runtime smoke still failed at its creation; its message was wrong). Real fix here: module-level `from app.api.v1 import weights` inserted directly above its include_router usage (earlier insertions into the import block failed with SyntaxError — root cause: file's import expressions span multiple lines/aliases).
 - Gate: `from app.main import app` → APP_IMPORT_OK before push.
+
+## Admin UI gap closed (2026-09-27, after f7e5f73)
+- Ported institution-owner management card verbatim from 7faf53a blob (OWNER_STATUS_LABEL + loadTenantOwner + renderOwnerCard, ~40 lines) — additive merge, no file replacement, zero FX in block (asserted).
+- Hooked renderOwnerCard(t) into tenant detail panel after creds box (t in scope); auto-loads via GET /admin/tenants/{id}/owner.
+- Buttons wired to real endpoints: resend-invitation / disable / enable (all confirmed in tenants.py).

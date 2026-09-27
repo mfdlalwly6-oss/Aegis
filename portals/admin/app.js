@@ -109,6 +109,8 @@ async function api(path, opts = {}) {
   return d;
 }
 
+/* ── Institution Owner management card (inside tenant detail) ── */
+
 async function apiRoot(path, opts = {}) {
   const h = { "Content-Type": "application/json", "X-Owner-Token": state.token, ...(opts.headers || {}) };
   const r = await fetch(AEGIS_ROOT + path, { ...opts, headers: h, body: opts.body ? JSON.stringify(opts.body) : undefined });
@@ -553,6 +555,7 @@ function renderTenantDetail() {
       credRow("🆔 tenant_id", t.tenant_id),
       credRow("🔑 api_key", t.api_key),
       credRow("🔐 hmac_secret", t.hmac_secret, { masked: true }),
+      renderOwnerCard(t),
       credRow("🌐 endpoint", endpoint),
       credRow("📊 الحالة", t.status || "active"),
       credRow("📦 الخطة", t.plan || "sandbox"),
