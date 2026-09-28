@@ -20,9 +20,9 @@ class TransactionRepository:
             "(tx_id,tenant_id,ts,channel,amount,currency,sender_account_id,"
             "sender_user_id,beneficiary_account_id,beneficiary_user_id,"
             "beneficiary_country,merchant_id,merchant_name,device_id,ip,"
-            "ip_country,raw_json,features_json,created_at,"
+            "ip_country,raw_json,features_json,created_at"
             ") "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+"VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 row["tx_id"],
                 row["tenant_id"],

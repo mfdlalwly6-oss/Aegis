@@ -109,3 +109,8 @@
 ## Root causes #4+#5 (2026-09-27, after 8212e93)
 - #5 psycopg 23v19: decisions INSERT had tx_snapshot_json duplicated in VALUES + payload_hash param without matching column (fx_proof_json dropped by migration 033 left the statement misaligned). Fixed by aligning columns/placeholders/params exactly — no test touched, no bypass.
 - #4 idempotency duplicate_flag: cascade of #5 — when INSERT exploded, evaluate_and_persist never reached the duplicate path (result.pop("duplicate")); the second request errored instead of returning {"duplicate": true}.
+
+## Root causes #4+#5 FIXED — verified (2026-09-28)
+- transaction_repo.py: line 23 column-list literal had trailing comma (created_at,) + VALUES had 23 placeholders for 19 params → removed comma (19 cols) and reduced placeholders to 19. AST-verified 19/19/19.
+- decision_repo.py: placeholder alignment kept at 34/34/34; mark_seen uses ON CONFLICT DO NOTHING RETURNING (RLS-safe).
+- test_api_security: 8/8. Full suite: no psycopg.ProgrammingError.

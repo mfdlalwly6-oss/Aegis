@@ -27,7 +27,7 @@ class DecisionRepository:
             "tx_snapshot_json,features_snapshot_json,"
             "rule_set_version,model_version,config_version,request_id,"
             "component_health_json,degraded_mode,degraded_reason,confidence,payload_hash) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 did,
                 assessment["tx_id"],
@@ -117,14 +117,15 @@ class DecisionRepository:
         return {"total": total, "by_decision": by, "avg_risk": round(total_risk / max(total, 1), 4)}
 
     def mark_seen(self, idempotency_key: str, tenant_id: str, tx_id: str) -> bool:
-        """Returns True if this is a NEW key (not seen before)."""
-        existing = self.db.query_one(
-            "SELECT 1 FROM webhooks_seen WHERE idempotency_key=?", (idempotency_key,)
-        )
-        if existing:
-            return False
-        self.db.execute(
-            "INSERT INTO webhooks_seen (idempotency_key,tenant_id,tx_id,first_seen) VALUES (?,?,?,?)",
+        """Returns True if this is a NEW key (not seen before).
+
+        RLS-safe: the SELECT may see nothing under tenant-scoped RLS while the
+        row physically exists (INSERT then violates the PK). Use INSERT ... ON
+        CONFLICT DO NOTHING RETURNING to detect duplicates atomically instead
+        of SELECT-then-INSERT (which races and breaks under RLS)."""
+        row = self.db.query_one(
+            "INSERT INTO webhooks_seen (idempotency_key,tenant_id,tx_id,first_seen) "
+            "VALUES (?,?,?,?) ON CONFLICT (idempotency_key) DO NOTHING RETURNING idempotency_key",
             (idempotency_key, tenant_id, tx_id, utcnow()),
         )
-        return True
+        return row is not None
