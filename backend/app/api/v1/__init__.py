@@ -49,4 +49,4 @@ from app.api.v1 import feedback  # noqa: E402
 router.include_router(feedback.router, tags=["feedback"])
 
 from app.api.v1 import weights  # noqa: E402
-router.include_router(weights.router, prefix="/weights", tags=["weights"])
+router.include_router(weights.router, tags=["weights"])

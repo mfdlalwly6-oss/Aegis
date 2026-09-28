@@ -114,3 +114,7 @@
 - transaction_repo.py: line 23 column-list literal had trailing comma (created_at,) + VALUES had 23 placeholders for 19 params → removed comma (19 cols) and reduced placeholders to 19. AST-verified 19/19/19.
 - decision_repo.py: placeholder alignment kept at 34/34/34; mark_seen uses ON CONFLICT DO NOTHING RETURNING (RLS-safe).
 - test_api_security: 8/8. Full suite: no psycopg.ProgrammingError.
+
+## Weights cluster fixed (2026-09-28)
+- Root cause: api/v1/__init__.py registered weights router with prefix="/weights" while weights.py paths already carry "/admin/…" → real routes were /api/v1/weights/admin/weights/* (double prefix) → all 16 weight tests 404/401.
+- Fix: dropped duplicate prefix. Evidence: 16/16 weights pass; api_security+arena guard 20/20; full suite improved from 192→208 passed.
