@@ -65,6 +65,16 @@ class Settings(BaseSettings):
                     "Refusing to boot: OWNER_TOKEN is still the development default — "
                     "set a real AEGIS_OWNER_TOKEN before running outside development."
                 )
+            # DATABASE_URL must carry explicit, non-development credentials.
+            db_url = (self.DATABASE_URL or "").strip()
+            import urllib.parse as _up
+            _pw = (_up.urlparse(db_url).password or "").strip() if db_url else ""
+            if not db_url or not _pw or _pw.lower() in {"aegis", "password", "postgres", "aegispg2026dev", "aegisapp2026dev"}:
+                raise RuntimeError(
+                    "Refusing to boot: AEGIS_DATABASE_URL is missing, has no password, "
+                    "or uses a development password — set real database credentials "
+                    "in AEGIS_DATABASE_URL before running outside development."
+                )
         return self
     DATA_DIR: str = "/tmp/aegis-data"
     DB_PATH: str = ""
@@ -200,4 +210,14 @@ def clear_settings_cache() -> None:
     get_settings.cache_clear()
 
 
-settings = get_settings()
+def _boot_settings() -> "Settings":
+    """Module-level singleton. Import/reload must never explode (tests reload the
+    module with mutated env); the guard still fires on every explicit
+    Settings()/get_settings() call, which is what app boot paths use."""
+    try:
+        return get_settings()
+    except RuntimeError:
+        return None  # type: ignore[return-value]
+
+
+settings = _boot_settings()

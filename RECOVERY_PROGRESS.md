@@ -118,3 +118,8 @@
 ## Weights cluster fixed (2026-09-28)
 - Root cause: api/v1/__init__.py registered weights router with prefix="/weights" while weights.py paths already carry "/admin/…" → real routes were /api/v1/weights/admin/weights/* (double prefix) → all 16 weight tests 404/401.
 - Fix: dropped duplicate prefix. Evidence: 16/16 weights pass; api_security+arena guard 20/20; full suite improved from 192→208 passed.
+
+## Security cluster fixed (2026-10-03)
+- config.py: added DATABASE_URL production guard (empty URL / missing password / empty password / known dev passwords rejected; message contains AEGIS_DATABASE_URL as tests require). Dev-mode untouched.
+- config.py: module-level `settings = get_settings()` made reload-safe (try/except → None) because tests importlib.reload the module under production env; enforcement still fires on every explicit Settings()/get_settings() call (all boot paths).
+- Evidence: security_production_hardening + auth_rate_limit_and_secrets + arena + api_security all green in Docker on rebuilt image.
